@@ -32,11 +32,26 @@ create index idx_messages_conversation on messages(conversation_id, "order");
 create index idx_comments_message on comments(message_id, created_at);
 create index idx_comments_parent on comments(parent_id);
 
+-- Feedback on conversations (text or voice)
+create table feedback (
+  id uuid default gen_random_uuid() primary key,
+  conversation_id uuid references conversations(id) on delete cascade not null,
+  author text not null default 'reviewer',
+  rating int check (rating between 1 and 5),
+  text_content text,
+  audio_url text,
+  created_at timestamptz default now() not null
+);
+
+create index idx_feedback_conversation on feedback(conversation_id, created_at);
+
 -- Enable RLS (allow all for now since this is an internal testing tool)
 alter table conversations enable row level security;
 alter table messages enable row level security;
 alter table comments enable row level security;
+alter table feedback enable row level security;
 
 create policy "Allow all on conversations" on conversations for all using (true) with check (true);
 create policy "Allow all on messages" on messages for all using (true) with check (true);
 create policy "Allow all on comments" on comments for all using (true) with check (true);
+create policy "Allow all on feedback" on feedback for all using (true) with check (true);

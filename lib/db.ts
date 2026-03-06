@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import type { TranscriptMessage } from "./types";
-import type { Comment, Conversation, Message } from "./database.types";
+import type { Comment, Conversation, Feedback, Message } from "./database.types";
 
 // --- Conversations ---
 
@@ -102,4 +102,57 @@ export async function addComment(
 export async function deleteComment(commentId: string): Promise<void> {
   const { error } = await supabase.from("comments").delete().eq("id", commentId);
   if (error) throw new Error(error.message);
+}
+
+// --- Feedback ---
+
+export async function submitFeedback(
+  conversationId: string,
+  author: string,
+  rating: number | null,
+  textContent: string | null,
+  audioUrl: string | null
+): Promise<Feedback> {
+  const { data, error } = await supabase
+    .from("feedback")
+    .insert({
+      conversation_id: conversationId,
+      author,
+      rating,
+      text_content: textContent,
+      audio_url: audioUrl,
+    })
+    .select("*")
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data!;
+}
+
+export async function getFeedbackForConversation(
+  conversationId: string
+): Promise<Feedback[]> {
+  const { data, error } = await supabase
+    .from("feedback")
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function uploadAudioFeedback(
+  conversationId: string,
+  blob: Blob
+): Promise<string> {
+  const filename = `${conversationId}/${Date.now()}.webm`;
+  const { error } = await supabase.storage
+    .from("feedback-audio")
+    .upload(filename, blob, { contentType: "audio/webm" });
+
+  if (error) throw new Error(error.message);
+
+  const { data } = supabase.storage.from("feedback-audio").getPublicUrl(filename);
+  return data.publicUrl;
 }

@@ -10,6 +10,7 @@ import VoiceControls from "@/components/VoiceControls";
 import TranscriptPanel from "@/components/TranscriptPanel";
 import ConversationHistory from "@/components/ConversationHistory";
 import Onboarding, { useOnboarding } from "@/components/Onboarding";
+import FeedbackPanel from "@/components/FeedbackPanel";
 
 type DisplayMessage = TranscriptMessage & { id?: string };
 
@@ -205,6 +206,11 @@ export default function Home() {
             : "Start a voice session to see the conversation here."
         }
       />
+
+      {/* Feedback — show when conversation is saved */}
+      {savedId && (
+        <FeedbackPanel conversationId={savedId} />
+      )}
 
       {/* Saved Conversations */}
       <ConversationHistory

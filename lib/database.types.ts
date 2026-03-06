@@ -96,6 +96,44 @@ export type Database = {
           },
         ];
       };
+      feedback: {
+        Row: {
+          id: string;
+          conversation_id: string;
+          author: string;
+          rating: number | null;
+          text_content: string | null;
+          audio_url: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          conversation_id: string;
+          author?: string;
+          rating?: number | null;
+          text_content?: string | null;
+          audio_url?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          conversation_id?: string;
+          author?: string;
+          rating?: number | null;
+          text_content?: string | null;
+          audio_url?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "feedback_conversation_id_fkey";
+            columns: ["conversation_id"];
+            isOneToOne: false;
+            referencedRelation: "conversations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: {};
     Functions: {};
@@ -107,3 +145,4 @@ export type Database = {
 export type Conversation = Database["public"]["Tables"]["conversations"]["Row"];
 export type Message = Database["public"]["Tables"]["messages"]["Row"];
 export type Comment = Database["public"]["Tables"]["comments"]["Row"];
+export type Feedback = Database["public"]["Tables"]["feedback"]["Row"];
