@@ -16,7 +16,8 @@ export async function saveConversation(
 
   if (convErr || !conv) throw new Error(convErr?.message ?? "Failed to create conversation");
 
-  const rows = transcriptMessages.map((m, i) => ({
+  const validMessages = transcriptMessages.filter((m) => m.content);
+  const rows = validMessages.map((m, i) => ({
     conversation_id: conv.id,
     role: m.role as "user" | "agent",
     content: m.content,
@@ -142,17 +143,3 @@ export async function getFeedbackForConversation(
   return data ?? [];
 }
 
-export async function uploadAudioFeedback(
-  conversationId: string,
-  blob: Blob
-): Promise<string> {
-  const filename = `${conversationId}/${Date.now()}.webm`;
-  const { error } = await supabase.storage
-    .from("feedback-audio")
-    .upload(filename, blob, { contentType: "audio/webm" });
-
-  if (error) throw new Error(error.message);
-
-  const { data } = supabase.storage.from("feedback-audio").getPublicUrl(filename);
-  return data.publicUrl;
-}

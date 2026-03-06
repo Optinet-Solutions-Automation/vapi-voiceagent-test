@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { submitFeedback, getFeedbackForConversation, uploadAudioFeedback } from "@/lib/db";
+import { useEffect, useState } from "react";
+import { submitFeedback, getFeedbackForConversation } from "@/lib/db";
 import { getNickname } from "./Onboarding";
 import type { Feedback } from "@/lib/database.types";
 
@@ -9,25 +9,12 @@ type Props = {
   conversationId: string;
 };
 
-type RecordingState = "idle" | "recording" | "recorded";
-
 export default function FeedbackPanel({ conversationId }: Props) {
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
-  const [mode, setMode] = useState<"text" | "voice">("text");
   const [text, setText] = useState("");
   const [rating, setRating] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-
-  // Voice recording state
-  const [recordingState, setRecordingState] = useState<RecordingState>("idle");
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [micError, setMicError] = useState<string | null>(null);
 
   useEffect(() => {
     getFeedbackForConversation(conversationId)
@@ -35,93 +22,26 @@ export default function FeedbackPanel({ conversationId }: Props) {
       .catch(() => {});
   }, [conversationId]);
 
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
-    };
-  }, [audioUrl]);
-
-  async function startRecording() {
-    setMicError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      mediaRecorderRef.current = recorder;
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        setAudioBlob(blob);
-        setAudioUrl(URL.createObjectURL(blob));
-        setRecordingState("recorded");
-        stream.getTracks().forEach((t) => t.stop());
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
-      };
-
-      recorder.start();
-      setRecordingState("recording");
-      setRecordingTime(0);
-      timerRef.current = setInterval(() => {
-        setRecordingTime((t) => t + 1);
-      }, 1000);
-    } catch {
-      setMicError("Microphone access denied.");
-    }
-  }
-
-  function stopRecording() {
-    mediaRecorderRef.current?.stop();
-  }
-
-  function discardRecording() {
-    if (audioUrl) URL.revokeObjectURL(audioUrl);
-    setAudioBlob(null);
-    setAudioUrl(null);
-    setRecordingState("idle");
-    setRecordingTime(0);
-  }
-
   async function handleSubmit() {
     if (rating === 0) return;
     setSubmitting(true);
     try {
-      let uploadedAudioUrl: string | null = null;
-
-      if (mode === "voice" && audioBlob) {
-        uploadedAudioUrl = await uploadAudioFeedback(conversationId, audioBlob);
-      }
-
       const fb = await submitFeedback(
         conversationId,
         getNickname(),
         rating,
-        mode === "text" ? text.trim() || null : null,
-        uploadedAudioUrl
+        text.trim() || null,
+        null
       );
       setFeedbacks((prev) => [...prev, fb]);
       setSubmitted(true);
       setText("");
       setRating(0);
-      discardRecording();
     } catch {
       // silent
     } finally {
       setSubmitting(false);
     }
-  }
-
-  function formatTime(seconds: number) {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
   }
 
   return (
@@ -163,9 +83,6 @@ export default function FeedbackPanel({ conversationId }: Props) {
                 {fb.text_content && (
                   <p className="text-sm text-gray-200">{fb.text_content}</p>
                 )}
-                {fb.audio_url && (
-                  <audio src={fb.audio_url} controls className="w-full h-8 mt-1" />
-                )}
               </div>
             ))}
           </div>
@@ -197,105 +114,20 @@ export default function FeedbackPanel({ conversationId }: Props) {
               </div>
             </div>
 
-            {/* Mode toggle */}
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setMode("text")}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                  mode === "text"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-700 text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                Text
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("voice")}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                  mode === "voice"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-700 text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                Voice
-              </button>
-            </div>
-
             {/* Text feedback */}
-            {mode === "text" && (
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Share your thoughts on this conversation..."
-                rows={3}
-                className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none resize-none sm:py-2 sm:text-xs"
-              />
-            )}
-
-            {/* Voice feedback */}
-            {mode === "voice" && (
-              <div className="space-y-3">
-                {micError && (
-                  <p className="text-xs text-red-400">{micError}</p>
-                )}
-
-                {recordingState === "idle" && (
-                  <button
-                    type="button"
-                    onClick={startRecording}
-                    className="flex items-center gap-2 rounded-lg border border-gray-600 bg-gray-700 px-4 py-3 text-sm text-gray-300 transition active:scale-[0.98] hover:bg-gray-600 sm:py-2.5"
-                  >
-                    <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 14a3 3 0 003-3V5a3 3 0 00-6 0v6a3 3 0 003 3z" />
-                      <path d="M19 11a1 1 0 10-2 0 5 5 0 01-10 0 1 1 0 10-2 0 7 7 0 006 6.93V20H8a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07A7 7 0 0019 11z" />
-                    </svg>
-                    Tap to record feedback
-                  </button>
-                )}
-
-                {recordingState === "recording" && (
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2 flex-1">
-                      <span className="relative flex h-3 w-3">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                        <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
-                      </span>
-                      <span className="text-sm text-red-400 font-mono">
-                        {formatTime(recordingTime)}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={stopRecording}
-                      className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition active:scale-[0.98] hover:bg-red-500 sm:py-2"
-                    >
-                      Stop
-                    </button>
-                  </div>
-                )}
-
-                {recordingState === "recorded" && audioUrl && (
-                  <div className="space-y-2">
-                    <audio src={audioUrl} controls className="w-full h-10" />
-                    <button
-                      type="button"
-                      onClick={discardRecording}
-                      className="text-xs text-gray-400 transition hover:text-red-400"
-                    >
-                      Discard and re-record
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Share your thoughts on this conversation..."
+              rows={3}
+              className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none resize-none sm:py-2 sm:text-xs"
+            />
 
             {/* Submit */}
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={submitting || rating === 0 || (mode === "voice" && recordingState !== "recorded")}
+              disabled={submitting || rating === 0}
               className="w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition active:scale-[0.98] hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed sm:py-2.5"
             >
               {submitting ? "Submitting..." : "Submit Feedback"}

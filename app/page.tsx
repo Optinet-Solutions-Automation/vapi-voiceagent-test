@@ -54,7 +54,7 @@ export default function Home() {
         }>;
         setMessages(
           conversation
-            .filter((m) => m.role === "user" || m.role === "assistant")
+            .filter((m) => (m.role === "user" || m.role === "assistant") && m.content)
             .map((m) => ({
               role: m.role === "assistant" ? ("agent" as const) : ("user" as const),
               content: m.content,
