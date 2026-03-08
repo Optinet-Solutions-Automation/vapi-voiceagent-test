@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import type { TranscriptMessage } from "./types";
-import type { Comment, Conversation, Feedback, Message, TrackerItem, ItemStatus } from "./database.types";
+import type { Comment, Conversation, Feedback, Message, TrackerItem, TrackerReply, ItemStatus } from "./database.types";
 
 // --- Conversations ---
 
@@ -252,6 +252,44 @@ export async function updateTrackerItemStatus(id: string, status: ItemStatus): P
 
 export async function deleteTrackerItem(id: string): Promise<void> {
   const { error } = await supabase.from("tracker_items").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+// --- Tracker replies ---
+
+export async function getReplies(
+  parentKind: "comment" | "feedback" | "item",
+  parentId: string
+): Promise<TrackerReply[]> {
+  const { data, error } = await supabase
+    .from("tracker_replies")
+    .select("*")
+    .eq("parent_kind", parentKind)
+    .eq("parent_id", parentId)
+    .order("created_at", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function addReply(
+  parentKind: "comment" | "feedback" | "item",
+  parentId: string,
+  content: string,
+  author: string
+): Promise<TrackerReply> {
+  const { data, error } = await supabase
+    .from("tracker_replies")
+    .insert({ parent_kind: parentKind, parent_id: parentId, content, author })
+    .select("*")
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data!;
+}
+
+export async function deleteReply(id: string): Promise<void> {
+  const { error } = await supabase.from("tracker_replies").delete().eq("id", id);
   if (error) throw new Error(error.message);
 }
 

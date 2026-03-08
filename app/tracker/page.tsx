@@ -12,9 +12,12 @@ import {
   updateTrackerItemStatus,
   deleteTrackerItem,
   listConversations,
+  getReplies,
+  addReply,
+  deleteReply,
 } from "@/lib/db";
 import type { CommentWithContext, FeedbackWithContext } from "@/lib/db";
-import type { ItemStatus, Conversation, TrackerItem } from "@/lib/database.types";
+import type { ItemStatus, Conversation, TrackerItem, TrackerReply } from "@/lib/database.types";
 import { getNickname } from "@/components/Onboarding";
 
 type UnifiedRow = {
@@ -29,49 +32,45 @@ type UnifiedRow = {
   created_at: string;
 };
 
-const STATUS_OPTIONS: { value: ItemStatus; label: string; color: string }[] = [
-  { value: "open", label: "Open", color: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
-  { value: "in_progress", label: "In Progress", color: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" },
-  { value: "done", label: "Done", color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" },
-  { value: "has_question", label: "Has Question", color: "bg-purple-500/20 text-purple-400 border-purple-500/30" },
+const STATUS_OPTIONS: { value: ItemStatus; label: string; color: string; dot: string }[] = [
+  { value: "open", label: "Open", color: "text-blue-400", dot: "bg-blue-400" },
+  { value: "in_progress", label: "In Progress", color: "text-yellow-400", dot: "bg-yellow-400" },
+  { value: "done", label: "Done", color: "text-emerald-400", dot: "bg-emerald-400" },
+  { value: "has_question", label: "Has Question", color: "text-purple-400", dot: "bg-purple-400" },
 ];
 
-function StatusBadge({
+function StatusDropdown({
   status,
   onChange,
 }: {
   status: ItemStatus;
   onChange: (s: ItemStatus) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const opt = STATUS_OPTIONS.find((o) => o.value === status)!;
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${opt.color}`}
+    <div className="relative inline-flex items-center">
+      <span className={`absolute left-2.5 h-2 w-2 rounded-full ${opt.dot} pointer-events-none`} />
+      <select
+        value={status}
+        onChange={(e) => onChange(e.target.value as ItemStatus)}
+        className={`appearance-none rounded-lg border border-gray-600 bg-gray-700 py-1.5 pl-7 pr-7 text-xs font-medium ${opt.color} cursor-pointer focus:border-indigo-500 focus:outline-none`}
       >
-        {opt.label}
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 rounded-lg border border-gray-600 bg-gray-800 py-1 shadow-xl min-w-[140px]">
-          {STATUS_OPTIONS.map((o) => (
-            <button
-              key={o.value}
-              onClick={() => {
-                onChange(o.value);
-                setOpen(false);
-              }}
-              className={`block w-full px-3 py-1.5 text-left text-xs transition hover:bg-gray-700 ${
-                o.value === status ? "font-semibold text-white" : "text-gray-300"
-              }`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
+        {STATUS_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <svg
+        className="absolute right-2 h-3 w-3 text-gray-400 pointer-events-none"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+      </svg>
     </div>
   );
 }
@@ -82,7 +81,7 @@ function KindBadge({ kind }: { kind: UnifiedRow["kind"] }) {
     feedback: "bg-amber-500/20 text-amber-400 border-amber-500/30",
     item: "bg-gray-500/20 text-gray-400 border-gray-500/30",
   };
-  const labels = { comment: "Comment", feedback: "Feedback", item: "Note" };
+  const labels = { comment: "Comment", feedback: "Feedback", item: "Comment" };
 
   return (
     <span
@@ -93,12 +92,194 @@ function KindBadge({ kind }: { kind: UnifiedRow["kind"] }) {
   );
 }
 
+// --- Detail Modal ---
+
+function DetailModal({
+  row,
+  onClose,
+  onStatusChange,
+  onDelete,
+}: {
+  row: UnifiedRow;
+  onClose: () => void;
+  onStatusChange: (s: ItemStatus) => void;
+  onDelete: () => void;
+}) {
+  const [replies, setReplies] = useState<TrackerReply[]>([]);
+  const [loadingReplies, setLoadingReplies] = useState(true);
+  const [replyInput, setReplyInput] = useState("");
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    setLoadingReplies(true);
+    getReplies(row.kind, row.id)
+      .then(setReplies)
+      .catch(() => {})
+      .finally(() => setLoadingReplies(false));
+  }, [row.kind, row.id]);
+
+  async function handleSendReply() {
+    const trimmed = replyInput.trim();
+    if (!trimmed) return;
+    setSending(true);
+    try {
+      const r = await addReply(row.kind, row.id, trimmed, getNickname());
+      setReplies((prev) => [...prev, r]);
+      setReplyInput("");
+    } catch {
+      // silent
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleDeleteReply(id: string) {
+    try {
+      await deleteReply(id);
+      setReplies((prev) => prev.filter((r) => r.id !== id));
+    } catch {
+      // silent
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg max-h-[85dvh] flex flex-col rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal header */}
+        <div className="flex items-start justify-between gap-3 border-b border-gray-700 p-4 sm:p-5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <KindBadge kind={row.kind} />
+            <StatusDropdown status={row.status} onChange={onStatusChange} />
+          </div>
+          <button
+            onClick={onClose}
+            className="shrink-0 rounded-lg p-1 text-gray-400 transition hover:bg-gray-800 hover:text-gray-200"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Modal body — scrollable */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 sm:p-5">
+          {/* Main content */}
+          <div>
+            <p className="text-sm text-gray-200 whitespace-pre-wrap">{row.content}</p>
+            {row.meta && (
+              <p className="mt-2 text-xs text-gray-500">{row.meta}</p>
+            )}
+          </div>
+
+          {/* Info row */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+            <span>
+              By <span className="font-medium text-indigo-400">{row.author}</span>
+            </span>
+            {row.conversationTitle && (
+              <span>
+                in <span className="text-gray-400">{row.conversationTitle}</span>
+              </span>
+            )}
+            <span>{new Date(row.created_at).toLocaleString()}</span>
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-gray-700" />
+
+          {/* Replies thread */}
+          <div>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
+              Thread {replies.length > 0 && `(${replies.length})`}
+            </h3>
+
+            {loadingReplies ? (
+              <p className="text-xs text-gray-500">Loading replies...</p>
+            ) : replies.length === 0 ? (
+              <p className="text-xs text-gray-500">No replies yet. Start the conversation below.</p>
+            ) : (
+              <div className="space-y-2">
+                {replies.map((r) => (
+                  <div key={r.id} className="rounded-lg bg-gray-800 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-400">
+                          {r.author}
+                        </span>
+                        <span className="text-[10px] text-gray-500">
+                          {new Date(r.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteReply(r.id)}
+                        className="text-[10px] text-gray-500 transition hover:text-red-400"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-200 whitespace-pre-wrap">{r.content}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Reply input — sticky at bottom */}
+        <div className="border-t border-gray-700 p-4 sm:p-5">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={replyInput}
+              onChange={(e) => setReplyInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendReply();
+                }
+              }}
+              placeholder="Write a reply..."
+              className="min-w-0 flex-1 rounded-lg border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none sm:py-2"
+            />
+            <button
+              onClick={handleSendReply}
+              disabled={sending || !replyInput.trim()}
+              className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-40 sm:py-2"
+            >
+              {sending ? "..." : "Reply"}
+            </button>
+          </div>
+
+          {/* Delete item button */}
+          {row.kind === "item" && (
+            <button
+              onClick={onDelete}
+              className="mt-3 text-xs text-gray-500 transition hover:text-red-400"
+            >
+              Delete this comment
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Main page ---
+
 export default function TrackerPage() {
   const [rows, setRows] = useState<UnifiedRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ItemStatus | "all">("all");
   const [kindFilter, setKindFilter] = useState<UnifiedRow["kind"] | "all">("all");
   const [search, setSearch] = useState("");
+  const [selectedRow, setSelectedRow] = useState<UnifiedRow | null>(null);
 
   // Add new item form
   const [showForm, setShowForm] = useState(false);
@@ -126,7 +307,7 @@ export default function TrackerPage() {
             status: c.status,
             conversationTitle: c.conversation_title,
             conversationId: c.conversation_id,
-            meta: `On ${c.message_role} message: "${c.message_content.slice(0, 60)}${c.message_content.length > 60 ? "..." : ""}"`,
+            meta: `On ${c.message_role} message: "${c.message_content.slice(0, 80)}${c.message_content.length > 80 ? "..." : ""}"`,
             created_at: c.created_at,
           })
         ),
@@ -179,6 +360,9 @@ export default function TrackerPage() {
       setRows((prev) =>
         prev.map((r) => (r.id === row.id ? { ...r, status: newStatus } : r))
       );
+      if (selectedRow?.id === row.id) {
+        setSelectedRow((prev) => prev ? { ...prev, status: newStatus } : null);
+      }
     } catch {
       // silent
     }
@@ -219,6 +403,7 @@ export default function TrackerPage() {
     try {
       await deleteTrackerItem(row.id);
       setRows((prev) => prev.filter((r) => r.id !== row.id));
+      if (selectedRow?.id === row.id) setSelectedRow(null);
     } catch {
       // silent
     }
@@ -254,6 +439,16 @@ export default function TrackerPage() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-6xl px-3 py-6 pb-[env(safe-area-inset-bottom)] sm:px-6 sm:py-10">
+      {/* Detail modal */}
+      {selectedRow && (
+        <DetailModal
+          row={selectedRow}
+          onClose={() => setSelectedRow(null)}
+          onStatusChange={(s) => handleStatusChange(selectedRow, s)}
+          onDelete={() => handleDelete(selectedRow)}
+        />
+      )}
+
       {/* Header */}
       <header className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -261,7 +456,7 @@ export default function TrackerPage() {
             Comment Tracker
           </h1>
           <p className="mt-1 text-sm text-gray-500">
-            Track and resolve comments, feedback, and notes across all conversations
+            Track and resolve comments and feedback across all conversations
           </p>
         </div>
         <Link
@@ -314,13 +509,13 @@ export default function TrackerPage() {
           <option value="all">All Types</option>
           <option value="comment">Comments</option>
           <option value="feedback">Feedback</option>
-          <option value="item">Notes</option>
+          <option value="item">Comments (Manual)</option>
         </select>
         <button
           onClick={() => setShowForm(!showForm)}
           className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 whitespace-nowrap"
         >
-          + Add Note
+          + Add Comment
         </button>
       </div>
 
@@ -330,7 +525,7 @@ export default function TrackerPage() {
           <textarea
             value={newContent}
             onChange={(e) => setNewContent(e.target.value)}
-            placeholder="Write a note or training observation..."
+            placeholder="Write a comment or training observation..."
             rows={2}
             className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none resize-none"
           />
@@ -340,7 +535,7 @@ export default function TrackerPage() {
               onChange={(e) => setNewConvId(e.target.value)}
               className="min-w-0 flex-1 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-gray-300 focus:border-indigo-500 focus:outline-none"
             >
-              <option value="">No conversation (general note)</option>
+              <option value="">No conversation (general comment)</option>
               {conversations.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.title.slice(0, 60)}
@@ -376,7 +571,7 @@ export default function TrackerPage() {
       ) : filtered.length === 0 ? (
         <div className="py-20 text-center text-gray-500">
           {rows.length === 0
-            ? "No comments, feedback, or notes yet. Start by testing a conversation!"
+            ? "No comments or feedback yet. Start by testing a conversation!"
             : "No results match your filters."}
         </div>
       ) : (
@@ -404,15 +599,17 @@ export default function TrackerPage() {
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
                     Date
                   </th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
-                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-700/50">
                 {filtered.map((row) => (
-                  <tr key={`${row.kind}-${row.id}`} className="transition hover:bg-gray-800/50">
-                    <td className="px-4 py-3">
-                      <StatusBadge
+                  <tr
+                    key={`${row.kind}-${row.id}`}
+                    className="transition hover:bg-gray-800/50 cursor-pointer"
+                    onClick={() => setSelectedRow(row)}
+                  >
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <StatusDropdown
                         status={row.status}
                         onChange={(s) => handleStatusChange(row, s)}
                       />
@@ -427,23 +624,13 @@ export default function TrackerPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-400 text-xs max-w-[160px] truncate">
-                      {row.conversationTitle ?? "—"}
+                      {row.conversationTitle ?? "\u2014"}
                     </td>
                     <td className="px-4 py-3">
                       <span className="text-xs font-medium text-indigo-400">{row.author}</span>
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
                       {new Date(row.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3">
-                      {row.kind === "item" && (
-                        <button
-                          onClick={() => handleDelete(row)}
-                          className="text-xs text-gray-500 transition hover:text-red-400"
-                        >
-                          Delete
-                        </button>
-                      )}
                     </td>
                   </tr>
                 ))}
@@ -456,28 +643,24 @@ export default function TrackerPage() {
             {filtered.map((row) => (
               <div
                 key={`${row.kind}-${row.id}`}
-                className="rounded-xl border border-gray-700 bg-gray-800/50 p-3 space-y-2"
+                className="rounded-xl border border-gray-700 bg-gray-800/50 p-3 space-y-2 cursor-pointer active:bg-gray-800"
+                onClick={() => setSelectedRow(row)}
               >
-                <div className="flex items-center justify-between gap-2">
+                <div
+                  className="flex items-center justify-between gap-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="flex items-center gap-2">
-                    <StatusBadge
+                    <StatusDropdown
                       status={row.status}
                       onChange={(s) => handleStatusChange(row, s)}
                     />
                     <KindBadge kind={row.kind} />
                   </div>
-                  {row.kind === "item" && (
-                    <button
-                      onClick={() => handleDelete(row)}
-                      className="text-xs text-gray-500 transition hover:text-red-400"
-                    >
-                      Delete
-                    </button>
-                  )}
                 </div>
-                <p className="text-sm text-gray-200">{row.content}</p>
+                <p className="text-sm text-gray-200 line-clamp-2">{row.content}</p>
                 {row.meta && (
-                  <p className="text-[11px] text-gray-500">{row.meta}</p>
+                  <p className="text-[11px] text-gray-500 truncate">{row.meta}</p>
                 )}
                 <div className="flex items-center justify-between text-[11px] text-gray-500">
                   <span>

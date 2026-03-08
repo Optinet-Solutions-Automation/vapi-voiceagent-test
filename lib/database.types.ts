@@ -177,6 +177,33 @@ export type Database = {
           },
         ];
       };
+      tracker_replies: {
+        Row: {
+          id: string;
+          parent_kind: "comment" | "feedback" | "item";
+          parent_id: string;
+          author: string;
+          content: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          parent_kind: "comment" | "feedback" | "item";
+          parent_id: string;
+          author?: string;
+          content: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          parent_kind?: "comment" | "feedback" | "item";
+          parent_id?: string;
+          author?: string;
+          content?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {};
     Functions: {};
@@ -190,3 +217,4 @@ export type Message = Database["public"]["Tables"]["messages"]["Row"];
 export type Comment = Database["public"]["Tables"]["comments"]["Row"];
 export type Feedback = Database["public"]["Tables"]["feedback"]["Row"];
 export type TrackerItem = Database["public"]["Tables"]["tracker_items"]["Row"];
+export type TrackerReply = Database["public"]["Tables"]["tracker_replies"]["Row"];
