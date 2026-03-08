@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { getVapi, VAPI_ASSISTANT_ID } from "@/lib/vapi";
 import { AgentState, TranscriptMessage } from "@/lib/types";
 import { saveConversation, getConversationWithMessages } from "@/lib/db";
@@ -162,6 +163,15 @@ export default function Home() {
         <p className="mt-1 text-sm text-gray-500">
           Speak with the Vapi assistant and debug in real time
         </p>
+        <Link
+          href="/tracker"
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-400 transition hover:bg-gray-800 hover:text-gray-200"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+          </svg>
+          Comment Tracker
+        </Link>
       </header>
 
       {/* Controls Card */}

@@ -1,3 +1,5 @@
+export type ItemStatus = "open" | "in_progress" | "done" | "has_question";
+
 export type Database = {
   public: {
     Tables: {
@@ -61,6 +63,7 @@ export type Database = {
           parent_id: string | null;
           author: string;
           content: string;
+          status: ItemStatus;
           created_at: string;
         };
         Insert: {
@@ -69,6 +72,7 @@ export type Database = {
           parent_id?: string | null;
           author?: string;
           content: string;
+          status?: ItemStatus;
           created_at?: string;
         };
         Update: {
@@ -77,6 +81,7 @@ export type Database = {
           parent_id?: string | null;
           author?: string;
           content?: string;
+          status?: ItemStatus;
           created_at?: string;
         };
         Relationships: [
@@ -104,6 +109,7 @@ export type Database = {
           rating: number | null;
           text_content: string | null;
           audio_url: string | null;
+          status: ItemStatus;
           created_at: string;
         };
         Insert: {
@@ -113,6 +119,7 @@ export type Database = {
           rating?: number | null;
           text_content?: string | null;
           audio_url?: string | null;
+          status?: ItemStatus;
           created_at?: string;
         };
         Update: {
@@ -122,11 +129,47 @@ export type Database = {
           rating?: number | null;
           text_content?: string | null;
           audio_url?: string | null;
+          status?: ItemStatus;
           created_at?: string;
         };
         Relationships: [
           {
             foreignKeyName: "feedback_conversation_id_fkey";
+            columns: ["conversation_id"];
+            isOneToOne: false;
+            referencedRelation: "conversations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      tracker_items: {
+        Row: {
+          id: string;
+          conversation_id: string | null;
+          author: string;
+          content: string;
+          status: ItemStatus;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          conversation_id?: string | null;
+          author?: string;
+          content: string;
+          status?: ItemStatus;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          conversation_id?: string | null;
+          author?: string;
+          content?: string;
+          status?: ItemStatus;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "tracker_items_conversation_id_fkey";
             columns: ["conversation_id"];
             isOneToOne: false;
             referencedRelation: "conversations";
@@ -146,3 +189,4 @@ export type Conversation = Database["public"]["Tables"]["conversations"]["Row"];
 export type Message = Database["public"]["Tables"]["messages"]["Row"];
 export type Comment = Database["public"]["Tables"]["comments"]["Row"];
 export type Feedback = Database["public"]["Tables"]["feedback"]["Row"];
+export type TrackerItem = Database["public"]["Tables"]["tracker_items"]["Row"];

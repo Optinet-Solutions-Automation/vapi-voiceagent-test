@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import type { TranscriptMessage } from "./types";
-import type { Comment, Conversation, Feedback, Message } from "./database.types";
+import type { Comment, Conversation, Feedback, Message, TrackerItem, ItemStatus } from "./database.types";
 
 // --- Conversations ---
 
@@ -141,5 +141,117 @@ export async function getFeedbackForConversation(
 
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+// --- Tracker: aggregated views ---
+
+export type CommentWithContext = Comment & {
+  message_content: string;
+  message_role: "user" | "agent";
+  conversation_id: string;
+  conversation_title: string;
+};
+
+export type FeedbackWithContext = Feedback & {
+  conversation_title: string;
+};
+
+export async function getAllCommentsWithContext(): Promise<CommentWithContext[]> {
+  const { data, error } = await supabase
+    .from("comments")
+    .select("*, messages!inner(content, role, conversation_id, conversations!inner(title))")
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    message_id: row.message_id,
+    parent_id: row.parent_id,
+    author: row.author,
+    content: row.content,
+    status: row.status,
+    created_at: row.created_at,
+    message_content: row.messages.content,
+    message_role: row.messages.role,
+    conversation_id: row.messages.conversation_id,
+    conversation_title: row.messages.conversations.title,
+  }));
+}
+
+export async function getAllFeedbackWithContext(): Promise<FeedbackWithContext[]> {
+  const { data, error } = await supabase
+    .from("feedback")
+    .select("*, conversations!inner(title)")
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    conversation_id: row.conversation_id,
+    author: row.author,
+    rating: row.rating,
+    text_content: row.text_content,
+    audio_url: row.audio_url,
+    status: row.status,
+    created_at: row.created_at,
+    conversation_title: row.conversations.title,
+  }));
+}
+
+export async function getAllTrackerItems(): Promise<
+  (TrackerItem & { conversation_title: string | null })[]
+> {
+  const { data, error } = await supabase
+    .from("tracker_items")
+    .select("*, conversations(title)")
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  return (data ?? []).map((row: any) => ({
+    ...row,
+    conversation_title: row.conversations?.title ?? null,
+  }));
+}
+
+export async function addTrackerItem(
+  content: string,
+  author: string,
+  conversationId?: string
+): Promise<TrackerItem> {
+  const { data, error } = await supabase
+    .from("tracker_items")
+    .insert({
+      content,
+      author,
+      conversation_id: conversationId ?? null,
+    })
+    .select("*")
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data!;
+}
+
+export async function updateCommentStatus(id: string, status: ItemStatus): Promise<void> {
+  const { error } = await supabase.from("comments").update({ status }).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function updateFeedbackStatus(id: string, status: ItemStatus): Promise<void> {
+  const { error } = await supabase.from("feedback").update({ status }).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function updateTrackerItemStatus(id: string, status: ItemStatus): Promise<void> {
+  const { error } = await supabase.from("tracker_items").update({ status }).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteTrackerItem(id: string): Promise<void> {
+  const { error } = await supabase.from("tracker_items").delete().eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
