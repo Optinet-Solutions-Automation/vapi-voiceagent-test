@@ -409,6 +409,32 @@ export default function TrackerPage() {
     }
   }
 
+  function handleExportCsv() {
+    const header = ["Status", "Type", "Content", "Conversation", "Author", "Date"];
+    const kindLabels = { comment: "Comment", feedback: "Feedback", item: "Comment (Manual)" };
+    const statusLabels = { open: "Open", in_progress: "In Progress", done: "Done", has_question: "Has Question" };
+
+    const csvRows = filtered.map((r) => [
+      statusLabels[r.status],
+      kindLabels[r.kind],
+      r.content,
+      r.conversationTitle ?? "",
+      r.author,
+      new Date(r.created_at).toLocaleDateString(),
+    ]);
+
+    const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const csv = [header, ...csvRows].map((row) => row.map(escape).join(",")).join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `comment-tracker-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   useEffect(() => {
     if (showForm && conversations.length === 0) {
       listConversations().then(setConversations).catch(() => {});
@@ -516,6 +542,13 @@ export default function TrackerPage() {
           className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 whitespace-nowrap"
         >
           + Add Comment
+        </button>
+        <button
+          onClick={handleExportCsv}
+          disabled={filtered.length === 0}
+          className="rounded-lg border border-gray-600 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+        >
+          Export CSV
         </button>
       </div>
 
