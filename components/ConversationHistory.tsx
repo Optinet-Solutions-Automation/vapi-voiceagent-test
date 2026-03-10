@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { listConversations, deleteConversation } from "@/lib/db";
 import type { Conversation } from "@/lib/database.types";
 
 type Props = {
   onSelect: (id: string) => void;
   refreshKey: number;
+  limit?: number;
 };
 
-export default function ConversationHistory({ onSelect, refreshKey }: Props) {
+export default function ConversationHistory({ onSelect, refreshKey, limit }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -31,12 +33,23 @@ export default function ConversationHistory({ onSelect, refreshKey }: Props) {
     }
   }
 
+  const displayed = limit ? conversations.slice(0, limit) : conversations;
+  const hasMore = limit ? conversations.length > limit : false;
+
   return (
     <div className="rounded-xl border border-gray-700 bg-gray-800/50 backdrop-blur">
-      <div className="border-b border-gray-700 px-4 py-3 sm:px-5">
+      <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3 sm:px-5">
         <h2 className="text-xs font-semibold text-gray-300 uppercase tracking-wider sm:text-sm">
           Saved Conversations
         </h2>
+        {hasMore && (
+          <Link
+            href="/conversations"
+            className="text-xs font-medium text-indigo-400 transition hover:text-indigo-300"
+          >
+            View All ({conversations.length})
+          </Link>
+        )}
       </div>
 
       <div className="max-h-[250px] overflow-y-auto sm:max-h-[300px]">
@@ -48,7 +61,7 @@ export default function ConversationHistory({ onSelect, refreshKey }: Props) {
           <p className="px-5 py-4 text-sm text-gray-500">No saved conversations yet.</p>
         )}
 
-        {conversations.map((c) => (
+        {displayed.map((c) => (
           <div
             key={c.id}
             role="button"

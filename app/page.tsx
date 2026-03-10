@@ -246,6 +246,7 @@ export default function Home() {
       <ConversationHistory
         onSelect={handleLoadConversation}
         refreshKey={historyRefresh}
+        limit={5}
       />
     </div>
     </>
