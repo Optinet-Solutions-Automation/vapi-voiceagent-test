@@ -207,6 +207,36 @@ export type Database = {
         };
         Relationships: [];
       };
+      call_transcripts: {
+        Row: {
+          id: string;
+          title: string;
+          content: string;
+          notes: string;
+          classification: "good" | "bad" | "unclassified";
+          ai_analysis: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          title?: string;
+          content: string;
+          notes?: string;
+          classification?: "good" | "bad" | "unclassified";
+          ai_analysis?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          title?: string;
+          content?: string;
+          notes?: string;
+          classification?: "good" | "bad" | "unclassified";
+          ai_analysis?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {};
     Functions: {};
@@ -221,3 +251,4 @@ export type Comment = Database["public"]["Tables"]["comments"]["Row"];
 export type Feedback = Database["public"]["Tables"]["feedback"]["Row"];
 export type TrackerItem = Database["public"]["Tables"]["tracker_items"]["Row"];
 export type TrackerReply = Database["public"]["Tables"]["tracker_replies"]["Row"];
+export type CallTranscript = Database["public"]["Tables"]["call_transcripts"]["Row"];

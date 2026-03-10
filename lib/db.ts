@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import type { TranscriptMessage } from "./types";
-import type { Comment, Conversation, Feedback, Message, TrackerItem, TrackerReply, ItemStatus } from "./database.types";
+import type { CallTranscript, Comment, Conversation, Feedback, Message, TrackerItem, TrackerReply, ItemStatus } from "./database.types";
 
 // --- Conversations ---
 
@@ -298,6 +298,64 @@ export async function addReply(
 
 export async function deleteReply(id: string): Promise<void> {
   const { error } = await supabase.from("tracker_replies").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+// --- Call Transcripts ---
+
+export async function listCallTranscripts(): Promise<CallTranscript[]> {
+  const { data, error } = await supabase
+    .from("call_transcripts")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getCallTranscript(id: string): Promise<CallTranscript> {
+  const { data, error } = await supabase
+    .from("call_transcripts")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error || !data) throw new Error(error?.message ?? "Transcript not found");
+  return data;
+}
+
+export async function createCallTranscript(
+  title: string,
+  content: string
+): Promise<CallTranscript> {
+  const { data, error } = await supabase
+    .from("call_transcripts")
+    .insert({ title, content })
+    .select("*")
+    .single();
+
+  if (error || !data) throw new Error(error?.message ?? "Failed to create transcript");
+  return data;
+}
+
+export async function updateCallTranscript(
+  id: string,
+  updates: { notes?: string; classification?: "good" | "bad" | "unclassified"; ai_analysis?: string; title?: string }
+): Promise<void> {
+  const { error } = await supabase
+    .from("call_transcripts")
+    .update(updates)
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteCallTranscript(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("call_transcripts")
+    .delete()
+    .eq("id", id);
+
   if (error) throw new Error(error.message);
 }
 
