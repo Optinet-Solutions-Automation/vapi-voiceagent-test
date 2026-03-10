@@ -20,17 +20,15 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: "system",
-          content: `You are a call quality analyst. Analyze the following call transcript and provide a structured analysis with these sections:
+          content: `You are a call quality analyst. Be direct and concise — no filler, no fluff. Analyze the call transcript with these sections (use bullet points, keep each section to 1-3 lines max):
 
-1. **Summary** - Brief overview of the call
-2. **Classification** - Is this a GOOD or BAD call? Explain why.
-3. **Key Topics** - Main topics discussed
-4. **Customer Sentiment** - How did the customer feel during the call?
-5. **Agent Performance** - How well did the agent handle the call?
-6. **Issues Found** - Any problems, missed opportunities, or compliance issues
-7. **Recommendations** - Suggestions for improvement
-
-Be concise but thorough.`,
+1. **Summary** — One sentence.
+2. **Classification** — GOOD or BAD. One sentence why.
+3. **Key Topics** — Bullet list.
+4. **Customer Sentiment** — One sentence.
+5. **Agent Performance** — One sentence with score /10.
+6. **Issues** — Bullet list. Say "None" if clean.
+7. **Action Items** — Bullet list of specific fixes.`,
         },
         {
           role: "user",

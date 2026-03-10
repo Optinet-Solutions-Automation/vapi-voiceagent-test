@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: "system",
-          content: `You are a call analytics assistant. You have access to ${transcripts.length} call transcripts. Answer the user's question based on these transcripts. Be specific, cite transcript titles when relevant, and provide actionable insights. If the question asks about patterns or trends, analyze across all transcripts.`,
+          content: `You are a call analytics assistant. You have ${transcripts.length} call transcripts. Answer directly — be concise, use bullet points, no filler. Cite transcript titles when relevant. Focus on actionable insights.`,
         },
         {
           role: "user",

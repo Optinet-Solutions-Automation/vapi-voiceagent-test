@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import type { TranscriptMessage } from "./types";
-import type { CallTranscript, Comment, Conversation, Feedback, Message, TrackerItem, TrackerReply, ItemStatus } from "./database.types";
+import type { CallTranscript, Comment, Conversation, Feedback, Message, TrackerItem, TrackerReply, TranscriptQuestion, ItemStatus } from "./database.types";
 
 // --- Conversations ---
 
@@ -353,6 +353,54 @@ export async function updateCallTranscript(
 export async function deleteCallTranscript(id: string): Promise<void> {
   const { error } = await supabase
     .from("call_transcripts")
+    .delete()
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
+}
+
+// --- Transcript Questions ---
+
+export async function listTranscriptQuestions(): Promise<TranscriptQuestion[]> {
+  const { data, error } = await supabase
+    .from("transcript_questions")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function saveTranscriptQuestion(
+  question: string,
+  answer: string,
+  transcriptIds: string[]
+): Promise<TranscriptQuestion> {
+  const { data, error } = await supabase
+    .from("transcript_questions")
+    .insert({ question, answer, transcript_ids: transcriptIds })
+    .select("*")
+    .single();
+
+  if (error || !data) throw new Error(error?.message ?? "Failed to save question");
+  return data;
+}
+
+export async function updateTranscriptQuestion(
+  id: string,
+  answer: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("transcript_questions")
+    .update({ answer })
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteTranscriptQuestion(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("transcript_questions")
     .delete()
     .eq("id", id);
 
