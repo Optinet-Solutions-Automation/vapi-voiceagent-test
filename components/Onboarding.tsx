@@ -56,7 +56,7 @@ const STEPS = [
   {
     title: "Save & Comment",
     description:
-      'After a session, click "Save Conversation" to store it. Reopen saved conversations anytime, click on any message to add comments, and start threaded discussions for your team.',
+      'After a session, click "Save Conversation" to store it. Reopen saved conversations anytime, click on any message to add comments, and start threaded discussions for your team.\n\nNote: Call recordings may take a moment to be available after a call ends. If you click "Play Call Recording" and see "No recording available yet", wait a minute and try again.',
     icon: (
       <svg className="h-10 w-10 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
@@ -156,7 +156,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
         <h2 className="mb-2 text-center text-base font-semibold text-white sm:mb-3 sm:text-lg">
           {current.title}
         </h2>
-        <p className="mb-6 text-center text-sm leading-relaxed text-gray-400 sm:mb-8">
+        <p className="mb-6 text-center text-sm leading-relaxed text-gray-400 whitespace-pre-line sm:mb-8">
           {current.description}
         </p>
 
