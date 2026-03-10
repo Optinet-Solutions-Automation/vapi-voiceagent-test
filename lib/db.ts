@@ -18,15 +18,17 @@ export async function saveConversation(
   if (convErr || !conv) throw new Error(convErr?.message ?? "Failed to create conversation");
 
   const validMessages = transcriptMessages.filter((m) => m.content);
-  const rows = validMessages.map((m, i) => ({
-    conversation_id: conv.id,
-    role: m.role as "user" | "agent",
-    content: m.content,
-    order: i,
-  }));
+  if (validMessages.length > 0) {
+    const rows = validMessages.map((m, i) => ({
+      conversation_id: conv.id,
+      role: m.role as "user" | "agent",
+      content: m.content,
+      order: i,
+    }));
 
-  const { error: msgErr } = await supabase.from("messages").insert(rows);
-  if (msgErr) throw new Error(msgErr.message);
+    const { error: msgErr } = await supabase.from("messages").insert(rows);
+    if (msgErr) throw new Error(msgErr.message);
+  }
 
   return conv.id;
 }

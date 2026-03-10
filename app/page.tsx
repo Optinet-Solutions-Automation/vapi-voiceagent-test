@@ -52,20 +52,24 @@ export default function Home() {
     });
 
     vapi.on("message", (msg: any) => {
-      if (msg.type === "conversation-update" && msg.conversation) {
-        const conversation = msg.conversation as Array<{
-          role: string;
-          content: string;
-        }>;
-        setMessages(
-          conversation
-            .filter((m) => (m.role === "user" || m.role === "assistant") && m.content)
-            .map((m) => ({
-              role: m.role === "assistant" ? ("agent" as const) : ("user" as const),
-              content: m.content,
-              timestamp: new Date(),
-            }))
-        );
+      try {
+        if (msg.type === "conversation-update" && Array.isArray(msg.conversation)) {
+          const conversation = msg.conversation as Array<{
+            role: string;
+            content: string;
+          }>;
+          setMessages(
+            conversation
+              .filter((m) => (m.role === "user" || m.role === "assistant") && m.content)
+              .map((m) => ({
+                role: m.role === "assistant" ? ("agent" as const) : ("user" as const),
+                content: m.content,
+                timestamp: new Date(),
+              }))
+          );
+        }
+      } catch {
+        // Ignore malformed messages
       }
     });
 
