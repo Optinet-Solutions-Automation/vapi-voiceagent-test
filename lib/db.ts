@@ -256,6 +256,11 @@ export async function deleteTrackerItem(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+export async function deleteFeedback(id: string): Promise<void> {
+  const { error } = await supabase.from("feedback").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
 // --- Tracker replies ---
 
 export async function getReplies(

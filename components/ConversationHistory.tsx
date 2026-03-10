@@ -25,6 +25,7 @@ export default function ConversationHistory({ onSelect, refreshKey, limit }: Pro
 
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.stopPropagation();
+    if (!window.confirm("Are you sure you want to delete this conversation? This action cannot be undone.")) return;
     try {
       await deleteConversation(id);
       setConversations((prev) => prev.filter((c) => c.id !== id));

@@ -11,6 +11,8 @@ import {
   updateFeedbackStatus,
   updateTrackerItemStatus,
   deleteTrackerItem,
+  deleteComment,
+  deleteFeedback,
   listConversations,
   getReplies,
   addReply,
@@ -256,15 +258,13 @@ function DetailModal({
             </button>
           </div>
 
-          {/* Delete item button */}
-          {row.kind === "item" && (
-            <button
-              onClick={onDelete}
-              className="mt-3 text-xs text-gray-500 transition hover:text-red-400"
-            >
-              Delete this comment
-            </button>
-          )}
+          {/* Delete button */}
+          <button
+            onClick={onDelete}
+            className="mt-3 text-xs text-gray-500 transition hover:text-red-400"
+          >
+            Delete this {row.kind === "feedback" ? "feedback" : "comment"}
+          </button>
         </div>
       </div>
     </div>
@@ -399,9 +399,12 @@ export default function TrackerPage() {
   }
 
   async function handleDelete(row: UnifiedRow) {
-    if (row.kind !== "item") return;
+    const label = row.kind === "feedback" ? "feedback" : "comment";
+    if (!window.confirm(`Are you sure you want to delete this ${label}? This action cannot be undone.`)) return;
     try {
-      await deleteTrackerItem(row.id);
+      if (row.kind === "comment") await deleteComment(row.id);
+      else if (row.kind === "feedback") await deleteFeedback(row.id);
+      else await deleteTrackerItem(row.id);
       setRows((prev) => prev.filter((r) => r.id !== row.id));
       if (selectedRow?.id === row.id) setSelectedRow(null);
     } catch {
