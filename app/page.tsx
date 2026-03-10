@@ -12,6 +12,7 @@ import TranscriptPanel from "@/components/TranscriptPanel";
 import ConversationHistory from "@/components/ConversationHistory";
 import Onboarding, { useOnboarding } from "@/components/Onboarding";
 import FeedbackPanel from "@/components/FeedbackPanel";
+import CallRecording from "@/components/CallRecording";
 
 type DisplayMessage = TranscriptMessage & { id?: string };
 
@@ -23,8 +24,10 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [viewingConversation, setViewingConversation] = useState<string | null>(null);
+  const [viewingCallId, setViewingCallId] = useState<string | null>(null);
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const vapiRef = useRef<ReturnType<typeof getVapi> | null>(null);
+  const callIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const vapi = getVapi();
@@ -33,6 +36,7 @@ export default function Home() {
     vapi.on("call-start", () => {
       setState("listening");
       setError(null);
+      // call ID is set from vapi.start() return value
     });
 
     vapi.on("call-end", () => {
@@ -83,11 +87,14 @@ export default function Home() {
     setMessages([]);
     setSavedId(null);
     setViewingConversation(null);
+    setViewingCallId(null);
+    callIdRef.current = null;
 
     try {
       const vapi = vapiRef.current;
       if (!vapi) return;
-      await vapi.start(VAPI_ASSISTANT_ID);
+      const call = await vapi.start(VAPI_ASSISTANT_ID);
+      if (call?.id) callIdRef.current = call.id;
     } catch (err: any) {
       const msg =
         err?.message?.includes("permission") || err?.message?.includes("NotAllowed")
@@ -111,7 +118,7 @@ export default function Home() {
       const title = firstUserMsg
         ? firstUserMsg.content.slice(0, 80)
         : `Conversation ${new Date().toLocaleString()}`;
-      const id = await saveConversation(title, messages);
+      const id = await saveConversation(title, messages, callIdRef.current);
       setSavedId(id);
       setHistoryRefresh((n) => n + 1);
 
@@ -128,6 +135,7 @@ export default function Home() {
     try {
       const { conversation, messages: dbMessages } = await getConversationWithMessages(id);
       setViewingConversation(conversation.title);
+      setViewingCallId(conversation.vapi_call_id);
       setSavedId(id);
       setMessages(
         dbMessages.map((m: Message) => ({
@@ -144,6 +152,7 @@ export default function Home() {
 
   function handleBackToLive() {
     setViewingConversation(null);
+    setViewingCallId(null);
     setSavedId(null);
     setMessages([]);
   }
@@ -216,6 +225,13 @@ export default function Home() {
             : "Start a voice session to see the conversation here."
         }
       />
+
+      {/* Call Recording — show when viewing a saved conversation with a call ID */}
+      {viewingCallId && (
+        <div className="rounded-xl border border-gray-700 bg-gray-800/50 p-4 backdrop-blur sm:p-5">
+          <CallRecording vapiCallId={viewingCallId} />
+        </div>
+      )}
 
       {/* Feedback — show when conversation is saved */}
       {savedId && (

@@ -7,16 +7,19 @@ export type Database = {
         Row: {
           id: string;
           title: string;
+          vapi_call_id: string | null;
           created_at: string;
         };
         Insert: {
           id?: string;
           title?: string;
+          vapi_call_id?: string | null;
           created_at?: string;
         };
         Update: {
           id?: string;
           title?: string;
+          vapi_call_id?: string | null;
           created_at?: string;
         };
         Relationships: [];

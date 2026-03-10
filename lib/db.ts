@@ -6,11 +6,12 @@ import type { Comment, Conversation, Feedback, Message, TrackerItem, TrackerRepl
 
 export async function saveConversation(
   title: string,
-  transcriptMessages: TranscriptMessage[]
+  transcriptMessages: TranscriptMessage[],
+  vapiCallId?: string | null
 ): Promise<string> {
   const { data: conv, error: convErr } = await supabase
     .from("conversations")
-    .insert({ title })
+    .insert({ title, vapi_call_id: vapiCallId ?? null })
     .select("id")
     .single();
 
