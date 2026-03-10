@@ -4,13 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getVapi, VAPI_ASSISTANT_ID } from "@/lib/vapi";
 import { AgentState, TranscriptMessage } from "@/lib/types";
-import { saveConversation, getConversationWithMessages } from "@/lib/db";
+import { saveConversation, getConversationWithMessages, addTrackerItem } from "@/lib/db";
 import type { Message } from "@/lib/database.types";
 import StatusIndicator from "@/components/StatusIndicator";
 import VoiceControls from "@/components/VoiceControls";
 import TranscriptPanel from "@/components/TranscriptPanel";
 import ConversationHistory from "@/components/ConversationHistory";
-import Onboarding, { useOnboarding } from "@/components/Onboarding";
+import Onboarding, { useOnboarding, getNickname } from "@/components/Onboarding";
 import FeedbackPanel from "@/components/FeedbackPanel";
 import CallRecording from "@/components/CallRecording";
 
@@ -114,13 +114,17 @@ export default function Home() {
     if (messages.length === 0) return;
     setSaving(true);
     try {
-      const firstUserMsg = messages.find((m) => m.role === "user");
-      const title = firstUserMsg
-        ? firstUserMsg.content.slice(0, 80)
-        : `Conversation ${new Date().toLocaleString()}`;
+      const now = new Date();
+      const date = now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      const time = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+      const tester = getNickname();
+      const title = `${date}, ${time} - ${tester}`;
       const id = await saveConversation(title, messages, callIdRef.current);
       setSavedId(id);
       setHistoryRefresh((n) => n + 1);
+
+      // Auto-add a comment in the tracker for this conversation
+      await addTrackerItem(`New conversation saved: ${title}`, tester, id).catch(() => {});
 
       // Reload as saved messages so comments become available
       await handleLoadConversation(id);
