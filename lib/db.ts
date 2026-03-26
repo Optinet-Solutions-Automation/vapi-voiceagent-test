@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import type { TranscriptMessage } from "./types";
-import type { CallTranscript, Comment, Conversation, Feedback, Message, TrackerItem, TrackerReply, TranscriptQuestion, ItemStatus } from "./database.types";
+import type { CallTranscript, Comment, Conversation, Feedback, Message, PromptLibraryItem, TrackerItem, TrackerReply, TranscriptQuestion, ItemStatus } from "./database.types";
 
 // --- Conversations ---
 
@@ -401,6 +401,71 @@ export async function updateTranscriptQuestion(
 export async function deleteTranscriptQuestion(id: string): Promise<void> {
   const { error } = await supabase
     .from("transcript_questions")
+    .delete()
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
+}
+
+// --- Prompt Library ---
+
+export async function listPrompts(): Promise<PromptLibraryItem[]> {
+  const { data, error } = await supabase
+    .from("prompt_library")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function createPrompt(
+  name: string,
+  content: string,
+  notes?: string
+): Promise<PromptLibraryItem> {
+  const { data, error } = await supabase
+    .from("prompt_library")
+    .insert({ name, content, notes: notes ?? "" })
+    .select("*")
+    .single();
+
+  if (error || !data) throw new Error(error?.message ?? "Failed to create prompt");
+  return data;
+}
+
+export async function updatePrompt(
+  id: string,
+  updates: { name?: string; content?: string; notes?: string }
+): Promise<void> {
+  const { error } = await supabase
+    .from("prompt_library")
+    .update(updates)
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
+}
+
+export async function setActivePrompt(id: string): Promise<void> {
+  // Deactivate all, then activate the selected one
+  const { error: clearErr } = await supabase
+    .from("prompt_library")
+    .update({ is_active: false })
+    .neq("id", "00000000-0000-0000-0000-000000000000"); // update all rows
+
+  if (clearErr) throw new Error(clearErr.message);
+
+  const { error } = await supabase
+    .from("prompt_library")
+    .update({ is_active: true })
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
+}
+
+export async function deletePrompt(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("prompt_library")
     .delete()
     .eq("id", id);
 

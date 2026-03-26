@@ -31,6 +31,8 @@ type UnifiedRow = {
   conversationTitle: string | null;
   conversationId: string | null;
   meta?: string;
+  messageContent?: string;
+  messageRole?: string;
   created_at: string;
 };
 
@@ -171,12 +173,22 @@ function DetailModal({
 
         {/* Modal body — scrollable */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 sm:p-5">
-          {/* Main content */}
+          {/* Original message context (for comments) */}
+          {row.messageContent && (
+            <div className="rounded-lg border border-gray-700 bg-gray-800 p-3">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                {row.messageRole === "agent" ? "Agent" : "User"} Message
+              </p>
+              <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{row.messageContent}</p>
+            </div>
+          )}
+
+          {/* Comment / feedback content */}
           <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+              {row.kind === "feedback" ? "Feedback" : "Comment"}
+            </p>
             <p className="text-sm text-gray-200 whitespace-pre-wrap">{row.content}</p>
-            {row.meta && (
-              <p className="mt-2 text-xs text-gray-500">{row.meta}</p>
-            )}
           </div>
 
           {/* Info row */}
@@ -184,13 +196,22 @@ function DetailModal({
             <span>
               By <span className="font-medium text-indigo-400">{row.author}</span>
             </span>
-            {row.conversationTitle && (
-              <span>
-                in <span className="text-gray-400">{row.conversationTitle}</span>
-              </span>
-            )}
             <span>{new Date(row.created_at).toLocaleString()}</span>
           </div>
+
+          {/* Conversation link */}
+          {row.conversationId && row.conversationTitle && (
+            <Link
+              href={`/conversations`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-600 px-3 py-1.5 text-xs font-medium text-indigo-400 transition hover:bg-gray-800 hover:text-indigo-300"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              View conversation: {row.conversationTitle}
+            </Link>
+          )}
 
           {/* Divider */}
           <div className="border-t border-gray-700" />
@@ -308,6 +329,8 @@ export default function TrackerPage() {
             conversationTitle: c.conversation_title,
             conversationId: c.conversation_id,
             meta: `On ${c.message_role} message: "${c.message_content.slice(0, 80)}${c.message_content.length > 80 ? "..." : ""}"`,
+            messageContent: c.message_content,
+            messageRole: c.message_role,
             created_at: c.created_at,
           })
         ),

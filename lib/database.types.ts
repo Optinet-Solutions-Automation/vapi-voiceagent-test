@@ -261,6 +261,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      prompt_library: {
+        Row: {
+          id: string;
+          name: string;
+          content: string;
+          notes: string;
+          is_active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          content: string;
+          notes?: string;
+          is_active?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          content?: string;
+          notes?: string;
+          is_active?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {};
     Functions: {};
@@ -277,3 +304,4 @@ export type TrackerItem = Database["public"]["Tables"]["tracker_items"]["Row"];
 export type TrackerReply = Database["public"]["Tables"]["tracker_replies"]["Row"];
 export type CallTranscript = Database["public"]["Tables"]["call_transcripts"]["Row"];
 export type TranscriptQuestion = Database["public"]["Tables"]["transcript_questions"]["Row"];
+export type PromptLibraryItem = Database["public"]["Tables"]["prompt_library"]["Row"];
