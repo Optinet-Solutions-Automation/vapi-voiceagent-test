@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+
 import {
   listPrompts,
   createPrompt,
@@ -40,7 +40,7 @@ export default function PromptsPage() {
     setLoading(true);
     try {
       const data = await listPrompts();
-      setPrompts(data);
+      setPrompts(data.sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0)));
     } catch {
       // silent
     } finally {
@@ -53,6 +53,7 @@ export default function PromptsPage() {
   }, [load]);
 
   function selectPrompt(p: PromptLibraryItem) {
+    setShowNew(false);
     setSelected(p);
     setEditName(p.name);
     setEditContent(p.content);
@@ -98,7 +99,7 @@ export default function PromptsPage() {
       // Mark active in Supabase
       await setActivePrompt(selected.id);
       const updated = prompts.map((p) => ({ ...p, is_active: p.id === selected.id }));
-      setPrompts(updated);
+      setPrompts(updated.sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0)));
       setSelected({ ...selected, is_active: true });
     } catch (e: any) {
       alert(e?.message ?? "Failed to set active prompt");
@@ -162,20 +163,12 @@ export default function PromptsPage() {
   }
 
   return (
-    <div className="flex h-dvh flex-col bg-gray-950 text-white">
+    <div className="flex h-full flex-col bg-gray-950 text-white">
       {/* Top bar */}
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-800 px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-300 transition hover:bg-gray-800"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-            Back
-          </Link>
-          <h1 className="text-lg font-bold tracking-tight">Prompt Library</h1>
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-gray-800 px-4 py-3 sm:px-6">
+        <div>
+          <h1 className="text-lg font-bold tracking-tight text-white">Prompt Library</h1>
+          <p className="text-xs text-gray-500">Manage and deploy system prompts for your VAPI agent</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -217,17 +210,23 @@ export default function PromptsPage() {
                 <li key={p.id}>
                   <button
                     onClick={() => selectPrompt(p)}
-                    className={`w-full px-4 py-3 text-left transition hover:bg-gray-800 ${
-                      selected?.id === p.id ? "bg-gray-800" : ""
+                    className={`w-full px-4 py-3 text-left transition ${
+                      p.is_active
+                        ? "border-l-2 border-emerald-400 bg-emerald-950/40 hover:bg-emerald-950/60"
+                        : selected?.id === p.id
+                        ? "bg-gray-800 hover:bg-gray-800"
+                        : "hover:bg-gray-800"
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      {p.is_active && (
-                        <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" title="Active" />
-                      )}
+                    <div className="flex items-center justify-between gap-2">
                       <span className={`truncate text-sm font-medium ${p.is_active ? "text-emerald-300" : "text-gray-200"}`}>
                         {p.name}
                       </span>
+                      {p.is_active && (
+                        <span className="shrink-0 rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-400">
+                          Active
+                        </span>
+                      )}
                     </div>
                     <p className="mt-0.5 truncate text-[11px] text-gray-500">
                       {new Date(p.created_at).toLocaleDateString()}

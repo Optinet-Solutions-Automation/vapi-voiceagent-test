@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import {
   listCallTranscripts,
   getCallTranscript,
@@ -718,7 +717,7 @@ export default function TranscriptsPage() {
   // Detail view
   if (selectedId && selectedTranscript) {
     return (
-      <div className="mx-auto flex min-h-dvh max-w-3xl flex-col gap-4 px-3 py-6 pb-[env(safe-area-inset-bottom)] sm:gap-6 sm:px-4 sm:py-10">
+      <div className="flex min-h-dvh flex-col gap-4 px-3 py-6 pb-[env(safe-area-inset-bottom)] sm:gap-6 sm:px-6 sm:py-10">
         <TranscriptDetail
           transcript={selectedTranscript}
           onBack={handleBack}
@@ -731,29 +730,25 @@ export default function TranscriptsPage() {
 
   // List view
   return (
-    <div className="mx-auto flex min-h-dvh max-w-6xl flex-col gap-4 px-3 py-6 pb-[env(safe-area-inset-bottom)] sm:gap-6 sm:px-4 sm:py-10">
+    <div className="px-4 py-6 pb-[env(safe-area-inset-bottom)] sm:px-6 sm:py-8">
       {showUpload && <UploadModal onClose={() => setShowUpload(false)} onUploaded={loadData} />}
 
       {/* Header */}
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <header className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
-            Call Transcripts
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Upload, analyze, and ask questions about call transcripts
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Call Transcripts</h1>
+          <p className="mt-1 text-sm text-gray-500">Upload, analyze, and ask questions about call transcripts</p>
         </div>
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-600 px-3 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-800 self-start"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-          Back to Console
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => setShowUpload(true)}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 whitespace-nowrap"
+          >
+            + Upload Transcript
+          </button>
+        </div>
       </header>
+      <div className="space-y-4 sm:space-y-6">
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
@@ -779,12 +774,6 @@ export default function TranscriptsPage() {
           placeholder="Search transcripts..."
           className="min-w-0 flex-1 rounded-lg border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
         />
-        <button
-          onClick={() => setShowUpload(true)}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 whitespace-nowrap"
-        >
-          + Upload Transcript
-        </button>
       </div>
 
       {/* Q&A Panel */}
@@ -837,6 +826,7 @@ export default function TranscriptsPage() {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }

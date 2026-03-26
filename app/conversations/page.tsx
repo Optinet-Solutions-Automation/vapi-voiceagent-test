@@ -1,188 +1,151 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { listConversations, deleteConversation, getConversationWithMessages } from "@/lib/db";
-import type { Conversation, Message } from "@/lib/database.types";
-import type { TranscriptMessage } from "@/lib/types";
-import TranscriptPanel from "@/components/TranscriptPanel";
-import FeedbackPanel from "@/components/FeedbackPanel";
-import CallRecording from "@/components/CallRecording";
+import { useRouter } from "next/navigation";
+import { listConversations, deleteConversation, getTrackerItemByConversationId } from "@/lib/db";
+import type { Conversation } from "@/lib/database.types";
 
-type DisplayMessage = TranscriptMessage & { id?: string };
+const PAGE_SIZE = 15;
 
 export default function ConversationsPage() {
+  const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-
-  // Viewing state
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [viewingTitle, setViewingTitle] = useState<string | null>(null);
-  const [viewingCallId, setViewingCallId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [loadingConvo, setLoadingConvo] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     setLoading(true);
+    setLoadError(null);
     listConversations()
       .then(setConversations)
-      .catch(() => setConversations([]))
+      .catch((e) => { setLoadError(e?.message ?? "Failed to load conversations"); setConversations([]); })
       .finally(() => setLoading(false));
   }, []);
 
-  async function handleSelect(id: string) {
-    setLoadingConvo(true);
-    try {
-      const { conversation, messages: dbMessages } = await getConversationWithMessages(id);
-      setSelectedId(id);
-      setViewingTitle(conversation.title);
-      setViewingCallId(conversation.vapi_call_id);
-      setMessages(
-        dbMessages.map((m: Message) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          timestamp: new Date(m.created_at),
-        }))
-      );
-    } catch {
-      // silent
-    } finally {
-      setLoadingConvo(false);
-    }
-  }
-
-  function handleBack() {
-    setSelectedId(null);
-    setViewingTitle(null);
-    setViewingCallId(null);
-    setMessages([]);
-  }
+  // Reset to page 1 when filters change
+  useEffect(() => { setPage(1); }, [search, dateFrom, dateTo]);
 
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.stopPropagation();
-    if (!window.confirm("Are you sure you want to delete this conversation? This action cannot be undone.")) return;
+    if (!window.confirm("Delete this conversation? This cannot be undone.")) return;
     try {
       await deleteConversation(id);
       setConversations((prev) => prev.filter((c) => c.id !== id));
-      if (selectedId === id) handleBack();
     } catch {
       // silent
     }
   }
 
-  const filtered = search.trim()
-    ? conversations.filter((c) =>
-        c.title.toLowerCase().includes(search.toLowerCase())
-      )
-    : conversations;
+  const filtered = conversations.filter((c) => {
+    if (search.trim() && !c.title.toLowerCase().includes(search.toLowerCase())) return false;
+    const created = new Date(c.created_at);
+    if (dateFrom && created < new Date(dateFrom)) return false;
+    if (dateTo && created > new Date(dateTo + "T23:59:59")) return false;
+    return true;
+  });
 
-  // Viewing a conversation
-  if (selectedId) {
-    return (
-      <div className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-4 px-3 py-6 pb-[env(safe-area-inset-bottom)] sm:gap-6 sm:px-4 sm:py-10">
-        <header>
-          <button
-            onClick={handleBack}
-            className="mb-3 inline-flex items-center gap-1.5 text-sm text-gray-400 transition hover:text-gray-200"
-          >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            Back to Conversations
-          </button>
-          <h1 className="text-lg font-bold text-white sm:text-xl">{viewingTitle}</h1>
-        </header>
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-        {loadingConvo ? (
-          <p className="text-sm text-gray-500">Loading conversation...</p>
-        ) : (
-          <>
-            <TranscriptPanel
-              messages={messages}
-              title={`Review: ${viewingTitle}`}
-              emptyText="This conversation has no messages."
-            />
-
-            {viewingCallId && (
-              <div className="rounded-xl border border-gray-700 bg-gray-800/50 p-4 backdrop-blur sm:p-5">
-                <CallRecording vapiCallId={viewingCallId} />
-              </div>
-            )}
-
-            <FeedbackPanel conversationId={selectedId} />
-          </>
-        )}
-      </div>
-    );
-  }
-
-  // Conversation list
   return (
-    <div className="mx-auto flex min-h-dvh max-w-3xl flex-col gap-4 px-3 py-6 pb-[env(safe-area-inset-bottom)] sm:gap-6 sm:px-4 sm:py-10">
-      <header>
-        <Link
-          href="/"
-          className="mb-3 inline-flex items-center gap-1.5 text-sm text-gray-400 transition hover:text-gray-200"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          Back to Console
-        </Link>
-        <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
-          All Conversations
-        </h1>
-        <p className="mt-1 text-sm text-gray-500">
-          {conversations.length} saved conversation{conversations.length !== 1 ? "s" : ""}
-        </p>
+    <div className="flex flex-col px-4 py-6 pb-[env(safe-area-inset-bottom)] sm:px-6 sm:py-8">
+      {/* Header */}
+      <header className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Conversations</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            {filtered.length} of {conversations.length} conversation{conversations.length !== 1 ? "s" : ""}
+          </p>
+        </div>
       </header>
 
-      {/* Search */}
-      <div className="relative">
-        <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search conversations..."
-          className="w-full rounded-lg border border-gray-700 bg-gray-800/50 py-2.5 pl-10 pr-4 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
-        />
+      {/* Filters */}
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+        {/* Search */}
+        <div className="relative flex-1">
+          <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search conversations..."
+            className="w-full rounded-lg border border-gray-700 bg-gray-800/50 py-2.5 pl-10 pr-4 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+
+        {/* Date from */}
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-gray-500 uppercase tracking-wider">From</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]"
+          />
+        </div>
+
+        {/* Date to */}
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-gray-500 uppercase tracking-wider">To</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]"
+          />
+        </div>
+
+        {/* Clear filters */}
+        {(search || dateFrom || dateTo) && (
+          <button
+            onClick={() => { setSearch(""); setDateFrom(""); setDateTo(""); }}
+            className="self-end rounded-lg border border-gray-700 px-3 py-2.5 text-sm text-gray-400 transition hover:text-gray-200"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* List */}
       <div className="rounded-xl border border-gray-700 bg-gray-800/50 backdrop-blur">
         {loading && (
-          <p className="px-5 py-8 text-center text-sm text-gray-500">Loading...</p>
+          <p className="px-5 py-10 text-center text-sm text-gray-500">Loading...</p>
         )}
 
-        {!loading && filtered.length === 0 && (
-          <p className="px-5 py-8 text-center text-sm text-gray-500">
-            {search.trim() ? "No conversations match your search." : "No saved conversations yet."}
+        {!loading && loadError && (
+          <p className="px-5 py-10 text-center text-sm text-red-400">{loadError}</p>
+        )}
+
+        {!loading && !loadError && filtered.length === 0 && (
+          <p className="px-5 py-10 text-center text-sm text-gray-500">
+            {search || dateFrom || dateTo ? "No conversations match your filters." : "No saved conversations yet."}
           </p>
         )}
 
-        {filtered.map((c) => (
+        {paginated.map((c) => (
           <div
             key={c.id}
             role="button"
             tabIndex={0}
-            onClick={() => handleSelect(c.id)}
-            onKeyDown={(e) => e.key === "Enter" && handleSelect(c.id)}
-            className="flex w-full cursor-pointer items-center justify-between gap-3 border-b border-gray-700/50 px-4 py-3.5 text-left transition active:bg-gray-700/40 hover:bg-gray-700/30 last:border-b-0 sm:px-5 sm:py-3"
+            onClick={async () => { const item = await getTrackerItemByConversationId(c.id); if (item) router.push(`/tracker/item/${item.id}`); }}
+            onKeyDown={async (e) => { if (e.key === "Enter") { const item = await getTrackerItemByConversationId(c.id); if (item) router.push(`/tracker/item/${item.id}`); } }}
+            className="flex w-full cursor-pointer items-center justify-between gap-3 border-b border-gray-700/50 px-4 py-3.5 text-left transition hover:bg-gray-700/30 active:bg-gray-700/40 last:border-b-0 sm:px-5"
           >
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-gray-200">{c.title}</p>
-              <p className="text-xs text-gray-500">
+              <p className="mt-0.5 text-xs text-gray-500">
                 {new Date(c.created_at).toLocaleString()}
               </p>
             </div>
             <button
               onClick={(e) => handleDelete(e, c.id)}
-              className="shrink-0 rounded p-2 text-gray-500 transition active:bg-red-500/30 hover:bg-red-500/20 hover:text-red-400 sm:p-1"
+              className="shrink-0 rounded p-2 text-gray-500 transition hover:bg-red-500/20 hover:text-red-400 active:bg-red-500/30 sm:p-1"
               title="Delete conversation"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -192,6 +155,31 @@ export default function ConversationsPage() {
           </div>
         ))}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <p className="text-xs text-gray-500">
+            Page {page} of {totalPages} &middot; {filtered.length} results
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-400 transition hover:text-gray-200 disabled:opacity-40"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-400 transition hover:text-gray-200 disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -288,6 +288,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      call_settings: {
+        Row: {
+          id: string;
+          voice_provider: string;
+          voice_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          voice_provider: string;
+          voice_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          voice_provider?: string;
+          voice_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {};
     Functions: {};
@@ -305,3 +326,4 @@ export type TrackerReply = Database["public"]["Tables"]["tracker_replies"]["Row"
 export type CallTranscript = Database["public"]["Tables"]["call_transcripts"]["Row"];
 export type TranscriptQuestion = Database["public"]["Tables"]["transcript_questions"]["Row"];
 export type PromptLibraryItem = Database["public"]["Tables"]["prompt_library"]["Row"];
+export type CallSettings = Database["public"]["Tables"]["call_settings"]["Row"];

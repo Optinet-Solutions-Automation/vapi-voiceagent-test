@@ -32,11 +32,16 @@ export async function GET() {
   return NextResponse.json({ systemPrompt, assistant });
 }
 
-// PATCH /api/vapi-assistant — update the assistant system prompt
+// PATCH /api/vapi-assistant — update the assistant system prompt and/or voice
 export async function PATCH(req: Request) {
-  const { systemPrompt } = await req.json();
-  if (typeof systemPrompt !== "string") {
-    return NextResponse.json({ error: "systemPrompt is required" }, { status: 400 });
+  const body = await req.json();
+  const { systemPrompt, voice } = body as {
+    systemPrompt?: string;
+    voice?: { provider: string; voiceId: string };
+  };
+
+  if (systemPrompt === undefined && voice === undefined) {
+    return NextResponse.json({ error: "systemPrompt or voice is required" }, { status: 400 });
   }
 
   // First fetch the current assistant to preserve all other fields
@@ -50,17 +55,25 @@ export async function PATCH(req: Request) {
   }
 
   const assistant = await getRes.json();
-  const model = assistant?.model ?? {};
-  const existingMessages: Array<{ role: string; content: string }> =
-    model.messages ?? [];
+  const patchBody: Record<string, unknown> = {};
 
-  // Replace or insert the system message
-  const hasSystem = existingMessages.some((m) => m.role === "system");
-  const newMessages = hasSystem
-    ? existingMessages.map((m) =>
-        m.role === "system" ? { ...m, content: systemPrompt } : m
-      )
-    : [{ role: "system", content: systemPrompt }, ...existingMessages];
+  // Update system prompt if provided
+  if (typeof systemPrompt === "string") {
+    const model = assistant?.model ?? {};
+    const existingMessages: Array<{ role: string; content: string }> = model.messages ?? [];
+    const hasSystem = existingMessages.some((m) => m.role === "system");
+    const newMessages = hasSystem
+      ? existingMessages.map((m) =>
+          m.role === "system" ? { ...m, content: systemPrompt } : m
+        )
+      : [{ role: "system", content: systemPrompt }, ...existingMessages];
+    patchBody.model = { ...model, messages: newMessages };
+  }
+
+  // Update voice if provided
+  if (voice) {
+    patchBody.voice = voice;
+  }
 
   const patchRes = await fetch(`${VAPI_BASE}/assistant/${VAPI_ASSISTANT_ID}`, {
     method: "PATCH",
@@ -68,7 +81,7 @@ export async function PATCH(req: Request) {
       Authorization: `Bearer ${VAPI_PRIVATE_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ model: { ...model, messages: newMessages } }),
+    body: JSON.stringify(patchBody),
   });
 
   if (!patchRes.ok) {

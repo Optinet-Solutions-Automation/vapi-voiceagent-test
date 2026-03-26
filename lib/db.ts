@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import type { TranscriptMessage } from "./types";
-import type { CallTranscript, Comment, Conversation, Feedback, Message, PromptLibraryItem, TrackerItem, TrackerReply, TranscriptQuestion, ItemStatus } from "./database.types";
+import type { CallSettings, CallTranscript, Comment, Conversation, Feedback, Message, PromptLibraryItem, TrackerItem, TrackerReply, TranscriptQuestion, ItemStatus } from "./database.types";
 
 // --- Conversations ---
 
@@ -472,3 +472,101 @@ export async function deletePrompt(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+// --- Tracker detail helpers ---
+
+export async function getCommentById(id: string): Promise<Comment & { conversation_id: string }> {
+  const { data, error } = await supabase
+    .from("comments")
+    .select("*, messages!inner(conversation_id)")
+    .eq("id", id)
+    .single();
+
+  if (error || !data) throw new Error(error?.message ?? "Comment not found");
+  return {
+    id: data.id,
+    message_id: data.message_id,
+    parent_id: data.parent_id,
+    author: data.author,
+    content: data.content,
+    status: data.status as ItemStatus,
+    created_at: data.created_at,
+    conversation_id: (data as any).messages.conversation_id,
+  };
+}
+
+export async function getFeedbackById(id: string): Promise<Feedback> {
+  const { data, error } = await supabase
+    .from("feedback")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "Feedback not found");
+  return data;
+}
+
+export async function getTrackerItemByConversationId(conversationId: string): Promise<TrackerItem | null> {
+  const { data } = await supabase
+    .from("tracker_items")
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+export async function getTrackerItemById(id: string): Promise<TrackerItem> {
+  const { data, error } = await supabase
+    .from("tracker_items")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "Item not found");
+  return data;
+}
+
+export async function getActivePrompt(): Promise<PromptLibraryItem | null> {
+  const { data } = await supabase
+    .from("prompt_library")
+    .select("*")
+    .eq("is_active", true)
+    .maybeSingle();
+  return data ?? null;
+}
+
+export async function getCommentsByConversation(conversationId: string): Promise<Comment[]> {
+  const { data: msgs, error: msgErr } = await supabase
+    .from("messages")
+    .select("id")
+    .eq("conversation_id", conversationId);
+
+  if (msgErr) throw new Error(msgErr.message);
+  if (!msgs?.length) return [];
+
+  const messageIds = msgs.map((m) => m.id);
+
+  const { data, error } = await supabase
+    .from("comments")
+    .select("*")
+    .in("message_id", messageIds)
+    .order("created_at", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+// --- Call Settings ---
+
+export async function getCallSettings(): Promise<CallSettings | null> {
+  const { data } = await supabase
+    .from("call_settings")
+    .select("*")
+    .eq("id", "default")
+    .maybeSingle();
+  return data ?? null;
+}
+
+export async function saveCallSettings(voice_provider: string, voice_id: string): Promise<void> {
+  const { error } = await supabase
+    .from("call_settings")
+    .upsert({ id: "default", voice_provider, voice_id, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+}
