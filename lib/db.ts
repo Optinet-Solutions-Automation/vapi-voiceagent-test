@@ -1,17 +1,32 @@
 import { supabase } from "./supabase";
 import type { TranscriptMessage } from "./types";
-import type { CallSettings, CallTranscript, Comment, Conversation, Feedback, Message, PromptLibraryItem, TrackerItem, TrackerReply, TranscriptQuestion, ItemStatus } from "./database.types";
+import type { AgentConfig, CallSettings, CallTranscript, Comment, Conversation, Feedback, Message, PromptLibraryItem, TrackerItem, TrackerReply, TranscriptQuestion, ItemStatus } from "./database.types";
 
 // --- Conversations ---
 
 export async function saveConversation(
   title: string,
   transcriptMessages: TranscriptMessage[],
-  vapiCallId?: string | null
+  vapiCallId?: string | null,
+  assistantId?: string | null,
+  assistantName?: string | null,
+  tester?: string | null,
+  promptId?: string | null,
+  promptName?: string | null,
+  promptContent?: string | null
 ): Promise<string> {
   const { data: conv, error: convErr } = await supabase
     .from("conversations")
-    .insert({ title, vapi_call_id: vapiCallId ?? null })
+    .insert({
+      title,
+      vapi_call_id: vapiCallId ?? null,
+      assistant_id: assistantId ?? null,
+      assistant_name: assistantName ?? null,
+      tester: tester ?? null,
+      prompt_id: promptId ?? null,
+      prompt_name: promptName ?? null,
+      prompt_content: promptContent ?? null,
+    })
     .select("id")
     .single();
 
@@ -409,12 +424,10 @@ export async function deleteTranscriptQuestion(id: string): Promise<void> {
 
 // --- Prompt Library ---
 
-export async function listPrompts(): Promise<PromptLibraryItem[]> {
-  const { data, error } = await supabase
-    .from("prompt_library")
-    .select("*")
-    .order("created_at", { ascending: false });
-
+export async function listPrompts(assistantId?: string | null): Promise<PromptLibraryItem[]> {
+  let q = supabase.from("prompt_library").select("*").order("created_at", { ascending: false });
+  if (assistantId) q = q.eq("assistant_id", assistantId);
+  const { data, error } = await q;
   if (error) throw new Error(error.message);
   return data ?? [];
 }
@@ -422,11 +435,12 @@ export async function listPrompts(): Promise<PromptLibraryItem[]> {
 export async function createPrompt(
   name: string,
   content: string,
-  notes?: string
+  notes?: string,
+  assistantId?: string | null
 ): Promise<PromptLibraryItem> {
   const { data, error } = await supabase
     .from("prompt_library")
-    .insert({ name, content, notes: notes ?? "" })
+    .insert({ name, content, notes: notes ?? "", assistant_id: assistantId ?? null })
     .select("*")
     .single();
 
@@ -446,20 +460,15 @@ export async function updatePrompt(
   if (error) throw new Error(error.message);
 }
 
-export async function setActivePrompt(id: string): Promise<void> {
-  // Deactivate all, then activate the selected one
-  const { error: clearErr } = await supabase
-    .from("prompt_library")
-    .update({ is_active: false })
-    .neq("id", "00000000-0000-0000-0000-000000000000"); // update all rows
+export async function setActivePrompt(id: string, assistantId?: string | null): Promise<void> {
+  // Deactivate all prompts for this assistant, then activate the selected one
+  const clearQ = supabase.from("prompt_library").update({ is_active: false });
+  const cleared = assistantId
+    ? await clearQ.eq("assistant_id", assistantId)
+    : await clearQ.neq("id", "00000000-0000-0000-0000-000000000000");
+  if (cleared.error) throw new Error(cleared.error.message);
 
-  if (clearErr) throw new Error(clearErr.message);
-
-  const { error } = await supabase
-    .from("prompt_library")
-    .update({ is_active: true })
-    .eq("id", id);
-
+  const { error } = await supabase.from("prompt_library").update({ is_active: true }).eq("id", id);
   if (error) throw new Error(error.message);
 }
 
@@ -523,12 +532,10 @@ export async function getTrackerItemById(id: string): Promise<TrackerItem> {
   return data;
 }
 
-export async function getActivePrompt(): Promise<PromptLibraryItem | null> {
-  const { data } = await supabase
-    .from("prompt_library")
-    .select("*")
-    .eq("is_active", true)
-    .maybeSingle();
+export async function getActivePrompt(assistantId?: string | null): Promise<PromptLibraryItem | null> {
+  let q = supabase.from("prompt_library").select("*").eq("is_active", true);
+  if (assistantId) q = q.eq("assistant_id", assistantId);
+  const { data } = await q.maybeSingle();
   return data ?? null;
 }
 
@@ -568,5 +575,23 @@ export async function saveCallSettings(voice_provider: string, voice_id: string)
   const { error } = await supabase
     .from("call_settings")
     .upsert({ id: "default", voice_provider, voice_id, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+}
+
+// --- Agent Configs ---
+
+export async function getAgentConfig(assistantId: string): Promise<AgentConfig | null> {
+  const { data } = await supabase
+    .from("agent_configs")
+    .select("*")
+    .eq("id", assistantId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+export async function upsertAgentConfig(assistantId: string, name: string, passwordHash: string | null): Promise<void> {
+  const { error } = await supabase
+    .from("agent_configs")
+    .upsert({ id: assistantId, name, password_hash: passwordHash });
   if (error) throw new Error(error.message);
 }

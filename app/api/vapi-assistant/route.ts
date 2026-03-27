@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 
-const VAPI_ASSISTANT_ID = "509156f5-78b7-4644-901a-acbc3415472d";
+const FALLBACK_ASSISTANT_ID = "509156f5-78b7-4644-901a-acbc3415472d";
 const VAPI_PRIVATE_KEY = process.env.VAPI_PRIVATE_KEY!;
 const VAPI_BASE = "https://api.vapi.ai";
 
-// GET /api/vapi-assistant — fetch the current assistant system prompt
-export async function GET() {
-  const res = await fetch(`${VAPI_BASE}/assistant/${VAPI_ASSISTANT_ID}`, {
+// GET /api/vapi-assistant?assistantId=xxx
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const assistantId = searchParams.get("assistantId") ?? FALLBACK_ASSISTANT_ID;
+
+  const res = await fetch(`${VAPI_BASE}/assistant/${assistantId}`, {
     headers: { Authorization: `Bearer ${VAPI_PRIVATE_KEY}` },
   });
 
@@ -17,35 +20,31 @@ export async function GET() {
 
   const assistant = await res.json();
 
-  // System prompt can be in model.messages[role=system] or model.systemPrompt
   let systemPrompt: string | null = null;
-
-  const messages: Array<{ role: string; content: string }> =
-    assistant?.model?.messages ?? [];
+  const messages: Array<{ role: string; content: string }> = assistant?.model?.messages ?? [];
   const systemMsg = messages.find((m) => m.role === "system");
-  if (systemMsg) {
-    systemPrompt = systemMsg.content;
-  } else if (assistant?.model?.systemPrompt) {
-    systemPrompt = assistant.model.systemPrompt;
-  }
+  if (systemMsg) systemPrompt = systemMsg.content;
+  else if (assistant?.model?.systemPrompt) systemPrompt = assistant.model.systemPrompt;
 
   return NextResponse.json({ systemPrompt, assistant });
 }
 
-// PATCH /api/vapi-assistant — update the assistant system prompt and/or voice
+// PATCH /api/vapi-assistant — body: { assistantId?, systemPrompt?, voice? }
 export async function PATCH(req: Request) {
   const body = await req.json();
-  const { systemPrompt, voice } = body as {
+  const { assistantId: bodyId, systemPrompt, voice } = body as {
+    assistantId?: string;
     systemPrompt?: string;
     voice?: { provider: string; voiceId: string };
   };
+
+  const assistantId = bodyId ?? FALLBACK_ASSISTANT_ID;
 
   if (systemPrompt === undefined && voice === undefined) {
     return NextResponse.json({ error: "systemPrompt or voice is required" }, { status: 400 });
   }
 
-  // First fetch the current assistant to preserve all other fields
-  const getRes = await fetch(`${VAPI_BASE}/assistant/${VAPI_ASSISTANT_ID}`, {
+  const getRes = await fetch(`${VAPI_BASE}/assistant/${assistantId}`, {
     headers: { Authorization: `Bearer ${VAPI_PRIVATE_KEY}` },
   });
 
@@ -57,30 +56,21 @@ export async function PATCH(req: Request) {
   const assistant = await getRes.json();
   const patchBody: Record<string, unknown> = {};
 
-  // Update system prompt if provided
   if (typeof systemPrompt === "string") {
     const model = assistant?.model ?? {};
     const existingMessages: Array<{ role: string; content: string }> = model.messages ?? [];
     const hasSystem = existingMessages.some((m) => m.role === "system");
     const newMessages = hasSystem
-      ? existingMessages.map((m) =>
-          m.role === "system" ? { ...m, content: systemPrompt } : m
-        )
+      ? existingMessages.map((m) => m.role === "system" ? { ...m, content: systemPrompt } : m)
       : [{ role: "system", content: systemPrompt }, ...existingMessages];
     patchBody.model = { ...model, messages: newMessages };
   }
 
-  // Update voice if provided
-  if (voice) {
-    patchBody.voice = voice;
-  }
+  if (voice) patchBody.voice = voice;
 
-  const patchRes = await fetch(`${VAPI_BASE}/assistant/${VAPI_ASSISTANT_ID}`, {
+  const patchRes = await fetch(`${VAPI_BASE}/assistant/${assistantId}`, {
     method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${VAPI_PRIVATE_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${VAPI_PRIVATE_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify(patchBody),
   });
 

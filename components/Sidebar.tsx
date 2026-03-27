@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { useAgent } from "@/lib/agent-context";
 
 const NAV = [
   {
@@ -32,31 +33,16 @@ const NAV = [
       </svg>
     ),
   },
-  {
-    label: "Comments",
-    href: "/tracker",
-    icon: (
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-      </svg>
-    ),
-  },
-  {
-    label: "Call Transcripts",
-    href: "/transcripts",
-    icon: (
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-  },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const { session, setSession } = useAgent();
   function isActive(href: string) {
     if (href === "/") return pathname === "/";
+    // Tracker item pages are reached from Conversations, so highlight that tab
+    if (href === "/conversations") return pathname.startsWith("/conversations") || pathname.startsWith("/tracker");
     return pathname.startsWith(href);
   }
 
@@ -87,13 +73,28 @@ export default function Sidebar() {
     <>
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex w-56 shrink-0 flex-col border-r border-gray-800 bg-gray-900/60">
-        <div className="flex items-center gap-2 border-b border-gray-800 px-4 py-4">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-600">
-            <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-            </svg>
+        <div className="border-b border-gray-800 px-4 py-4">
+          <div className="flex items-center gap-2">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-indigo-600">
+              <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-white truncate">{session?.assistantName ?? "VOIZO"}</p>
+              {session && (
+                <p className={`text-[10px] ${session.isOwner ? "text-emerald-400" : "text-gray-500"}`}>
+                  {session.isOwner ? "Owner" : "View only"}
+                </p>
+              )}
+            </div>
           </div>
-          <span className="text-sm font-semibold text-white">VOIZO Testing Tool</span>
+          <button
+            onClick={() => setSession(null)}
+            className="mt-2 w-full rounded-md border border-gray-700 px-2 py-1 text-[11px] text-gray-400 transition hover:border-gray-600 hover:text-gray-200"
+          >
+            Switch Agent
+          </button>
         </div>
         <div className="flex-1">{navItems}</div>
       </aside>
@@ -106,7 +107,10 @@ export default function Sidebar() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
             </svg>
           </div>
-          <span className="text-sm font-semibold text-white">VOIZO Testing Tool</span>
+          <div>
+            <p className="text-sm font-semibold text-white">{session?.assistantName ?? "VOIZO"}</p>
+            {session && <p className={`text-[10px] ${session.isOwner ? "text-emerald-400" : "text-gray-500"}`}>{session.isOwner ? "Owner" : "View only"}</p>}
+          </div>
         </div>
         <button
           onClick={() => setOpen((v) => !v)}
@@ -128,6 +132,14 @@ export default function Sidebar() {
       {open && (
         <div className="lg:hidden absolute inset-x-0 top-[49px] z-50 border-b border-gray-800 bg-gray-900 shadow-xl">
           {navItems}
+          <div className="border-t border-gray-800 p-3">
+            <button
+              onClick={() => { setSession(null); setOpen(false); }}
+              className="w-full rounded-lg border border-gray-700 py-2 text-sm text-gray-400 transition hover:text-gray-200"
+            >
+              Switch Agent
+            </button>
+          </div>
         </div>
       )}
     </>

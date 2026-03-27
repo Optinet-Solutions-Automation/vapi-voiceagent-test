@@ -8,7 +8,6 @@ import {
   getFeedbackById,
   getTrackerItemById,
   getConversationWithMessages,
-  getActivePrompt,
   getCommentsByConversation,
   getReplies,
   addReply,
@@ -23,7 +22,6 @@ import type {
   Comment,
   Conversation,
   Message,
-  PromptLibraryItem,
   TrackerReply,
   ItemStatus,
 } from "@/lib/database.types";
@@ -72,7 +70,6 @@ export default function TrackerDetailPage() {
   // Core data
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [activePrompt, setActivePrompt] = useState<PromptLibraryItem | null>(null);
   const [convComments, setConvComments] = useState<Comment[]>([]);
 
   // Original item
@@ -123,11 +120,7 @@ export default function TrackerDetailPage() {
           conversationId = item.conversation_id;
         }
 
-        const [promptResult, repliesResult] = await Promise.all([
-          getActivePrompt(),
-          getReplies(kind, id),
-        ]);
-        setActivePrompt(promptResult);
+        const repliesResult = await getReplies(kind, id);
         setReplies(repliesResult);
 
         if (conversationId) {
@@ -253,6 +246,14 @@ export default function TrackerDetailPage() {
               {new Date(conversation.created_at).toLocaleString()}
             </span>
           )}
+          {conversation?.assistant_name && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 px-2.5 py-0.5 text-xs font-bold text-indigo-300">
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              {conversation.assistant_name}
+            </span>
+          )}
           <span className="text-xs text-indigo-400 font-medium">{itemAuthor}</span>
         </div>
       </header>
@@ -260,24 +261,23 @@ export default function TrackerDetailPage() {
       {/* 3-column body */}
       <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
 
-        {/* Col 1 — System Prompt */}
+        {/* Col 1 — System Prompt used during this conversation */}
         <div className="hidden lg:flex lg:w-[30%] shrink-0 flex-col border-r border-gray-800">
           <div className="border-b border-gray-800 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">System Prompt</p>
-            {activePrompt && (
-              <p className="mt-0.5 truncate text-[11px] text-emerald-400">{activePrompt.name} · Active</p>
+            {conversation?.prompt_name ? (
+              <p className="mt-0.5 truncate text-[11px] text-emerald-400">{conversation.prompt_name}</p>
+            ) : (
+              <p className="mt-0.5 text-[11px] text-gray-500">Used during this call</p>
             )}
           </div>
           <div className="flex-1 overflow-y-auto p-4">
-            {activePrompt ? (
+            {conversation?.prompt_content ? (
               <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-gray-300">
-                {activePrompt.content}
+                {conversation.prompt_content}
               </pre>
             ) : (
-              <div className="space-y-2 text-xs text-gray-500">
-                <p>No active prompt.</p>
-                <Link href="/prompts" className="text-indigo-400 hover:underline">Set one in Prompt Library →</Link>
-              </div>
+              <p className="text-xs text-gray-500">No prompt snapshot — this conversation was saved before prompt tracking was added.</p>
             )}
           </div>
         </div>

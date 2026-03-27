@@ -8,18 +8,36 @@ export type Database = {
           id: string;
           title: string;
           vapi_call_id: string | null;
+          assistant_id: string | null;
+          assistant_name: string | null;
+          tester: string | null;
+          prompt_id: string | null;
+          prompt_name: string | null;
+          prompt_content: string | null;
           created_at: string;
         };
         Insert: {
           id?: string;
           title?: string;
           vapi_call_id?: string | null;
+          assistant_id?: string | null;
+          assistant_name?: string | null;
+          tester?: string | null;
+          prompt_id?: string | null;
+          prompt_name?: string | null;
+          prompt_content?: string | null;
           created_at?: string;
         };
         Update: {
           id?: string;
           title?: string;
           vapi_call_id?: string | null;
+          assistant_id?: string | null;
+          assistant_name?: string | null;
+          tester?: string | null;
+          prompt_id?: string | null;
+          prompt_name?: string | null;
+          prompt_content?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -268,6 +286,7 @@ export type Database = {
           content: string;
           notes: string;
           is_active: boolean;
+          assistant_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -276,6 +295,7 @@ export type Database = {
           content: string;
           notes?: string;
           is_active?: boolean;
+          assistant_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -284,6 +304,28 @@ export type Database = {
           content?: string;
           notes?: string;
           is_active?: boolean;
+          assistant_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      agent_configs: {
+        Row: {
+          id: string;
+          name: string;
+          password_hash: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id: string;
+          name: string;
+          password_hash?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          password_hash?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -327,3 +369,4 @@ export type CallTranscript = Database["public"]["Tables"]["call_transcripts"]["R
 export type TranscriptQuestion = Database["public"]["Tables"]["transcript_questions"]["Row"];
 export type PromptLibraryItem = Database["public"]["Tables"]["prompt_library"]["Row"];
 export type CallSettings = Database["public"]["Tables"]["call_settings"]["Row"];
+export type AgentConfig = Database["public"]["Tables"]["agent_configs"]["Row"];
