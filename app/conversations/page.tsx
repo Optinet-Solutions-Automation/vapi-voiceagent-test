@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { listConversations, deleteConversation, getTrackerItemByConversationId } from "@/lib/db";
+import { listConversations, getTrackerItemByConversationId } from "@/lib/db";
 import type { Conversation } from "@/lib/database.types";
 
 const PAGE_SIZE = 20;
@@ -29,17 +29,6 @@ export default function ConversationsPage() {
 
   // Reset page when filters change
   useEffect(() => { setPage(1); }, [search, dateFrom, dateTo, activeAgent]);
-
-  async function handleDelete(e: React.MouseEvent, id: string) {
-    e.stopPropagation();
-    if (!window.confirm("Delete this conversation? This cannot be undone.")) return;
-    try {
-      await deleteConversation(id);
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-    } catch {
-      // silent
-    }
-  }
 
   // Build unique agent list from conversations
   const agents = Array.from(
@@ -152,11 +141,10 @@ export default function ConversationsPage() {
       <div className="rounded-xl border border-gray-700 bg-gray-800/50 backdrop-blur overflow-hidden">
         {/* Table header */}
         {!loading && !loadError && filtered.length > 0 && (
-          <div className="hidden sm:grid grid-cols-[1fr_160px_160px_40px] gap-4 border-b border-gray-700 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+          <div className="hidden sm:grid grid-cols-[1fr_160px_160px] gap-4 border-b border-gray-700 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
             <span>Date</span>
             <span>Tester</span>
             <span>Agent</span>
-            <span />
           </div>
         )}
 
@@ -183,7 +171,7 @@ export default function ConversationsPage() {
                 if (item) router.push(`/tracker/item/${item.id}`);
               }
             }}
-            className="grid grid-cols-[1fr_40px] sm:grid-cols-[1fr_160px_160px_40px] gap-4 items-center border-b border-gray-700/50 px-5 py-3.5 cursor-pointer transition hover:bg-gray-700/30 active:bg-gray-700/40 last:border-b-0"
+            className="grid grid-cols-[1fr] sm:grid-cols-[1fr_160px_160px] gap-4 items-center border-b border-gray-700/50 px-5 py-3.5 cursor-pointer transition hover:bg-gray-700/30 active:bg-gray-700/40 last:border-b-0"
           >
             {/* Date */}
             <div className="min-w-0">
@@ -220,18 +208,6 @@ export default function ConversationsPage() {
               )}
             </div>
 
-            {/* Delete */}
-            <div className="flex justify-end">
-              <button
-                onClick={(e) => handleDelete(e, c.id)}
-                className="rounded p-1.5 text-gray-600 transition hover:bg-red-500/20 hover:text-red-400"
-                title="Delete conversation"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            </div>
           </div>
         ))}
       </div>

@@ -501,10 +501,11 @@ export default function PromptsPage() {
                     </button>
                     <button
                       onClick={handleDelete}
-                      disabled={deleting}
-                      className="ml-auto text-xs text-gray-500 transition hover:text-red-400 disabled:opacity-40"
+                      disabled={deleting || selected.is_active}
+                      title={selected.is_active ? "Cannot delete the active prompt" : undefined}
+                      className="ml-auto text-xs text-gray-500 transition hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      {deleting ? "Deleting..." : "Delete"}
+                      {deleting ? "Deleting..." : selected.is_active ? "Active — cannot delete" : "Delete"}
                     </button>
                   </>
                 )}

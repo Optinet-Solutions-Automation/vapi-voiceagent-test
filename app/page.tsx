@@ -19,15 +19,13 @@ import {
 import type { PromptLibraryItem } from "@/lib/database.types";
 
 const VOICE_OPTIONS = [
-  { label: "Rachel",  provider: "11labs", voiceId: "21m00Tcm4TlvDq8ikWAM" },
-  { label: "Adam",    provider: "11labs", voiceId: "pNInz6obpgDQGcFmaJgB" },
-  { label: "Antoni",  provider: "11labs", voiceId: "ErXwobaYiN019PkySvjV" },
-  { label: "Josh",    provider: "11labs", voiceId: "TxGEqnHWrfWFTfGW9XjX" },
-  { label: "Bella",   provider: "11labs", voiceId: "EXAVITQu4vr4xnSDxMaL" },
-  { label: "Elli",    provider: "11labs", voiceId: "MF3mGyEYCl7XYWbV9V6O" },
-  { label: "Callum",  provider: "11labs", voiceId: "N2lVS1w4EtoT3dr4eOWO" },
-  { label: "Domi",    provider: "11labs", voiceId: "AZnzlk1XvdvUeBnXmlld" },
-  { label: "Fin",     provider: "11labs", voiceId: "D38z5RcWu1voky8WS1ja" },
+  { label: "Stephen – Sales and Customer Service",    provider: "11labs", voiceId: "3jR9BuQAOPMWUjWpi0ll" },
+  { label: "Mark – Dynamic, Balanced and Emotional",  provider: "11labs", voiceId: "UgBBYS2sOqTuMpoF3BR0" },
+  { label: "Mark – Natural Conversations",            provider: "11labs", voiceId: "6YQMyaUWlj0VX652cY1C" },
+  { label: "Jackson – American Tech Sales Rep",       provider: "11labs", voiceId: "2zGvynULFssveGrcP8hi" },
+  { label: "George – Natural, Full and Confident",    provider: "11labs", voiceId: "YaarrMwvJxVUpjbZ2RpC" },
+  { label: "Alex – Professional",                     provider: "11labs", voiceId: "pHqSZYhjNK8nDCPRglTL" },
+  { label: "Matthew Logovik",                         provider: "11labs", voiceId: "1IthILLNX448pH19aMvC" },
 ] as const;
 import StatusIndicator from "@/components/StatusIndicator";
 import TranscriptPanel from "@/components/TranscriptPanel";
@@ -67,8 +65,8 @@ export default function Home() {
 
   // ── Voice / call settings ────────────────────────────────────
   const [voiceProvider, setVoiceProvider] = useState("11labs");
-  const [voiceId, setVoiceId] = useState("21m00Tcm4TlvDq8ikWAM");
-  const [savedVoiceId, setSavedVoiceId] = useState("21m00Tcm4TlvDq8ikWAM");
+  const [voiceId, setVoiceId] = useState("3jR9BuQAOPMWUjWpi0ll");
+  const [savedVoiceId, setSavedVoiceId] = useState("3jR9BuQAOPMWUjWpi0ll");
   const [voiceDirty, setVoiceDirty] = useState(false);
   const [savingVoice, setSavingVoice] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -361,26 +359,27 @@ export default function Home() {
             <div className="shrink-0 border-b border-gray-800 px-4 py-4 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Call Settings</p>
               <div>
-                <label className="mb-1 block text-xs text-gray-500">Voice</label>
-                <div className="overflow-y-auto rounded-lg border border-gray-700 bg-gray-900 max-h-44">
-                  {VOICE_OPTIONS.map((v) => {
-                    const isSelected = v.voiceId === voiceId;
-                    const isSaved = v.voiceId === savedVoiceId;
-                    return (
-                      <button
-                        key={v.voiceId}
-                        disabled={isActive}
-                        onClick={() => { setVoiceProvider(v.provider); setVoiceId(v.voiceId); setVoiceDirty(v.voiceId !== savedVoiceId); }}
-                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition hover:bg-gray-800 disabled:opacity-50 ${isSelected ? "bg-indigo-900/50 text-white" : "text-gray-300"}`}
-                      >
-                        <span>{v.label}</span>
-                        {isSaved && (
-                          <span className="ml-2 shrink-0 rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">Active</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                <label className="mb-1 block text-xs text-gray-500">
+                  Voice
+                  {savedVoiceId && VOICE_OPTIONS.find(v => v.voiceId === savedVoiceId) && (
+                    <span className="ml-2 rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                      Active: {VOICE_OPTIONS.find(v => v.voiceId === savedVoiceId)!.label}
+                    </span>
+                  )}
+                </label>
+                <select
+                  value={voiceId}
+                  disabled={isActive}
+                  onChange={(e) => {
+                    const v = VOICE_OPTIONS.find(o => o.voiceId === e.target.value);
+                    if (v) { setVoiceProvider(v.provider); setVoiceId(v.voiceId); setVoiceDirty(v.voiceId !== savedVoiceId); }
+                  }}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none disabled:opacity-50 [color-scheme:dark]"
+                >
+                  {VOICE_OPTIONS.map((v) => (
+                    <option key={v.voiceId} value={v.voiceId}>{v.label}</option>
+                  ))}
+                </select>
               </div>
               {voiceError && <p className="text-xs text-red-400">{voiceError}</p>}
               <button
@@ -503,7 +502,7 @@ export default function Home() {
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                       </svg>
-                      Start Voice Test
+                      Call Voice Agent
                     </button>
                   ) : (
                     <button
