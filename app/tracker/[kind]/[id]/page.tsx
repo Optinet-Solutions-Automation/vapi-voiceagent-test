@@ -144,6 +144,8 @@ export default function TrackerDetailPage() {
   const [sending, setSending] = useState(false);
 
   const highlightRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const [isListening, setIsListening] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -271,6 +273,34 @@ export default function TrackerDetailPage() {
       await deleteReply(replyId);
       setReplies((prev) => prev.filter((r) => r.id !== replyId));
     } catch { /* silent */ }
+  }
+
+  function toggleMic() {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser. Please use Chrome or Edge.");
+      return;
+    }
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const rec = new SpeechRecognition();
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.lang = "en-US";
+    rec.onresult = (e: any) => {
+      const transcript = Array.from(e.results)
+        .slice(e.resultIndex)
+        .map((r: any) => r[0].transcript)
+        .join("");
+      setReplyInput((prev) => (prev ? prev + " " + transcript : transcript));
+    };
+    rec.onerror = () => { setIsListening(false); };
+    rec.onend = () => { setIsListening(false); };
+    rec.start();
+    recognitionRef.current = rec;
+    setIsListening(true);
   }
 
   const kindLabel = kind === "feedback" ? "Feedback" : kind === "item" ? "Conversation" : "Comment";
@@ -558,6 +588,19 @@ export default function TrackerDetailPage() {
                 className="min-w-0 flex-1 rounded-lg border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
               />
               <button
+                onClick={toggleMic}
+                title={isListening ? "Stop recording" : "Speak a comment"}
+                className={`shrink-0 rounded-lg border px-3 py-2 transition ${
+                  isListening
+                    ? "border-red-500 bg-red-500/20 text-red-400 animate-pulse"
+                    : "border-gray-600 bg-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-500"
+                }`}
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              </button>
+              <button
                 onClick={handleSend}
                 disabled={sending || !replyInput.trim()}
                 className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-40"
@@ -565,6 +608,9 @@ export default function TrackerDetailPage() {
                 {sending ? "..." : "Send"}
               </button>
             </div>
+            {isListening && (
+              <p className="mt-1.5 text-[11px] text-red-400">Listening... speak now. Click mic to stop.</p>
+            )}
           </div>
         </div>
       </div>
