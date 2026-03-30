@@ -10,7 +10,6 @@ import {
   addTrackerItem,
   getActivePrompt,
   listPrompts,
-  updatePrompt,
   createPrompt,
   setActivePrompt,
   getCallSettings,
@@ -256,17 +255,15 @@ export default function Home() {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error ?? "Failed to update VAPI assistant");
       }
-      // Save to Supabase
-      if (promptId) {
-        await updatePrompt(promptId, { content: promptContent });
-        await setActivePrompt(promptId, assistantId);
-      } else {
-        const now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-        const p = await createPrompt(`Prompt – ${now}`, promptContent, undefined, assistantId);
-        await setActivePrompt(p.id, assistantId);
-        setPromptId(p.id);
-        setPromptName(p.name);
-      }
+      // Always create a new version so previous prompts remain accessible in the picker
+      const timestamp = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const baseName = promptName
+        ? promptName.replace(/ \(.*\)$/, "") // strip old timestamp suffix if present
+        : "Prompt";
+      const p = await createPrompt(`${baseName} (${timestamp})`, promptContent, undefined, assistantId);
+      await setActivePrompt(p.id, assistantId);
+      setPromptId(p.id);
+      setPromptName(p.name);
       setPromptDirty(false);
       setPromptIsActive(true);
     } catch (e: any) {
