@@ -245,7 +245,7 @@ export default function Home() {
     setSavingPrompt(true);
     setPromptError(null);
     try {
-      // Push to VAPI
+      // Push current content to VAPI
       const res = await fetch("/api/vapi-assistant", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -255,15 +255,22 @@ export default function Home() {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error ?? "Failed to update VAPI assistant");
       }
-      // Always create a new version so previous prompts remain accessible in the picker
-      const timestamp = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-      const baseName = promptName
-        ? promptName.replace(/ \(.*\)$/, "") // strip old timestamp suffix if present
-        : "Prompt";
-      const p = await createPrompt(`${baseName} (${timestamp})`, promptContent, undefined, assistantId);
-      await setActivePrompt(p.id, assistantId);
-      setPromptId(p.id);
-      setPromptName(p.name);
+
+      if (promptDirty) {
+        // Content was edited — create a new version to preserve history
+        const timestamp = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+        const baseName = promptName
+          ? promptName.replace(/ \(.*\)$/, "")
+          : "Prompt";
+        const p = await createPrompt(`${baseName} (${timestamp})`, promptContent, undefined, assistantId);
+        await setActivePrompt(p.id, assistantId);
+        setPromptId(p.id);
+        setPromptName(p.name);
+      } else if (promptId) {
+        // No edits — just activate the selected prompt
+        await setActivePrompt(promptId, assistantId);
+      }
+
       setPromptDirty(false);
       setPromptIsActive(true);
     } catch (e: any) {
@@ -289,7 +296,7 @@ export default function Home() {
     setPromptId(p.id);
     setPromptName(p.name);
     setPromptIsActive(p.is_active);
-    setPromptDirty(!p.is_active);
+    setPromptDirty(false); // content not edited yet — dirty only after user types
     setShowPromptPicker(false);
   }
 
@@ -431,10 +438,10 @@ export default function Home() {
               )}
               <button
                 onClick={handleSavePrompt}
-                disabled={!promptDirty || isActive || savingPrompt || !promptContent.trim() || !isOwner}
+                disabled={promptIsActive && !promptDirty || isActive || savingPrompt || !promptContent.trim() || !isOwner}
                 className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-40"
               >
-                {savingPrompt ? "Saving..." : "Save Prompt"}
+                {savingPrompt ? "Saving..." : promptDirty ? "Save as New Version" : "Use This Prompt"}
               </button>
             </div>
 
