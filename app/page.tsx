@@ -59,6 +59,7 @@ export default function Home() {
   const [promptName, setPromptName] = useState<string | null>(null);
   const [promptIsActive, setPromptIsActive] = useState(false);
   const [promptDirty, setPromptDirty] = useState(false);
+  const [newPromptName, setNewPromptName] = useState("");
   const [savingPrompt, setSavingPrompt] = useState(false);
   const [promptError, setPromptError] = useState<string | null>(null);
 
@@ -259,13 +260,12 @@ export default function Home() {
       if (promptDirty) {
         // Content was edited — create a new version to preserve history
         const timestamp = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-        const baseName = promptName
-          ? promptName.replace(/ \(.*\)$/, "")
-          : "Prompt";
-        const p = await createPrompt(`${baseName} (${timestamp})`, promptContent, undefined, assistantId);
+        const finalName = newPromptName.trim() || (promptName ? promptName.replace(/ \(.*\)$/, "") : "Prompt");
+        const p = await createPrompt(`${finalName} (${timestamp})`, promptContent, undefined, assistantId);
         await setActivePrompt(p.id, assistantId);
         setPromptId(p.id);
         setPromptName(p.name);
+        setNewPromptName("");
       } else if (promptId) {
         // No edits — just activate the selected prompt
         await setActivePrompt(promptId, assistantId);
@@ -296,7 +296,8 @@ export default function Home() {
     setPromptId(p.id);
     setPromptName(p.name);
     setPromptIsActive(p.is_active);
-    setPromptDirty(false); // content not edited yet — dirty only after user types
+    setPromptDirty(false);
+    setNewPromptName("");
     setShowPromptPicker(false);
   }
 
@@ -424,7 +425,15 @@ export default function Home() {
               )}
               <textarea
                 value={promptContent}
-                onChange={(e) => { setPromptContent(e.target.value); setPromptDirty(true); }}
+                onChange={(e) => {
+                  setPromptContent(e.target.value);
+                  if (!promptDirty) {
+                    // Pre-fill name input with the base name on first edit
+                    const base = promptName ? promptName.replace(/ \(.*\)$/, "") : "Prompt";
+                    setNewPromptName(base);
+                  }
+                  setPromptDirty(true);
+                }}
                 disabled={isActive}
                 placeholder="Paste or write your system prompt here..."
                 className="flex-1 min-h-[180px] lg:min-h-0 w-full resize-none rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 font-mono text-xs text-gray-200 placeholder-gray-600 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
@@ -433,6 +442,15 @@ export default function Home() {
 
             {/* Save button */}
             <div className="shrink-0 border-t border-gray-800 px-4 py-3 space-y-2">
+              {promptDirty && (
+                <input
+                  type="text"
+                  value={newPromptName}
+                  onChange={(e) => setNewPromptName(e.target.value)}
+                  placeholder="Name this version..."
+                  className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+                />
+              )}
               {promptError && (
                 <p className="text-xs text-red-400">{promptError}</p>
               )}
