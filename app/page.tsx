@@ -134,12 +134,15 @@ export default function Home() {
     vapiRef.current = vapi;
 
     vapi.on("call-start", () => { setState("listening"); setError(null); });
-    vapi.on("call-end", () => {
+
+    function endCall() {
       setState("idle");
       if (messagesRef.current.length > 0) {
         setShowSaveModal(true);
       }
-    });
+    }
+
+    vapi.on("call-end", endCall);
     vapi.on("speech-start", () => { setState("agent-speaking"); });
     vapi.on("speech-end", () => { setState("listening"); });
 
@@ -161,9 +164,14 @@ export default function Home() {
     });
 
     vapi.on("error", (err: any) => {
-      const errorMessage = err?.message || err?.error?.message || "An unexpected error occurred";
-      setError(errorMessage);
-      setState("error");
+      // Treat unexpected disconnects (silence timeout, network drop, etc.) as an end-of-call
+      // so the user is prompted to save whatever was captured, rather than losing it.
+      endCall();
+      // Show the error non-destructively only if there was nothing to save
+      if (messagesRef.current.length === 0) {
+        const errorMessage = err?.message || err?.error?.message || "Call ended unexpectedly";
+        setError(errorMessage);
+      }
     });
 
     return () => { vapi.removeAllListeners(); };
