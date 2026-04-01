@@ -84,6 +84,22 @@ export async function deleteConversation(conversationId: string): Promise<void> 
   if (error) throw new Error(error.message);
 }
 
+export async function updateConversationTitle(id: string, title: string): Promise<void> {
+  const { error } = await supabase
+    .from("conversations")
+    .update({ title })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function setConversationFavorite(id: string, is_favorite: boolean): Promise<void> {
+  const { error } = await supabase
+    .from("conversations")
+    .update({ is_favorite })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
 // --- Comments ---
 
 export async function getCommentsForMessage(messageId: string): Promise<Comment[]> {

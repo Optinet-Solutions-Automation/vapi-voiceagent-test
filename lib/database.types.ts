@@ -14,6 +14,7 @@ export type Database = {
           prompt_id: string | null;
           prompt_name: string | null;
           prompt_content: string | null;
+          is_favorite: boolean;
           created_at: string;
         };
         Insert: {
@@ -26,6 +27,7 @@ export type Database = {
           prompt_id?: string | null;
           prompt_name?: string | null;
           prompt_content?: string | null;
+          is_favorite?: boolean;
           created_at?: string;
         };
         Update: {
@@ -38,6 +40,7 @@ export type Database = {
           prompt_id?: string | null;
           prompt_name?: string | null;
           prompt_content?: string | null;
+          is_favorite?: boolean;
           created_at?: string;
         };
         Relationships: [];

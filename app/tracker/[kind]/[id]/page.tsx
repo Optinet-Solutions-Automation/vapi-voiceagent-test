@@ -15,6 +15,8 @@ import {
   deleteReply,
   deleteComment,
   deleteConversation,
+  updateConversationTitle,
+  setConversationFavorite,
   updateCommentStatus,
   updateFeedbackStatus,
   updateTrackerItemStatus,
@@ -146,6 +148,11 @@ export default function TrackerDetailPage() {
   const highlightRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const [isListening, setIsListening] = useState(false);
+
+  // Title editing
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState("");
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     async function load() {
@@ -303,6 +310,36 @@ export default function TrackerDetailPage() {
     setIsListening(true);
   }
 
+  async function handleToggleFavorite() {
+    if (!conversation) return;
+    const next = !conversation.is_favorite;
+    setConversation((c) => c ? { ...c, is_favorite: next } : c);
+    try {
+      await setConversationFavorite(conversation.id, next);
+    } catch {
+      setConversation((c) => c ? { ...c, is_favorite: conversation.is_favorite } : c);
+    }
+  }
+
+  function startTitleEdit() {
+    if (!conversation) return;
+    setTitleInput(conversation.title);
+    setEditingTitle(true);
+    setTimeout(() => titleInputRef.current?.focus(), 0);
+  }
+
+  async function commitTitleEdit() {
+    setEditingTitle(false);
+    const trimmed = titleInput.trim();
+    if (!trimmed || !conversation || trimmed === conversation.title) return;
+    setConversation((c) => c ? { ...c, title: trimmed } : c);
+    try {
+      await updateConversationTitle(conversation.id, trimmed);
+    } catch {
+      setConversation((c) => c ? { ...c, title: conversation.title } : c);
+    }
+  }
+
   const kindLabel = kind === "feedback" ? "Feedback" : kind === "item" ? "Conversation" : "Comment";
   const currentUser = getNickname();
 
@@ -339,12 +376,47 @@ export default function TrackerDetailPage() {
           </svg>
           Back
         </button>
-        <div className="flex flex-1 flex-wrap items-baseline gap-x-4 gap-y-1">
-          <h1 className="text-base font-bold tracking-tight text-white">
-            {conversation?.title ?? kindLabel}
-          </h1>
+        <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+          {/* Favorite toggle */}
           {conversation && (
-            <span className="text-xs text-gray-500">
+            <button
+              onClick={handleToggleFavorite}
+              title={conversation.is_favorite ? "Remove from favorites" : "Mark as favorite"}
+              className={`shrink-0 transition ${conversation.is_favorite ? "text-rose-500 hover:text-rose-400" : "text-gray-600 hover:text-rose-400"}`}
+            >
+              <svg className="h-4 w-4" fill={conversation.is_favorite ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+              </svg>
+            </button>
+          )}
+
+          {/* Title (editable) */}
+          {editingTitle && conversation ? (
+            <input
+              ref={titleInputRef}
+              value={titleInput}
+              onChange={(e) => setTitleInput(e.target.value)}
+              onBlur={commitTitleEdit}
+              onKeyDown={(e) => { if (e.key === "Enter") commitTitleEdit(); if (e.key === "Escape") setEditingTitle(false); }}
+              className="min-w-0 flex-1 rounded border border-indigo-500 bg-gray-900 px-2 py-0.5 text-base font-bold text-white focus:outline-none"
+            />
+          ) : (
+            <div className="flex items-center gap-1.5 group min-w-0">
+              <h1 className="truncate text-base font-bold tracking-tight text-white">
+                {conversation?.title ?? kindLabel}
+              </h1>
+              {conversation && (
+                <button onClick={startTitleEdit} title="Rename" className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-600 hover:text-gray-300 transition">
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          )}
+
+          {conversation && (
+            <span className="shrink-0 text-xs text-gray-500">
               {new Date(conversation.created_at).toLocaleString()}
             </span>
           )}
