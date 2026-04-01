@@ -6,15 +6,22 @@ import {
   listConversations,
   getTrackerItemByConversationId,
   updateConversationTitle,
-  setConversationFavorite,
+  listConversationFavorites,
+  addConversationFavorite,
+  removeConversationFavorite,
 } from "@/lib/db";
+import { getNickname } from "@/components/Onboarding";
 import type { Conversation } from "@/lib/database.types";
 
 const PAGE_SIZE = 20;
 
 export default function ConversationsPage() {
   const router = useRouter();
+  const me = getNickname();
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  // Map of conversationId → Set of user_nicknames who favorited it
+  const [favMap, setFavMap] = useState<Map<string, Set<string>>>(new Map());
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -32,19 +39,28 @@ export default function ConversationsPage() {
   useEffect(() => {
     setLoading(true);
     setLoadError(null);
-    listConversations()
-      .then(setConversations)
-      .catch((e) => { setLoadError(e?.message ?? "Failed to load conversations"); setConversations([]); })
+    Promise.all([listConversations(), listConversationFavorites()])
+      .then(([convs, favs]) => {
+        setConversations(convs);
+        const map = new Map<string, Set<string>>();
+        for (const f of favs) {
+          if (!map.has(f.conversation_id)) map.set(f.conversation_id, new Set());
+          map.get(f.conversation_id)!.add(f.user_nickname);
+        }
+        setFavMap(map);
+      })
+      .catch((e) => { setLoadError(e?.message ?? "Failed to load"); })
       .finally(() => setLoading(false));
   }, []);
 
-  // Focus input when editing starts
   useEffect(() => {
     if (editingId) editInputRef.current?.focus();
   }, [editingId]);
 
-  // Reset page when filters change
   useEffect(() => { setPage(1); }, [search, dateFrom, dateTo, activeAgent, favoritesOnly]);
+
+  const isFavoritedByMe = (id: string) => favMap.get(id)?.has(me) ?? false;
+  const favoriteCount = (id: string) => favMap.get(id)?.size ?? 0;
 
   const agents = Array.from(
     new Map(
@@ -55,7 +71,7 @@ export default function ConversationsPage() {
   ).sort((a, b) => a[1].localeCompare(b[1]));
 
   const filtered = conversations.filter((c) => {
-    if (favoritesOnly && !c.is_favorite) return false;
+    if (favoritesOnly && !isFavoritedByMe(c.id)) return false;
     if (activeAgent && c.assistant_id !== activeAgent) return false;
     if (search.trim() && !c.title.toLowerCase().includes(search.toLowerCase())) return false;
     const created = new Date(c.created_at);
@@ -72,15 +88,32 @@ export default function ConversationsPage() {
     if (item) router.push(`/tracker/item/${item.id}`);
   }
 
-  async function handleToggleFavorite(e: React.MouseEvent, c: Conversation) {
+  async function handleToggleFavorite(e: React.MouseEvent, conversationId: string) {
     e.stopPropagation();
-    const next = !c.is_favorite;
-    setConversations((prev) => prev.map((x) => x.id === c.id ? { ...x, is_favorite: next } : x));
+    const currently = isFavoritedByMe(conversationId);
+    // Optimistic update
+    setFavMap((prev) => {
+      const next = new Map(prev);
+      const users = new Set(next.get(conversationId) ?? []);
+      if (currently) users.delete(me); else users.add(me);
+      next.set(conversationId, users);
+      return next;
+    });
     try {
-      await setConversationFavorite(c.id, next);
+      if (currently) {
+        await removeConversationFavorite(conversationId, me);
+      } else {
+        await addConversationFavorite(conversationId, me);
+      }
     } catch {
-      // Revert on failure
-      setConversations((prev) => prev.map((x) => x.id === c.id ? { ...x, is_favorite: c.is_favorite } : x));
+      // Revert
+      setFavMap((prev) => {
+        const next = new Map(prev);
+        const users = new Set(next.get(conversationId) ?? []);
+        if (currently) users.add(me); else users.delete(me);
+        next.set(conversationId, users);
+        return next;
+      });
     }
   }
 
@@ -116,7 +149,7 @@ export default function ConversationsPage() {
         </div>
       </header>
 
-      {/* Filter tabs: Favorites + Agents */}
+      {/* Filter tabs */}
       <div className="mb-4 flex flex-wrap gap-2">
         <button
           onClick={() => setFavoritesOnly((v) => !v)}
@@ -129,7 +162,7 @@ export default function ConversationsPage() {
           <svg className="h-3.5 w-3.5" fill={favoritesOnly ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
           </svg>
-          Favorites
+          My Favorites
         </button>
 
         {agents.length > 0 && (
@@ -178,29 +211,19 @@ export default function ConversationsPage() {
 
         <div className="flex flex-col gap-1">
           <label className="text-[11px] text-gray-500 uppercase tracking-wider">From</label>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]"
-          />
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+            className="rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]" />
         </div>
 
         <div className="flex flex-col gap-1">
           <label className="text-[11px] text-gray-500 uppercase tracking-wider">To</label>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]"
-          />
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+            className="rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]" />
         </div>
 
         {(search || dateFrom || dateTo) && (
-          <button
-            onClick={() => { setSearch(""); setDateFrom(""); setDateTo(""); }}
-            className="self-end rounded-lg border border-gray-700 px-3 py-2.5 text-sm text-gray-400 transition hover:text-gray-200"
-          >
+          <button onClick={() => { setSearch(""); setDateFrom(""); setDateTo(""); }}
+            className="self-end rounded-lg border border-gray-700 px-3 py-2.5 text-sm text-gray-400 transition hover:text-gray-200">
             Clear
           </button>
         )}
@@ -208,10 +231,9 @@ export default function ConversationsPage() {
 
       {/* Table */}
       <div className="rounded-xl border border-gray-700 bg-gray-800/50 backdrop-blur overflow-hidden">
-        {/* Table header */}
         {!loading && !loadError && filtered.length > 0 && (
           <div className="hidden sm:grid grid-cols-[auto_1fr_160px_160px] gap-4 border-b border-gray-700 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
-            <span className="w-5" />
+            <span className="w-6" />
             <span>Title / Date</span>
             <span>Tester</span>
             <span>Agent</span>
@@ -222,113 +244,113 @@ export default function ConversationsPage() {
         {!loading && loadError && <p className="px-5 py-10 text-center text-sm text-red-400">{loadError}</p>}
         {!loading && !loadError && filtered.length === 0 && (
           <p className="px-5 py-10 text-center text-sm text-gray-500">
-            {favoritesOnly ? "No favorite conversations yet." : search || dateFrom || dateTo || activeAgent ? "No conversations match your filters." : "No saved conversations yet."}
+            {favoritesOnly ? "You haven't favorited any conversations yet." : search || dateFrom || dateTo || activeAgent ? "No conversations match your filters." : "No saved conversations yet."}
           </p>
         )}
 
-        {paginated.map((c) => (
-          <div
-            key={c.id}
-            onClick={() => editingId !== c.id && handleRowClick(c)}
-            className="grid grid-cols-[auto_1fr] sm:grid-cols-[auto_1fr_160px_160px] gap-4 items-center border-b border-gray-700/50 px-5 py-3.5 cursor-pointer transition hover:bg-gray-700/30 active:bg-gray-700/40 last:border-b-0"
-          >
-            {/* Heart button */}
-            <button
-              onClick={(e) => handleToggleFavorite(e, c)}
-              title={c.is_favorite ? "Remove from favorites" : "Mark as favorite"}
-              className={`shrink-0 transition ${c.is_favorite ? "text-rose-500 hover:text-rose-400" : "text-gray-600 hover:text-rose-400"}`}
+        {paginated.map((c) => {
+          const myFav = isFavoritedByMe(c.id);
+          const count = favoriteCount(c.id);
+          return (
+            <div
+              key={c.id}
+              onClick={() => editingId !== c.id && handleRowClick(c)}
+              className="grid grid-cols-[auto_1fr] sm:grid-cols-[auto_1fr_160px_160px] gap-4 items-center border-b border-gray-700/50 px-5 py-3.5 cursor-pointer transition hover:bg-gray-700/30 active:bg-gray-700/40 last:border-b-0"
             >
-              <svg className="h-4 w-4" fill={c.is_favorite ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-              </svg>
-            </button>
-
-            {/* Title + date */}
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 group">
-                {editingId === c.id ? (
-                  <input
-                    ref={editInputRef}
-                    value={editingTitle}
-                    onChange={(e) => setEditingTitle(e.target.value)}
-                    onBlur={() => commitEdit(c.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") commitEdit(c.id);
-                      if (e.key === "Escape") setEditingId(null);
-                      e.stopPropagation();
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex-1 min-w-0 rounded border border-indigo-500 bg-gray-800 px-2 py-0.5 text-sm font-medium text-gray-200 focus:outline-none"
-                  />
-                ) : (
-                  <>
-                    <p className="truncate text-sm font-medium text-gray-200">{c.title}</p>
-                    <button
-                      onClick={(e) => startEditing(e, c)}
-                      title="Rename"
-                      className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-600 hover:text-gray-300 transition"
-                    >
-                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
-                  </>
+              {/* Heart */}
+              <div className="flex flex-col items-center gap-0.5">
+                <button
+                  onClick={(e) => handleToggleFavorite(e, c.id)}
+                  title={myFav ? "Remove from my favorites" : "Add to my favorites"}
+                  className={`transition ${myFav ? "text-rose-500 hover:text-rose-400" : "text-gray-600 hover:text-rose-400"}`}
+                >
+                  <svg className="h-4 w-4" fill={myFav ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                  </svg>
+                </button>
+                {count > 0 && (
+                  <span className="text-[9px] leading-none text-gray-500">{count}</span>
                 )}
               </div>
-              <p className="text-xs text-gray-500">
-                {new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                {" · "}
-                {new Date(c.created_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-              </p>
-              {/* Mobile: tester + agent */}
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 sm:hidden">
-                {c.tester && <span className="text-xs text-gray-400">{c.tester}</span>}
-                {c.assistant_name && (
-                  <span className="inline-flex items-center rounded-full bg-indigo-500/10 px-2 py-0.5 text-[11px] text-indigo-400">
+
+              {/* Title + date */}
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 group">
+                  {editingId === c.id ? (
+                    <input
+                      ref={editInputRef}
+                      value={editingTitle}
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      onBlur={() => commitEdit(c.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitEdit(c.id);
+                        if (e.key === "Escape") setEditingId(null);
+                        e.stopPropagation();
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex-1 min-w-0 rounded border border-indigo-500 bg-gray-800 px-2 py-0.5 text-sm font-medium text-gray-200 focus:outline-none"
+                    />
+                  ) : (
+                    <>
+                      <p className="truncate text-sm font-medium text-gray-200">{c.title}</p>
+                      <button
+                        onClick={(e) => startEditing(e, c)}
+                        title="Rename"
+                        className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-600 hover:text-gray-300 transition"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">
+                  {new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  {" · "}
+                  {new Date(c.created_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                </p>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 sm:hidden">
+                  {c.tester && <span className="text-xs text-gray-400">{c.tester}</span>}
+                  {c.assistant_name && (
+                    <span className="inline-flex items-center rounded-full bg-indigo-500/10 px-2 py-0.5 text-[11px] text-indigo-400">
+                      {c.assistant_name}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Tester */}
+              <div className="hidden sm:block min-w-0">
+                <span className="truncate text-sm text-gray-300">{c.tester ?? "—"}</span>
+              </div>
+
+              {/* Agent */}
+              <div className="hidden sm:block min-w-0">
+                {c.assistant_name ? (
+                  <span className="inline-flex items-center rounded-full bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-400">
                     {c.assistant_name}
                   </span>
+                ) : (
+                  <span className="text-sm text-gray-600">—</span>
                 )}
               </div>
             </div>
-
-            {/* Tester (desktop) */}
-            <div className="hidden sm:block min-w-0">
-              <span className="truncate text-sm text-gray-300">{c.tester ?? "—"}</span>
-            </div>
-
-            {/* Agent (desktop) */}
-            <div className="hidden sm:block min-w-0">
-              {c.assistant_name ? (
-                <span className="inline-flex items-center rounded-full bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-400">
-                  {c.assistant_name}
-                </span>
-              ) : (
-                <span className="text-sm text-gray-600">—</span>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between gap-2">
-          <p className="text-xs text-gray-500">
-            Page {page} of {totalPages} &middot; {filtered.length} results
-          </p>
+          <p className="text-xs text-gray-500">Page {page} of {totalPages} &middot; {filtered.length} results</p>
           <div className="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-400 transition hover:text-gray-200 disabled:opacity-40"
-            >
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+              className="rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-400 transition hover:text-gray-200 disabled:opacity-40">
               Previous
             </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-400 transition hover:text-gray-200 disabled:opacity-40"
-            >
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+              className="rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-400 transition hover:text-gray-200 disabled:opacity-40">
               Next
             </button>
           </div>

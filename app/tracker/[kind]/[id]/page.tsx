@@ -16,7 +16,9 @@ import {
   deleteComment,
   deleteConversation,
   updateConversationTitle,
-  setConversationFavorite,
+  addConversationFavorite,
+  removeConversationFavorite,
+  listConversationFavorites,
   updateCommentStatus,
   updateFeedbackStatus,
   updateTrackerItemStatus,
@@ -154,6 +156,9 @@ export default function TrackerDetailPage() {
   const [titleInput, setTitleInput] = useState("");
   const titleInputRef = useRef<HTMLInputElement>(null);
 
+  // Per-user favorite: track who favorited this conversation
+  const [favUsers, setFavUsers] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -186,13 +191,19 @@ export default function TrackerDetailPage() {
         setReplies(repliesResult);
 
         if (conversationId) {
-          const [convData, commentsData] = await Promise.all([
+          const [convData, commentsData, allFavs] = await Promise.all([
             getConversationWithMessages(conversationId),
             getCommentsByConversation(conversationId),
+            listConversationFavorites(),
           ]);
           setConversation(convData.conversation);
           setMessages(convData.messages);
           setConvComments(commentsData);
+          setFavUsers(new Set(
+            allFavs
+              .filter((f) => f.conversation_id === conversationId)
+              .map((f) => f.user_nickname)
+          ));
         }
       } catch (e: any) {
         setError(e?.message ?? "Failed to load");
@@ -312,12 +323,24 @@ export default function TrackerDetailPage() {
 
   async function handleToggleFavorite() {
     if (!conversation) return;
-    const next = !conversation.is_favorite;
-    setConversation((c) => c ? { ...c, is_favorite: next } : c);
+    const myFav = favUsers.has(currentUser);
+    setFavUsers((prev) => {
+      const next = new Set(prev);
+      if (myFav) next.delete(currentUser); else next.add(currentUser);
+      return next;
+    });
     try {
-      await setConversationFavorite(conversation.id, next);
+      if (myFav) {
+        await removeConversationFavorite(conversation.id, currentUser);
+      } else {
+        await addConversationFavorite(conversation.id, currentUser);
+      }
     } catch {
-      setConversation((c) => c ? { ...c, is_favorite: conversation.is_favorite } : c);
+      setFavUsers((prev) => {
+        const next = new Set(prev);
+        if (myFav) next.add(currentUser); else next.delete(currentUser);
+        return next;
+      });
     }
   }
 
@@ -377,17 +400,22 @@ export default function TrackerDetailPage() {
           Back
         </button>
         <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
-          {/* Favorite toggle */}
+          {/* Favorite toggle (per-user) */}
           {conversation && (
-            <button
-              onClick={handleToggleFavorite}
-              title={conversation.is_favorite ? "Remove from favorites" : "Mark as favorite"}
-              className={`shrink-0 transition ${conversation.is_favorite ? "text-rose-500 hover:text-rose-400" : "text-gray-600 hover:text-rose-400"}`}
-            >
-              <svg className="h-4 w-4" fill={conversation.is_favorite ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-              </svg>
-            </button>
+            <div className="flex flex-col items-center gap-0.5 shrink-0">
+              <button
+                onClick={handleToggleFavorite}
+                title={favUsers.has(currentUser) ? "Remove from my favorites" : "Add to my favorites"}
+                className={`transition ${favUsers.has(currentUser) ? "text-rose-500 hover:text-rose-400" : "text-gray-600 hover:text-rose-400"}`}
+              >
+                <svg className="h-4 w-4" fill={favUsers.has(currentUser) ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                </svg>
+              </button>
+              {favUsers.size > 0 && (
+                <span className="text-[9px] leading-none text-gray-500">{favUsers.size}</span>
+              )}
+            </div>
           )}
 
           {/* Title (editable) */}

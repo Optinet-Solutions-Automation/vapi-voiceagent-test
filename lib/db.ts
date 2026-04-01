@@ -92,11 +92,28 @@ export async function updateConversationTitle(id: string, title: string): Promis
   if (error) throw new Error(error.message);
 }
 
-export async function setConversationFavorite(id: string, is_favorite: boolean): Promise<void> {
+// Returns all favorite rows so the UI can derive per-user state and counts
+export async function listConversationFavorites(): Promise<{ conversation_id: string; user_nickname: string }[]> {
+  const { data, error } = await supabase
+    .from("conversation_favorites")
+    .select("conversation_id, user_nickname");
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function addConversationFavorite(conversationId: string, userNickname: string): Promise<void> {
   const { error } = await supabase
-    .from("conversations")
-    .update({ is_favorite })
-    .eq("id", id);
+    .from("conversation_favorites")
+    .insert({ conversation_id: conversationId, user_nickname: userNickname });
+  if (error) throw new Error(error.message);
+}
+
+export async function removeConversationFavorite(conversationId: string, userNickname: string): Promise<void> {
+  const { error } = await supabase
+    .from("conversation_favorites")
+    .delete()
+    .eq("conversation_id", conversationId)
+    .eq("user_nickname", userNickname);
   if (error) throw new Error(error.message);
 }
 
