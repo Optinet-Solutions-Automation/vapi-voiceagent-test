@@ -40,6 +40,13 @@ export default function Home() {
   const assistantId = session?.assistantId ?? "";
   const isOwner = session?.isOwner ?? false;
 
+  // ── Agent to call (may differ from session agent) ────────────
+  const [callAgentId, setCallAgentId] = useState(assistantId);
+  const [callAgentName, setCallAgentName] = useState(session?.assistantName ?? "");
+  const [availableAgents, setAvailableAgents] = useState<{ id: string; name: string }[]>([]);
+  // Can edit prompt/voice only when calling own agent as owner
+  const callOwner = callAgentId === assistantId && isOwner;
+
   // ── Call state ──────────────────────────────────────────────
   const [state, setState] = useState<AgentState>("idle");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -81,28 +88,41 @@ export default function Home() {
   // Keep ref in sync so the call-end listener can read current messages
   messagesRef.current = messages;
 
-  // ── Load settings when agent changes ─────────────────────────
+  // ── Fetch all agents for the selector ────────────────────────
   useEffect(() => {
-    if (!assistantId) return;
+    fetch("/api/vapi-assistants")
+      .then((r) => r.json())
+      .then((agents) => { if (Array.isArray(agents)) setAvailableAgents(agents); })
+      .catch(() => {});
+  }, []);
 
-    // Reset to blank slate while loading
+  // Sync call agent when session loads
+  useEffect(() => {
+    if (assistantId) { setCallAgentId(assistantId); setCallAgentName(session?.assistantName ?? ""); }
+  }, [assistantId]);
+
+  // ── Load settings when call agent changes ────────────────────
+  useEffect(() => {
+    if (!callAgentId) return;
+
     setPromptContent("");
     setPromptId(null);
     setPromptName(null);
     setPromptIsActive(false);
     setPromptDirty(false);
+    setNewPromptName("");
 
-    // Fetch VAPI assistant and DB in parallel; VAPI values are the fallback defaults
-    const vapiFetch = fetch(`/api/vapi-assistant?assistantId=${assistantId}`)
+    const isOwnAgent = callAgentId === assistantId;
+
+    const vapiFetch = fetch(`/api/vapi-assistant?assistantId=${callAgentId}`)
       .then((r) => r.json())
       .catch(() => ({}));
 
     Promise.all([
       vapiFetch,
-      getActivePrompt(assistantId).catch(() => null),
-      getCallSettings().catch(() => null),
+      getActivePrompt(callAgentId).catch(() => null),
+      isOwnAgent ? getCallSettings().catch(() => null) : Promise.resolve(null),
     ]).then(([vapiData, dbPrompt, dbVoice]) => {
-      // Prompt: saved DB prompt wins; otherwise show the agent's current system prompt
       if (dbPrompt) {
         setPromptContent(dbPrompt.content);
         setPromptId(dbPrompt.id);
@@ -112,7 +132,6 @@ export default function Home() {
         setPromptContent(vapiData.systemPrompt);
       }
 
-      // Voice: saved DB setting wins; otherwise use the agent's current voice
       if (dbVoice) {
         setVoiceProvider(dbVoice.voice_provider);
         setVoiceId(dbVoice.voice_id);
@@ -120,13 +139,10 @@ export default function Home() {
       } else {
         const v = vapiData?.assistant?.voice;
         if (v?.provider) setVoiceProvider(v.provider);
-        if (v?.voiceId) {
-          setVoiceId(v.voiceId);
-          setSavedVoiceId(v.voiceId);
-        }
+        if (v?.voiceId) { setVoiceId(v.voiceId); setSavedVoiceId(v.voiceId); }
       }
     });
-  }, [assistantId]);
+  }, [callAgentId]);
 
   // ── VAPI event listeners ─────────────────────────────────────
   useEffect(() => {
@@ -189,7 +205,7 @@ export default function Home() {
     try {
       const vapi = vapiRef.current;
       if (!vapi) return;
-      const call = await vapi.start(assistantId);
+      const call = await vapi.start(callAgentId);
       if (call?.id) callIdRef.current = call.id;
     } catch (err: any) {
       const msg =
@@ -215,7 +231,7 @@ export default function Home() {
       const time = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
       const tester = getNickname();
       const title = `${date}, ${time} - ${tester}`;
-      const id = await saveConversation(title, messages, callIdRef.current, assistantId, session?.assistantName ?? null, tester, promptId, promptName, promptContent);
+      const id = await saveConversation(title, messages, callIdRef.current, callAgentId, callAgentName || null, tester, promptId, promptName, promptContent);
       const trackerItem = await addTrackerItem(`New conversation saved: ${title}`, tester, id);
       router.push(`/tracker/item/${trackerItem.id}`);
     } catch (err: any) {
@@ -233,7 +249,7 @@ export default function Home() {
       const res = await fetch("/api/vapi-assistant", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assistantId, voice: { provider: voiceProvider, voiceId: voiceId } }),
+        body: JSON.stringify({ assistantId: callAgentId, voice: { provider: voiceProvider, voiceId: voiceId } }),
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
@@ -258,7 +274,7 @@ export default function Home() {
       const res = await fetch("/api/vapi-assistant", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assistantId, systemPrompt: promptContent }),
+        body: JSON.stringify({ assistantId: callAgentId, systemPrompt: promptContent }),
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
@@ -266,17 +282,15 @@ export default function Home() {
       }
 
       if (promptDirty) {
-        // Content was edited — create a new version to preserve history
         const timestamp = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
         const finalName = newPromptName.trim() || (promptName ? promptName.replace(/ \(.*\)$/, "") : "Prompt");
-        const p = await createPrompt(`${finalName} (${timestamp})`, promptContent, undefined, assistantId);
-        await setActivePrompt(p.id, assistantId);
+        const p = await createPrompt(`${finalName} (${timestamp})`, promptContent, undefined, callAgentId);
+        await setActivePrompt(p.id, callAgentId);
         setPromptId(p.id);
         setPromptName(p.name);
         setNewPromptName("");
       } else if (promptId) {
-        // No edits — just activate the selected prompt
-        await setActivePrompt(promptId, assistantId);
+        await setActivePrompt(promptId, callAgentId);
       }
 
       setPromptDirty(false);
@@ -292,7 +306,7 @@ export default function Home() {
     setShowPromptPicker(true);
     setLoadingPrompts(true);
     try {
-      const data = await listPrompts(assistantId);
+      const data = await listPrompts(callAgentId);
       setAllPrompts(data.sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0)));
     } catch { /* silent */ } finally {
       setLoadingPrompts(false);
@@ -371,6 +385,33 @@ export default function Home() {
             {/* ── Call Settings ── */}
             <div className="shrink-0 border-b border-gray-800 px-4 py-4 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Call Settings</p>
+
+              {/* Agent selector */}
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">Agent to Call</label>
+                <select
+                  value={callAgentId}
+                  disabled={isActive}
+                  onChange={(e) => {
+                    const selected = availableAgents.find((a) => a.id === e.target.value);
+                    if (selected) { setCallAgentId(selected.id); setCallAgentName(selected.name); }
+                  }}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none disabled:opacity-50 [color-scheme:dark]"
+                >
+                  {availableAgents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}{a.id === assistantId ? " (yours)" : ""}
+                    </option>
+                  ))}
+                  {availableAgents.length === 0 && (
+                    <option value={callAgentId}>{callAgentName || callAgentId}</option>
+                  )}
+                </select>
+                {callAgentId !== assistantId && (
+                  <p className="mt-1 text-[11px] text-amber-400">Viewing read-only — you can call but not edit this agent</p>
+                )}
+              </div>
+
               <div>
                 <label className="mb-1 block text-xs text-gray-500">
                   Voice
@@ -397,7 +438,7 @@ export default function Home() {
               {voiceError && <p className="text-xs text-red-400">{voiceError}</p>}
               <button
                 onClick={handleSaveVoice}
-                disabled={!voiceDirty || isActive || savingVoice || !isOwner}
+                disabled={!voiceDirty || isActive || savingVoice || !callOwner}
                 className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-40"
               >
                 {savingVoice ? "Saving..." : "Save Voice"}
@@ -464,7 +505,7 @@ export default function Home() {
               )}
               <button
                 onClick={handleSavePrompt}
-                disabled={promptIsActive && !promptDirty || isActive || savingPrompt || !promptContent.trim() || !isOwner}
+                disabled={promptIsActive && !promptDirty || isActive || savingPrompt || !promptContent.trim() || !callOwner}
                 className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-40"
               >
                 {savingPrompt ? "Saving..." : promptDirty ? "Save as New Version" : "Use This Prompt"}
