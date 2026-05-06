@@ -185,8 +185,8 @@ export default function Home() {
       endCall();
       // Show the error non-destructively only if there was nothing to save
       if (messagesRef.current.length === 0) {
-        const errorMessage = err?.message || err?.error?.message || "Call ended unexpectedly";
-        setError(errorMessage);
+        const raw = err?.message ?? err?.error?.message ?? err;
+        setError(typeof raw === "string" ? raw : "Call ended unexpectedly");
       }
     });
 
@@ -208,10 +208,10 @@ export default function Home() {
       const call = await vapi.start(callAgentId);
       if (call?.id) callIdRef.current = call.id;
     } catch (err: any) {
-      const msg =
-        err?.message?.includes("permission") || err?.message?.includes("NotAllowed")
-          ? "Microphone permission denied. Please allow microphone access and try again."
-          : err?.message || "Failed to start voice session";
+      const emsg = typeof err?.message === "string" ? err.message : "";
+      const msg = emsg.includes("permission") || emsg.includes("NotAllowed")
+        ? "Microphone permission denied. Please allow microphone access and try again."
+        : emsg || "Failed to start voice session";
       setError(msg);
       setState("error");
     }
@@ -235,7 +235,7 @@ export default function Home() {
       const trackerItem = await addTrackerItem(`New conversation saved: ${title}`, tester, id);
       router.push(`/tracker/item/${trackerItem.id}`);
     } catch (err: any) {
-      setError(err?.message ?? "Failed to save conversation");
+      setError(typeof err?.message === "string" ? err.message : "Failed to save conversation");
     } finally {
       setSaving(false);
     }
