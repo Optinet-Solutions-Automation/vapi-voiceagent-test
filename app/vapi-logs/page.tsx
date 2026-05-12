@@ -257,6 +257,10 @@ export default function VapiLogsPage() {
                   <span className="inline-flex items-center rounded-full bg-indigo-500/10 px-2 py-0.5 text-[11px] font-medium text-indigo-400">
                     {c.assistantName}
                   </span>
+                ) : c.assistantId ? (
+                  <span className="inline-flex items-center rounded-full bg-gray-700 px-2 py-0.5 font-mono text-[11px] text-gray-400" title={c.assistantId}>
+                    Agent {c.assistantId.slice(0, 8)}
+                  </span>
                 ) : (
                   <span className="text-xs text-gray-600">No agent</span>
                 )}

@@ -18,18 +18,34 @@ export async function GET(request: Request) {
   const params = new URLSearchParams({ limit });
   if (assistantId) params.set("assistantId", assistantId);
 
-  const res = await fetch(`${VAPI_BASE}/call?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${VAPI_PRIVATE_KEY}` },
-    cache: "no-store",
-  });
+  const [callsRes, assistantsRes] = await Promise.all([
+    fetch(`${VAPI_BASE}/call?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${VAPI_PRIVATE_KEY}` },
+      cache: "no-store",
+    }),
+    fetch(`${VAPI_BASE}/assistant`, {
+      headers: { Authorization: `Bearer ${VAPI_PRIVATE_KEY}` },
+      cache: "no-store",
+    }),
+  ]);
 
-  if (!res.ok) {
-    const text = await res.text();
-    return NextResponse.json({ error: text }, { status: res.status });
+  if (!callsRes.ok) {
+    const text = await callsRes.text();
+    return NextResponse.json({ error: text }, { status: callsRes.status });
   }
 
-  const data = await res.json();
+  const data = await callsRes.json();
   const calls = Array.isArray(data) ? data : [];
+
+  const assistantNameById = new Map<string, string>();
+  if (assistantsRes.ok) {
+    const assistants = await assistantsRes.json();
+    if (Array.isArray(assistants)) {
+      for (const a of assistants) {
+        if (a?.id && a?.name) assistantNameById.set(a.id, a.name);
+      }
+    }
+  }
 
   const summarized = calls.map((c: any) => {
     const startedAt = c.startedAt ?? c.createdAt ?? null;
@@ -39,13 +55,15 @@ export async function GET(request: Request) {
       const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime();
       if (Number.isFinite(ms) && ms >= 0) durationSeconds = Math.round(ms / 1000);
     }
+    const aId = c.assistantId ?? c.assistant?.id ?? null;
+    const aName = c.assistant?.name ?? (aId ? assistantNameById.get(aId) ?? null : null);
     return {
       id: c.id,
       type: c.type ?? null,
       status: c.status ?? null,
       endedReason: c.endedReason ?? null,
-      assistantId: c.assistantId ?? c.assistant?.id ?? null,
-      assistantName: c.assistant?.name ?? null,
+      assistantId: aId,
+      assistantName: aName,
       phoneNumber: c.customer?.number ?? c.phoneNumber?.number ?? null,
       startedAt,
       endedAt,

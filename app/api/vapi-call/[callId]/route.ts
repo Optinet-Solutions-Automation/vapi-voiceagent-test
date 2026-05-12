@@ -16,10 +16,16 @@ export async function GET(
     );
   }
 
-  const res = await fetch(`${VAPI_BASE}/call/${callId}`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    cache: "no-store",
-  });
+  const [res, assistantsRes] = await Promise.all([
+    fetch(`${VAPI_BASE}/call/${callId}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      cache: "no-store",
+    }),
+    fetch(`${VAPI_BASE}/assistant`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      cache: "no-store",
+    }),
+  ]);
 
   if (!res.ok) {
     const text = await res.text();
@@ -30,6 +36,16 @@ export async function GET(
   }
 
   const data = await res.json();
+
+  let resolvedAssistantName: string | null = data.assistant?.name ?? null;
+  const resolvedAssistantId: string | null = data.assistantId ?? data.assistant?.id ?? null;
+  if (!resolvedAssistantName && resolvedAssistantId && assistantsRes.ok) {
+    const assistants = await assistantsRes.json();
+    if (Array.isArray(assistants)) {
+      const match = assistants.find((a: any) => a?.id === resolvedAssistantId);
+      if (match?.name) resolvedAssistantName = match.name;
+    }
+  }
 
   const messages = Array.isArray(data.artifact?.messages)
     ? data.artifact.messages
@@ -59,8 +75,8 @@ export async function GET(
     type: data.type ?? null,
     status: data.status ?? null,
     endedReason: data.endedReason ?? null,
-    assistantId: data.assistantId ?? data.assistant?.id ?? null,
-    assistantName: data.assistant?.name ?? null,
+    assistantId: resolvedAssistantId,
+    assistantName: resolvedAssistantName,
     phoneNumber: data.customer?.number ?? data.phoneNumber?.number ?? null,
     startedAt,
     endedAt,
