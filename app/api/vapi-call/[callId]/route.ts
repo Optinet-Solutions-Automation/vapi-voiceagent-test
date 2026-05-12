@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { campaignsConfigured, getCampaignsSupabase } from "@/lib/campaigns-supabase";
 
 const VAPI_BASE = "https://api.vapi.ai";
 
@@ -70,6 +71,30 @@ export async function GET(
     if (Number.isFinite(ms) && ms >= 0) durationSeconds = Math.round(ms / 1000);
   }
 
+  let campaignId: string | null = null;
+  let campaignName: string | null = null;
+  if (campaignsConfigured) {
+    try {
+      const sb = getCampaignsSupabase();
+      const { data: link } = await sb
+        .from("calls_v2")
+        .select("campaign_id")
+        .eq("vapi_call_id", callId)
+        .maybeSingle();
+      if (link?.campaign_id) {
+        campaignId = link.campaign_id;
+        const { data: camp } = await sb
+          .from("campaigns_v2")
+          .select("name")
+          .eq("id", link.campaign_id)
+          .maybeSingle();
+        campaignName = camp?.name ?? null;
+      }
+    } catch (e) {
+      console.error("[vapi-call detail] campaign join failed:", e);
+    }
+  }
+
   return NextResponse.json({
     id: data.id,
     type: data.type ?? null,
@@ -87,5 +112,7 @@ export async function GET(
     transcript,
     recordingUrl: data.artifact?.recordingUrl ?? data.recordingUrl ?? null,
     stereoRecordingUrl: data.artifact?.stereoRecordingUrl ?? data.stereoRecordingUrl ?? null,
+    campaignId,
+    campaignName,
   });
 }

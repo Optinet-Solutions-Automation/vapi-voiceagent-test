@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 
 type CallSummary = {
   id: string;
@@ -15,6 +16,8 @@ type CallSummary = {
   durationSeconds: number | null;
   cost: number | null;
   hasRecording: boolean;
+  campaignId: string | null;
+  campaignName: string | null;
 };
 
 type TranscriptEntry = {
@@ -56,6 +59,18 @@ function formatDateTime(iso: string | null): string {
 }
 
 export default function VapiLogsPage() {
+  return (
+    <Suspense fallback={<div className="px-4 py-10 text-sm text-gray-500 sm:px-6">Loading...</div>}>
+      <VapiLogsInner />
+    </Suspense>
+  );
+}
+
+function VapiLogsInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialCampaign = searchParams.get("campaign");
+
   const [calls, setCalls] = useState<CallSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -63,6 +78,7 @@ export default function VapiLogsPage() {
   const [search, setSearch] = useState("");
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [activeStatus, setActiveStatus] = useState<string | null>(null);
+  const [activeCampaign, setActiveCampaign] = useState<string | null>(initialCampaign);
   const [page, setPage] = useState(1);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -86,7 +102,16 @@ export default function VapiLogsPage() {
   }
 
   useEffect(() => { loadCalls(); }, []);
-  useEffect(() => { setPage(1); }, [search, activeAgent, activeStatus]);
+  useEffect(() => { setPage(1); }, [search, activeAgent, activeStatus, activeCampaign]);
+
+  // Keep the URL in sync so /campaigns deep-links work and the filter survives refresh.
+  useEffect(() => {
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    if (activeCampaign) params.set("campaign", activeCampaign);
+    else params.delete("campaign");
+    const qs = params.toString();
+    router.replace(qs ? `/vapi-logs?${qs}` : "/vapi-logs", { scroll: false });
+  }, [activeCampaign]);
 
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
@@ -118,18 +143,27 @@ export default function VapiLogsPage() {
     return Array.from(set).sort();
   }, [calls]);
 
+  const campaigns = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of calls) {
+      if (c.campaignId) m.set(c.campaignId, c.campaignName ?? c.campaignId.slice(0, 8));
+    }
+    return Array.from(m.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [calls]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return calls.filter((c) => {
       if (activeAgent && c.assistantId !== activeAgent) return false;
       if (activeStatus && c.status !== activeStatus) return false;
+      if (activeCampaign && c.campaignId !== activeCampaign) return false;
       if (q) {
-        const hay = `${c.assistantName ?? ""} ${c.phoneNumber ?? ""} ${c.id} ${c.endedReason ?? ""}`.toLowerCase();
+        const hay = `${c.assistantName ?? ""} ${c.campaignName ?? ""} ${c.phoneNumber ?? ""} ${c.id} ${c.endedReason ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [calls, search, activeAgent, activeStatus]);
+  }, [calls, search, activeAgent, activeStatus, activeCampaign]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -157,26 +191,56 @@ export default function VapiLogsPage() {
       </header>
 
       {/* Filters */}
-      <div className="mb-4 flex flex-wrap gap-2">
-        <button
-          onClick={() => setActiveAgent(null)}
-          className={`rounded-full px-3 py-1 text-sm font-medium transition ${
-            activeAgent === null ? "bg-indigo-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
-          }`}
-        >
-          All Agents
-        </button>
-        {agents.map(([id, name]) => (
+      {campaigns.length > 0 && (
+        <div className="mb-3">
+          <p className="mb-1.5 text-[11px] uppercase tracking-wider text-gray-500">Campaign</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setActiveCampaign(null)}
+              className={`rounded-full px-3 py-1 text-sm font-medium transition ${
+                activeCampaign === null ? "bg-fuchsia-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+              }`}
+            >
+              All Campaigns
+            </button>
+            {campaigns.map(([id, name]) => (
+              <button
+                key={id}
+                onClick={() => setActiveCampaign(id === activeCampaign ? null : id)}
+                className={`rounded-full px-3 py-1 text-sm font-medium transition ${
+                  activeCampaign === id ? "bg-fuchsia-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+                }`}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-4">
+        <p className="mb-1.5 text-[11px] uppercase tracking-wider text-gray-500">Agent</p>
+        <div className="flex flex-wrap gap-2">
           <button
-            key={id}
-            onClick={() => setActiveAgent(id === activeAgent ? null : id)}
+            onClick={() => setActiveAgent(null)}
             className={`rounded-full px-3 py-1 text-sm font-medium transition ${
-              activeAgent === id ? "bg-indigo-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+              activeAgent === null ? "bg-indigo-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
             }`}
           >
-            {name}
+            All Agents
           </button>
-        ))}
+          {agents.map(([id, name]) => (
+            <button
+              key={id}
+              onClick={() => setActiveAgent(id === activeAgent ? null : id)}
+              className={`rounded-full px-3 py-1 text-sm font-medium transition ${
+                activeAgent === id ? "bg-indigo-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+              }`}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
       </div>
 
       {statuses.length > 0 && (
@@ -271,6 +335,14 @@ export default function VapiLogsPage() {
               <p className="mt-0.5 truncate text-sm text-gray-300">
                 {c.phoneNumber ?? <span className="text-gray-500">Web call</span>}
               </p>
+              {c.campaignName && (
+                <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-fuchsia-500/10 px-2 py-0.5 text-[10px] font-medium text-fuchsia-400">
+                  <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M3 13.5V20a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-6.5l-9 5.25L3 13.5zM21 7.5L12 13 3 7.5V6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v1.5z" />
+                  </svg>
+                  {c.campaignName}
+                </span>
+              )}
               <p className="mt-0.5 text-[11px] text-gray-500 md:hidden">{formatDateTime(c.startedAt)}</p>
             </div>
 
@@ -361,6 +433,13 @@ export default function VapiLogsPage() {
 
               {detail && (
                 <>
+                  {detail.campaignName && (
+                    <div className="rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-2 text-sm">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-fuchsia-400">Campaign</p>
+                      <p className="mt-0.5 text-fuchsia-100">{detail.campaignName}</p>
+                    </div>
+                  )}
+
                   {/* Meta grid */}
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
