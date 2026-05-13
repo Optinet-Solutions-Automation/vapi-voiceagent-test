@@ -372,8 +372,41 @@ export default function Home() {
 
         {/* Page header */}
         <header className="shrink-0 border-b border-gray-800 px-4 py-4 sm:px-6">
-          <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">Call Dashboard</h1>
-          <p className="mt-0.5 text-sm text-gray-500">Run voice tests and review transcripts in real time</p>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">Call Dashboard</h1>
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+              {callAgentName && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-2.5 py-1 font-medium text-indigo-300">
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                  Agent: <span className="font-semibold">{callAgentName}</span>
+                </span>
+              )}
+              {promptName && (
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium ${
+                    promptIsActive && !promptDirty
+                      ? "bg-emerald-500/10 text-emerald-300"
+                      : "bg-gray-700/60 text-gray-300"
+                  }`}
+                  title={promptIsActive && !promptDirty ? "Active prompt for this agent" : "Prompt loaded but not active"}
+                >
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Prompt: <span className="font-semibold">{promptName}</span>
+                  {promptDirty && <span className="ml-0.5 text-amber-400">(unsaved)</span>}
+                </span>
+              )}
+              {!promptName && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-gray-700/40 px-2.5 py-1 text-gray-500">
+                  No prompt loaded
+                </span>
+              )}
+            </div>
+          </div>
+          <p className="mt-1 text-sm text-gray-500">Run voice tests and review transcripts in real time</p>
         </header>
 
         {/* Body */}
