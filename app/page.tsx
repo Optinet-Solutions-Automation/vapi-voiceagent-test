@@ -20,7 +20,6 @@ import type { PromptLibraryItem } from "@/lib/database.types";
 const VOICE_OPTIONS = [
   { label: "Stephen – Sales and Customer Service",    provider: "11labs", voiceId: "3jR9BuQAOPMWUjWpi0ll" },
   { label: "Mark – Dynamic, Balanced and Emotional",  provider: "11labs", voiceId: "UgBBYS2sOqTuMpoF3BR0" },
-  { label: "Mark – Natural Conversations",            provider: "11labs", voiceId: "6YQMyaUWlj0VX652cY1C" },
   { label: "Jackson – American Tech Sales Rep",       provider: "11labs", voiceId: "2zGvynULFssveGrcP8hi" },
   { label: "George – Natural, Full and Confident",    provider: "11labs", voiceId: "YaarrMwvJxVUpjbZ2RpC" },
   { label: "Alex – Professional",                     provider: "11labs", voiceId: "pHqSZYhjNK8nDCPRglTL" },
