@@ -36,6 +36,7 @@ const VOICE_OPTIONS = [
 import StatusIndicator from "@/components/StatusIndicator";
 import TranscriptPanel from "@/components/TranscriptPanel";
 import Onboarding, { useOnboarding, getNickname } from "@/components/Onboarding";
+import AssistantSettingsDrawer from "@/components/AssistantSettingsDrawer";
 
 
 type DisplayMessage = TranscriptMessage & { id?: string };
@@ -89,6 +90,9 @@ export default function Home() {
   const [showPromptPicker, setShowPromptPicker] = useState(false);
   const [allPrompts, setAllPrompts] = useState<PromptLibraryItem[]>([]);
   const [loadingPrompts, setLoadingPrompts] = useState(false);
+
+  // ── Assistant settings drawer ─────────────────────────────────
+  const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
 
   const isActive = state === "connecting" || state === "listening" || state === "agent-speaking";
 
@@ -334,6 +338,13 @@ export default function Home() {
     <>
       {showOnboarding && <Onboarding onComplete={markComplete} />}
 
+      <AssistantSettingsDrawer
+        open={showSettingsDrawer}
+        onClose={() => setShowSettingsDrawer(false)}
+        assistantId={callAgentId}
+        assistantName={callAgentName}
+      />
+
       {/* ── Save Conversation Modal ── */}
       {showSaveModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -482,6 +493,18 @@ export default function Home() {
                 className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-40"
               >
                 {savingVoice ? "Saving..." : "Save Voice"}
+              </button>
+
+              <button
+                onClick={() => setShowSettingsDrawer(true)}
+                disabled={isActive || !callAgentId}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-700 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-800 disabled:opacity-40"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Assistant Settings
               </button>
             </div>
 
