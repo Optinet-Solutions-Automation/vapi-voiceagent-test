@@ -68,6 +68,8 @@ const ALLOWED_FIELDS = new Set([
   "responseDelaySeconds",
   "backgroundSound",
   "server",
+  "serverMessages",
+  "monitorPlan",
   "artifactPlan",
   "voicemailDetection",
   "analysisPlan",

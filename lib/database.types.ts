@@ -369,6 +369,141 @@ export type Database = {
         };
         Relationships: [];
       };
+      listener_handlers: {
+        Row: {
+          id: string;
+          name: string;
+          intent_key: string;
+          description: string;
+          response_template: string;
+          action_type: "answer" | "send_sms" | "give_offer" | "end_call" | "ignore";
+          enabled: boolean;
+          priority: number;
+          mode: "tool" | "listener" | "both";
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          intent_key: string;
+          description?: string;
+          response_template?: string;
+          action_type?: "answer" | "send_sms" | "give_offer" | "end_call" | "ignore";
+          enabled?: boolean;
+          priority?: number;
+          mode?: "tool" | "listener" | "both";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          intent_key?: string;
+          description?: string;
+          response_template?: string;
+          action_type?: "answer" | "send_sms" | "give_offer" | "end_call" | "ignore";
+          enabled?: boolean;
+          priority?: number;
+          mode?: "tool" | "listener" | "both";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      lab_call_events: {
+        Row: {
+          id: number;
+          call_id: string;
+          event_type: string;
+          role: string | null;
+          content: string | null;
+          intent_key: string | null;
+          confidence: number | null;
+          handler_id: string | null;
+          action_type: string | null;
+          utterance_at: string | null;
+          received_at: string;
+          classified_at: string | null;
+          injected_at: string | null;
+          latency_ms: number | null;
+          meta: Record<string, unknown> | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          call_id: string;
+          event_type: string;
+          role?: string | null;
+          content?: string | null;
+          intent_key?: string | null;
+          confidence?: number | null;
+          handler_id?: string | null;
+          action_type?: string | null;
+          utterance_at?: string | null;
+          received_at?: string;
+          classified_at?: string | null;
+          injected_at?: string | null;
+          latency_ms?: number | null;
+          meta?: Record<string, unknown> | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          call_id?: string;
+          event_type?: string;
+          role?: string | null;
+          content?: string | null;
+          intent_key?: string | null;
+          confidence?: number | null;
+          handler_id?: string | null;
+          action_type?: string | null;
+          utterance_at?: string | null;
+          received_at?: string;
+          classified_at?: string | null;
+          injected_at?: string | null;
+          latency_ms?: number | null;
+          meta?: Record<string, unknown> | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      lab_settings: {
+        Row: {
+          id: string;
+          lab_assistant_id: string | null;
+          short_prompt: string | null;
+          router_model: string;
+          confidence_threshold: number;
+          injection_cooldown_ms: number;
+          trigger_response: boolean;
+          server_url_override: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          lab_assistant_id?: string | null;
+          short_prompt?: string | null;
+          router_model?: string;
+          confidence_threshold?: number;
+          injection_cooldown_ms?: number;
+          trigger_response?: boolean;
+          server_url_override?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          lab_assistant_id?: string | null;
+          short_prompt?: string | null;
+          router_model?: string;
+          confidence_threshold?: number;
+          injection_cooldown_ms?: number;
+          trigger_response?: boolean;
+          server_url_override?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {};
     Functions: {};
@@ -389,3 +524,6 @@ export type TranscriptQuestion = Database["public"]["Tables"]["transcript_questi
 export type PromptLibraryItem = Database["public"]["Tables"]["prompt_library"]["Row"];
 export type CallSettings = Database["public"]["Tables"]["call_settings"]["Row"];
 export type AgentConfig = Database["public"]["Tables"]["agent_configs"]["Row"];
+export type ListenerHandler = Database["public"]["Tables"]["listener_handlers"]["Row"];
+export type LabCallEvent = Database["public"]["Tables"]["lab_call_events"]["Row"];
+export type LabSettings = Database["public"]["Tables"]["lab_settings"]["Row"];
