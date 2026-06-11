@@ -25,10 +25,22 @@ export function getVapi(): any {
 export function vapiErrorText(err: any, fallback: string): string {
   const cand = err?.message ?? err?.error?.message ?? err?.errorMsg ?? err?.msg ?? err;
   if (typeof cand === "string" && cand) return cand;
+  // e.g. err.message = {type:"ejected", msg:"Meeting has ended"} — drill one level
+  const inner = cand?.msg ?? cand?.message ?? cand?.errorMsg;
+  if (typeof inner === "string" && inner) return inner;
   try {
     const s = JSON.stringify(cand);
     return s && s !== "{}" ? s : fallback;
   } catch {
     return fallback;
   }
+}
+
+// When VAPI terminates a call server-side (silence timeout, end-call control,
+// agent hangup), Daily ejects the browser participant and the SDK surfaces it
+// as an "error" — it's actually a normal end of call.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function isBenignCallEnd(err: any): boolean {
+  const text = vapiErrorText(err, "");
+  return /meeting has ended|ejected/i.test(text);
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getVapi, vapiErrorText } from "@/lib/vapi";
+import { getVapi, vapiErrorText, isBenignCallEnd } from "@/lib/vapi";
 import { useAgent } from "@/lib/agent-context";
 import { AgentState, TranscriptMessage } from "@/lib/types";
 import {
@@ -180,7 +180,7 @@ export default function Home() {
       // so the user is prompted to save whatever was captured, rather than losing it.
       endCall();
       // Show the error non-destructively only if there was nothing to save
-      if (messagesRef.current.length === 0) {
+      if (messagesRef.current.length === 0 && !isBenignCallEnd(err)) {
         setError(vapiErrorText(err, "Call ended unexpectedly"));
       }
     });

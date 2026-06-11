@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getVapi, vapiErrorText as errText } from "@/lib/vapi";
+import { getVapi, vapiErrorText as errText, isBenignCallEnd } from "@/lib/vapi";
 import { AgentState, TranscriptMessage } from "@/lib/types";
 import StatusIndicator from "@/components/StatusIndicator";
 import TranscriptPanel from "@/components/TranscriptPanel";
@@ -54,7 +54,11 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
     vapi.on("error", (err: any) => {
       setState("idle");
       onCallEnded();
-      setError(errText(err, "Call ended unexpectedly"));
+      // VAPI ending the call (silence timeout, end-call control) surfaces as an
+      // ejection "error" — that's a normal end, not something to alarm about.
+      if (!isBenignCallEnd(err)) {
+        setError(errText(err, "Call ended unexpectedly"));
+      }
     });
 
     return () => {
