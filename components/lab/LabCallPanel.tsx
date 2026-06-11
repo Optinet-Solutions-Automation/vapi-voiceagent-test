@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getVapi } from "@/lib/vapi";
+import { getVapi, vapiErrorText as errText } from "@/lib/vapi";
 import { AgentState, TranscriptMessage } from "@/lib/types";
 import StatusIndicator from "@/components/StatusIndicator";
 import TranscriptPanel from "@/components/TranscriptPanel";
@@ -54,7 +54,7 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
     vapi.on("error", (err: any) => {
       setState("idle");
       onCallEnded();
-      setError(err?.message || err?.error?.message || "Call ended unexpectedly");
+      setError(errText(err, "Call ended unexpectedly"));
     });
 
     return () => {
@@ -72,10 +72,11 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
       const call = await vapi.start(assistantId);
       if (call?.id) onCallStarted(call.id);
     } catch (err: any) {
+      const raw = errText(err, "Failed to start call");
       const msg =
-        err?.message?.includes("permission") || err?.message?.includes("NotAllowed")
+        raw.includes("permission") || raw.includes("NotAllowed")
           ? "Microphone permission denied."
-          : err?.message || "Failed to start call";
+          : raw;
       setError(msg);
       setState("error");
     }

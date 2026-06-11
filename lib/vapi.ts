@@ -18,3 +18,17 @@ export function getVapi(): any {
   }
   return vapiInstance;
 }
+
+// VAPI SDK error events can be plain objects like {type, msg, details} —
+// rendering one as a React child crashes the app, so always coerce to string.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function vapiErrorText(err: any, fallback: string): string {
+  const cand = err?.message ?? err?.error?.message ?? err?.errorMsg ?? err?.msg ?? err;
+  if (typeof cand === "string" && cand) return cand;
+  try {
+    const s = JSON.stringify(cand);
+    return s && s !== "{}" ? s : fallback;
+  } catch {
+    return fallback;
+  }
+}
