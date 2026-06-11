@@ -131,7 +131,7 @@ async function handleToolCalls(
   const results: Array<{ toolCallId: string; result: string }> = [];
 
   let handlers: ListenerHandler[] = [];
-  let routerModel = "gpt-5.5-mini";
+  let routerModel = "gpt-5.4-mini";
   try {
     const [hs, settings] = await Promise.all([listHandlers(), getLabSettings()]);
     handlers = hs.filter((h) => h.enabled && (h.mode === "tool" || h.mode === "both"));

@@ -7,7 +7,7 @@ const inputCls =
   "w-full rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none";
 
 export default function LabSettingsCard() {
-  const [routerModel, setRouterModel] = useState("gpt-5.5-mini");
+  const [routerModel, setRouterModel] = useState("gpt-5.4-mini");
   const [threshold, setThreshold] = useState(0.7);
   const [cooldown, setCooldown] = useState(4000);
   const [triggerResponse, setTriggerResponse] = useState(true);
@@ -33,7 +33,7 @@ export default function LabSettingsCard() {
     setError(null);
     try {
       await saveLabSettings({
-        router_model: routerModel.trim() || "gpt-5.5-mini",
+        router_model: routerModel.trim() || "gpt-5.4-mini",
         confidence_threshold: threshold,
         injection_cooldown_ms: cooldown,
         trigger_response: triggerResponse,

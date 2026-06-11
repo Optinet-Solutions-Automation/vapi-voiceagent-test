@@ -43,7 +43,7 @@ create table public.lab_settings (
   id text primary key default 'default',
   lab_assistant_id text,
   short_prompt text,
-  router_model text not null default 'gpt-5.5-mini',
+  router_model text not null default 'gpt-5.4-mini',
   confidence_threshold numeric not null default 0.7,
   injection_cooldown_ms int not null default 4000,
   trigger_response boolean not null default true,
