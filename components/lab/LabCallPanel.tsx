@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getVapi, vapiErrorText as errText, isBenignCallEnd } from "@/lib/vapi";
 import { AgentState, TranscriptMessage } from "@/lib/types";
+import { listHandlers } from "@/lib/lab-db";
 import StatusIndicator from "@/components/StatusIndicator";
 import TranscriptPanel from "@/components/TranscriptPanel";
 
@@ -16,7 +17,13 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
   const [state, setState] = useState<AgentState>("idle");
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [clientName, setClientName] = useState("");
   const vapiRef = useRef<ReturnType<typeof getVapi> | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("lab_client_name");
+    if (saved) setClientName(saved);
+  }, []);
 
   const isActive = state === "connecting" || state === "listening" || state === "agent-speaking";
 
@@ -73,7 +80,25 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
     try {
       const vapi = vapiRef.current;
       if (!vapi) return;
-      const call = await vapi.start(assistantId);
+      localStorage.setItem("lab_client_name", clientName);
+
+      // The opening line lives in the Organizer (intent_key "first_message")
+      // so it's editable like any other handler; {{name}} is personalized here.
+      let overrides: Record<string, unknown> | undefined;
+      try {
+        const handlers = await listHandlers();
+        const fm = handlers.find((h) => h.intent_key === "first_message" && h.enabled);
+        if (fm?.response_template) {
+          const rendered = fm.response_template
+            .replace(/\{\{\s*name\s*\}\}/gi, clientName.trim() || "there")
+            .replace(/\s{2,}/g, " ");
+          overrides = { firstMessage: rendered, firstMessageMode: "assistant-speaks-first" };
+        }
+      } catch {
+        /* no handler / DB hiccup → fall back to the assistant's own first message */
+      }
+
+      const call = await vapi.start(assistantId, overrides);
       if (call?.id) onCallStarted(call.id);
     } catch (err: any) {
       const raw = errText(err, "Failed to start call");
@@ -84,7 +109,7 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
       setError(msg);
       setState("error");
     }
-  }, [assistantId]);
+  }, [assistantId, clientName]);
 
   const handleStop = useCallback(() => {
     vapiRef.current?.stop();
@@ -99,6 +124,17 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
           <p className="text-[11px] text-gray-500">Talk to the lab agent from the browser.</p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex flex-col">
+            <label className="text-[10px] text-gray-500">Client Name</label>
+            <input
+              value={clientName}
+              onChange={(e) => setClientName(e.target.value)}
+              disabled={isActive}
+              placeholder="Chris"
+              title='Fills {{name}} in the "First Message" handler'
+              className="w-28 rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
+            />
+          </div>
           <StatusIndicator state={state} />
           {!isActive ? (
             <button

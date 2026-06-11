@@ -10,6 +10,18 @@ const sb = createClient(
 );
 
 const handlers = [
+  // ── Special: call opening (not routed — read at call start) ──
+  {
+    name: "First Message (call opening)",
+    intent_key: "first_message",
+    description:
+      "SPECIAL: not routed — this template is spoken as the agent's opening line when the call starts. Use {{name}} for the client's name.",
+    response_template:
+      "Hi {{name}}, this is Tom from Lucky Seven. I saw you registered an account recently at Lucky7even.com — does that sound familiar?",
+    action_type: "answer",
+    priority: 0,
+    mode: "both",
+  },
   // ── Safety-critical (highest priority — these MUST fire reliably) ──
   {
     name: "Gambling Problem",

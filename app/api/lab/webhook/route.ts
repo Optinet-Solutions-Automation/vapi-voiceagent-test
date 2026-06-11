@@ -134,7 +134,12 @@ async function handleToolCalls(
   let routerModel = "gpt-5.4-mini";
   try {
     const [hs, settings] = await Promise.all([listHandlers(), getLabSettings()]);
-    handlers = hs.filter((h) => h.enabled && (h.mode === "tool" || h.mode === "both"));
+    handlers = hs.filter(
+      (h) =>
+        h.enabled &&
+        h.intent_key !== "first_message" && // special: opening line, never routed
+        (h.mode === "tool" || h.mode === "both")
+    );
     if (settings?.router_model) routerModel = settings.router_model;
   } catch (e) {
     console.error("[lab webhook] failed to load handlers/settings:", e);
@@ -253,7 +258,10 @@ async function handleTranscript(
     const [s, hs] = await Promise.all([getLabSettings(), listHandlers()]);
     settings = s;
     handlers = hs.filter(
-      (h) => h.enabled && (h.mode === "listener" || h.mode === "both")
+      (h) =>
+        h.enabled &&
+        h.intent_key !== "first_message" && // special: opening line, never routed
+        (h.mode === "listener" || h.mode === "both")
     );
   } catch (e) {
     await log({
