@@ -29,7 +29,14 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-  const webhookUrl = `${base.replace(/\/+$/, "")}/api/lab/webhook`;
+  // Users tend to paste full page URLs (e.g. .../listener-lab) — keep only the origin.
+  let origin: string;
+  try {
+    origin = new URL(base.includes("://") ? base : `https://${base}`).origin;
+  } catch {
+    return NextResponse.json({ error: `Invalid webhook base URL: ${base}` }, { status: 400 });
+  }
+  const webhookUrl = `${origin}/api/lab/webhook`;
 
   // GET current assistant to preserve model.messages etc.
   const getRes = await fetch(`${VAPI_BASE}/assistant/${assistantId}`, {
