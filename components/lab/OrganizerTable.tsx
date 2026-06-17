@@ -315,7 +315,7 @@ export default function OrganizerTable() {
 
       {/* Add/Edit modal */}
       {draft && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setDraft(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setDraft(null)}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
             onClick={(e) => e.stopPropagation()}
