@@ -7,6 +7,7 @@ import {
   getLabSettings,
   insertLabEvent,
   getLastInjectedEvent,
+  getRecentTurns,
 } from "@/lib/lab-db";
 import { classifyUtterance } from "@/lib/lab-router";
 import {
@@ -244,6 +245,10 @@ async function handleTranscript(
   const utteranceAt =
     typeof message.timestamp === "number" ? new Date(message.timestamp) : new Date(receivedAt);
 
+  // Grab prior turns BEFORE logging this one, so the router classifies the
+  // utterance in conversational context (prevents keyword-only mismatches).
+  const recentTurns = await getRecentTurns(callId, 6).catch(() => []);
+
   await log({
     call_id: callId,
     event_type: "utterance",
@@ -305,7 +310,7 @@ async function handleTranscript(
   // Classify
   let cls;
   try {
-    cls = await classifyUtterance(utterance, [], handlers, settings.router_model);
+    cls = await classifyUtterance(utterance, recentTurns, handlers, settings.router_model);
   } catch (e) {
     await log({
       call_id: callId,

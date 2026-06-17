@@ -81,6 +81,22 @@ export async function listLabCallEvents(callId: string, afterId = 0): Promise<La
   return data ?? [];
 }
 
+/** Recent conversation turns for a call, oldest-first, as "Customer:/Agent:" lines.
+ *  Gives the router LLM context so a keyword can't hijack the intent. */
+export async function getRecentTurns(callId: string, limit = 6): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("event_type, content")
+    .eq("call_id", callId)
+    .in("event_type", ["utterance", "injected"])
+    .order("id", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? [])
+    .reverse()
+    .map((e) => (e.event_type === "utterance" ? "Customer: " : "Agent: ") + (e.content ?? ""));
+}
+
 export async function getLastInjectedEvent(callId: string): Promise<LabCallEvent | null> {
   const { data, error } = await supabase
     .from("lab_call_events")

@@ -114,6 +114,18 @@ const handlers = [
     priority: 14,
     mode: "both",
   },
+  {
+    name: "Cannot Act Now / Offer Timing",
+    intent_key: "cant_act_now",
+    description:
+      "Customer can't log in or act right now or for a while (busy, away, no access for days) and is really asking whether the offer still stands or what happens to it — this is about TIMING of the offer, NOT a technical login error.",
+    response_template:
+      "Reassure them the free spins are already credited to their account, so they'll be waiting when they log in. If they ask whether the today-only window still applies, don't guess — offer to text them the full details so they have everything in writing.",
+    action_type: "answer",
+    delivery: "reword",
+    priority: 16,
+    mode: "both",
+  },
   // ── Q&A knowledge (only surfaces when asked) ──
   {
     name: "Wagering Requirements",
@@ -201,7 +213,7 @@ const handlers = [
     name: "Login Help",
     intent_key: "login_help",
     description:
-      "Customer says they cannot log in, forgot their password, or have account access trouble.",
+      "Customer reports a TECHNICAL problem accessing their account — forgot password, password not working, account locked, getting an error when logging in. NOT about offer timing, being busy, or being unable to log in until later.",
     response_template:
       "Point them to the live chat support team on the website, or walk them through the reset-password option on the login page. Do not make account changes yourself.",
     action_type: "answer",
