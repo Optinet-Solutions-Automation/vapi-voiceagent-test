@@ -17,7 +17,7 @@ type Run = {
   avgLatencyMs: number | null;
 };
 
-type DrawerName = "config" | "organizer" | null;
+type DrawerName = "config" | "organizer" | "logs" | null;
 
 export default function ListenerLabPage() {
   const [assistantId, setAssistantId] = useState("");
@@ -119,6 +119,18 @@ export default function ListenerLabPage() {
               </span>
             )}
           </button>
+          <button
+            onClick={() => {
+              refreshRuns();
+              setOpenDrawer("logs");
+            }}
+            className={tabBtn}
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Logs
+          </button>
         </div>
       </header>
 
@@ -145,57 +157,6 @@ export default function ListenerLabPage() {
           &ldquo;Configure for Lab&rdquo; before starting a call.
         </div>
       )}
-
-      {/* Past runs */}
-      <div className="rounded-xl border border-gray-700 bg-gray-800/50 overflow-hidden">
-        <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold text-white">Past Runs</h2>
-            <p className="text-[11px] text-gray-500">
-              Click a run to replay its listener timeline in the monitor above.
-            </p>
-          </div>
-          <button
-            onClick={refreshRuns}
-            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 transition hover:bg-gray-700"
-          >
-            Refresh
-          </button>
-        </div>
-
-        {runs.length === 0 && (
-          <p className="px-4 py-8 text-center text-sm text-gray-500">
-            No lab runs yet — start a test call.
-          </p>
-        )}
-
-        {runs.map((r) => (
-          <button
-            key={r.callId}
-            onClick={() => setViewedCallId(r.callId)}
-            className={`flex w-full flex-wrap items-center gap-3 border-b border-gray-700/50 px-4 py-2.5 text-left transition last:border-b-0 hover:bg-gray-700/30 ${
-              viewedCallId === r.callId ? "bg-gray-700/40" : ""
-            }`}
-          >
-            <span className="font-mono text-[11px] text-gray-500">{r.callId.slice(0, 8)}…</span>
-            <span className="text-xs text-gray-300">
-              {new Date(r.startedAt).toLocaleString("en-US", {
-                month: "short",
-                day: "numeric",
-                hour: "numeric",
-                minute: "2-digit",
-              })}
-            </span>
-            <span className="text-[11px] text-gray-500">{r.events} events</span>
-            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
-              {r.injections} injections
-            </span>
-            {r.avgLatencyMs != null && (
-              <span className="text-[11px] font-semibold text-emerald-400">avg {r.avgLatencyMs} ms</span>
-            )}
-          </button>
-        ))}
-      </div>
 
       {/* ── Config drawers (hidden by default) ── */}
       <Drawer
@@ -224,6 +185,58 @@ export default function ListenerLabPage() {
         width="max-w-4xl"
       >
         <OrganizerTable />
+      </Drawer>
+
+      <Drawer
+        open={openDrawer === "logs"}
+        onClose={() => setOpenDrawer(null)}
+        title="Logs"
+        subtitle="Past test calls — click one to replay its listener timeline in the monitor"
+        width="max-w-xl"
+      >
+        <div className="mb-3 flex justify-end">
+          <button
+            onClick={refreshRuns}
+            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 transition hover:bg-gray-700"
+          >
+            Refresh
+          </button>
+        </div>
+        {runs.length === 0 ? (
+          <p className="py-8 text-center text-sm text-gray-500">No lab runs yet — start a test call.</p>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-gray-700">
+            {runs.map((r) => (
+              <button
+                key={r.callId}
+                onClick={() => {
+                  setViewedCallId(r.callId);
+                  setOpenDrawer(null);
+                }}
+                className={`flex w-full flex-wrap items-center gap-3 border-b border-gray-700/50 px-4 py-2.5 text-left transition last:border-b-0 hover:bg-gray-700/30 ${
+                  viewedCallId === r.callId ? "bg-gray-700/40" : ""
+                }`}
+              >
+                <span className="font-mono text-[11px] text-gray-500">{r.callId.slice(0, 8)}…</span>
+                <span className="text-xs text-gray-300">
+                  {new Date(r.startedAt).toLocaleString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </span>
+                <span className="text-[11px] text-gray-500">{r.events} events</span>
+                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+                  {r.injections} injections
+                </span>
+                {r.avgLatencyMs != null && (
+                  <span className="text-[11px] font-semibold text-emerald-400">avg {r.avgLatencyMs} ms</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       </Drawer>
     </div>
   );
