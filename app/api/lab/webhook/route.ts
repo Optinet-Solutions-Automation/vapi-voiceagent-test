@@ -371,8 +371,12 @@ async function handleTranscript(
   try {
     let injectResult;
     let injectedText = handler.response_template;
+    // verbatim → the agent speaks the line word-for-word (say);
+    // reword → the line is a [STAFF] briefing the agent rephrases (add-message).
+    const verbatim = handler.delivery === "verbatim";
 
     if (handler.action_type === "end_call") {
+      // Goodbyes are always spoken verbatim, then the call ends.
       injectedText = handler.response_template || "Thanks for your time today. Goodbye!";
       injectResult = await injectSay(controlUrl, injectedText, true);
       if (!injectResult.ok) {
@@ -384,11 +388,16 @@ async function handleTranscript(
       }
     } else if (handler.action_type === "send_sms") {
       injectedText =
-        "The SMS with the details has been sent. Confirm to the customer it's on its way.";
-      injectResult = await injectStaffNote(controlUrl, injectedText, settings.trigger_response);
+        handler.response_template ||
+        "The SMS with the details is on its way. Confirm that to the customer.";
+      injectResult = verbatim
+        ? await injectSay(controlUrl, injectedText, false)
+        : await injectStaffNote(controlUrl, injectedText, settings.trigger_response);
     } else {
       // answer / give_offer
-      injectResult = await injectStaffNote(controlUrl, injectedText, settings.trigger_response);
+      injectResult = verbatim
+        ? await injectSay(controlUrl, injectedText, false)
+        : await injectStaffNote(controlUrl, injectedText, settings.trigger_response);
     }
 
     const injectedAtMs = Date.now();
@@ -404,7 +413,7 @@ async function handleTranscript(
       classified_at: new Date(classifiedAt).toISOString(),
       injected_at: new Date(injectedAtMs).toISOString(),
       latency_ms: injectedAtMs - utteranceAt.getTime(),
-      meta: { controlStatus: injectResult.status, controlOk: injectResult.ok },
+      meta: { controlStatus: injectResult.status, controlOk: injectResult.ok, delivery: handler.delivery },
     });
   } catch (e) {
     await log({

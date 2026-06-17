@@ -25,32 +25,36 @@ const STARTER_HANDLERS = [
     name: "Greeting",
     intent_key: "greeting",
     description: "The customer says hello, hi, good morning, or asks who's calling.",
-    response_template: "Greet them warmly by name if known, and briefly say why you're calling.",
+    response_template: "Greet them warmly and briefly say why you're calling.",
     action_type: "answer" as const,
+    delivery: "reword" as const,
     priority: 10,
   },
   {
     name: "Pricing Question",
     intent_key: "pricing_question",
     description: "Questions about price, cost, fees, how much something is.",
-    response_template: "The standard plan is $49/month with no setup fee.",
+    response_template: "The standard plan is forty-nine dollars a month, with no setup fee.",
     action_type: "answer" as const,
+    delivery: "verbatim" as const,
     priority: 20,
   },
   {
     name: "Give Offer",
     intent_key: "give_offer",
     description: "The customer shows interest, asks what you can do for them, or asks about deals/promotions.",
-    response_template: "We have a special 300% deposit bonus available today only for returning customers.",
+    response_template: "We've got a special three hundred percent deposit bonus available today only.",
     action_type: "give_offer" as const,
+    delivery: "verbatim" as const,
     priority: 30,
   },
   {
     name: "Send SMS",
     intent_key: "send_sms",
     description: "The customer agrees to receive details by text/SMS, or asks you to text them.",
-    response_template: "",
+    response_template: "Perfect — I'll text you the details right now.",
     action_type: "send_sms" as const,
+    delivery: "verbatim" as const,
     priority: 40,
   },
   {
@@ -59,6 +63,7 @@ const STARTER_HANDLERS = [
     description: "The customer says goodbye, asks to end the call, or firmly says they're not interested after the offer was presented.",
     response_template: "Thanks so much for your time today. Have a great day. Goodbye!",
     action_type: "end_call" as const,
+    delivery: "verbatim" as const,
     priority: 50,
   },
 ];
@@ -70,6 +75,7 @@ type Draft = {
   description: string;
   response_template: string;
   action_type: ListenerHandler["action_type"];
+  delivery: ListenerHandler["delivery"];
   mode: ListenerHandler["mode"];
   priority: number;
   enabled: boolean;
@@ -81,6 +87,7 @@ const EMPTY_DRAFT: Draft = {
   description: "",
   response_template: "",
   action_type: "answer",
+  delivery: "verbatim",
   mode: "both",
   priority: 100,
   enabled: true,
@@ -133,6 +140,7 @@ export default function OrganizerTable() {
         description: draft.description,
         response_template: draft.response_template,
         action_type: draft.action_type,
+        delivery: draft.delivery,
         mode: draft.mode,
         priority: draft.priority,
         enabled: draft.enabled,
@@ -243,6 +251,20 @@ export default function OrganizerTable() {
               <span className="rounded-full bg-gray-700/60 px-2 py-0.5 text-[10px] text-gray-400">
                 {h.mode}
               </span>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  h.delivery === "verbatim"
+                    ? "bg-sky-500/15 text-sky-300"
+                    : "bg-amber-500/15 text-amber-300"
+                }`}
+                title={
+                  h.delivery === "verbatim"
+                    ? "Spoken word-for-word"
+                    : "Reworded by the agent in its own voice"
+                }
+              >
+                {h.delivery === "verbatim" ? "verbatim" : "reword"}
+              </span>
               <span className="text-[10px] text-gray-600">p{h.priority}</span>
             </div>
             {h.description && (
@@ -265,6 +287,7 @@ export default function OrganizerTable() {
                   description: h.description,
                   response_template: h.response_template,
                   action_type: h.action_type,
+                  delivery: h.delivery,
                   mode: h.mode,
                   priority: h.priority,
                   enabled: h.enabled,
@@ -338,15 +361,46 @@ export default function OrganizerTable() {
 
             <div>
               <label className="mb-1 block text-xs text-gray-400">
-                Response <span className="text-gray-600">(what the staff hands the agent)</span>
+                Response{" "}
+                <span className="text-gray-600">
+                  {draft.delivery === "verbatim"
+                    ? "(spoken word-for-word — write the exact line)"
+                    : "(briefing — the agent rewords this in its own voice)"}
+                </span>
               </label>
               <textarea
                 className={inputCls + " resize-none"}
                 rows={3}
                 value={draft.response_template}
                 onChange={(e) => setDraft({ ...draft, response_template: e.target.value })}
-                placeholder="The standard plan is $49/month with no setup fee."
+                placeholder={
+                  draft.delivery === "verbatim"
+                    ? "The wagering requirement is forty times the deposit."
+                    : "Acknowledge kindly and offer to text the details."
+                }
               />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-gray-400">Delivery</label>
+              <div className="flex gap-2">
+                {(["verbatim", "reword"] as const).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDraft({ ...draft, delivery: d })}
+                    className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium transition ${
+                      draft.delivery === d
+                        ? d === "verbatim"
+                          ? "border-sky-500 bg-sky-500/15 text-sky-300"
+                          : "border-amber-500 bg-amber-500/15 text-amber-300"
+                        : "border-gray-700 text-gray-400 hover:bg-gray-800"
+                    }`}
+                  >
+                    {d === "verbatim" ? "Verbatim (say exactly)" : "Reword (agent rephrases)"}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2">

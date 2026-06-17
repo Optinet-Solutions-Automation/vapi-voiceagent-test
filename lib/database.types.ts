@@ -377,6 +377,7 @@ export type Database = {
           description: string;
           response_template: string;
           action_type: "answer" | "send_sms" | "give_offer" | "end_call" | "ignore";
+          delivery: "verbatim" | "reword";
           enabled: boolean;
           priority: number;
           mode: "tool" | "listener" | "both";
@@ -390,6 +391,7 @@ export type Database = {
           description?: string;
           response_template?: string;
           action_type?: "answer" | "send_sms" | "give_offer" | "end_call" | "ignore";
+          delivery?: "verbatim" | "reword";
           enabled?: boolean;
           priority?: number;
           mode?: "tool" | "listener" | "both";
@@ -403,6 +405,7 @@ export type Database = {
           description?: string;
           response_template?: string;
           action_type?: "answer" | "send_sms" | "give_offer" | "end_call" | "ignore";
+          delivery?: "verbatim" | "reword";
           enabled?: boolean;
           priority?: number;
           mode?: "tool" | "listener" | "both";

@@ -1,7 +1,12 @@
 // Seeds the Listener Lab Organizer with handlers decomposed from the
 // LuckySeven Casino production prompt, and saves the matching short
 // behavior-only prompt to lab_settings.
-// Run: node scripts/seed-lucky7-handlers.mjs
+//
+// Each handler has a `delivery` mode:
+//   verbatim → the agent SPEAKS response_template word-for-word (VAPI `say`)
+//   reword   → response_template is a [STAFF] briefing the agent rephrases
+//
+// Run: node scripts/seed-lucky7-handlers.mjs   (idempotent — skips existing intent_keys)
 import { createClient } from "@supabase/supabase-js";
 
 const sb = createClient(
@@ -19,6 +24,7 @@ const handlers = [
     response_template:
       "Hi {{name}}, this is Tom from Lucky Seven. I saw you registered an account recently at Lucky7even.com — does that sound familiar?",
     action_type: "answer",
+    delivery: "verbatim",
     priority: 0,
     mode: "both",
   },
@@ -29,8 +35,9 @@ const handlers = [
     description:
       "Customer says they have a gambling problem, gambling addiction, are trying to quit gambling, or that gambling has hurt them or their family.",
     response_template:
-      "COMPLIANCE: Carefully and warmly acknowledge. Do not pitch anything further. Advise them to reach out to their local gambling authorities and assure them help is available. Then say a warm goodbye and end the call.",
+      "I really appreciate you telling me that, and I want you to know support is available — please do reach out to your local gambling helpline. Take good care of yourself. Goodbye.",
     action_type: "end_call",
+    delivery: "verbatim",
     priority: 1,
     mode: "both",
   },
@@ -40,8 +47,9 @@ const handlers = [
     description:
       "Customer is angry, says do not call again, remove me from your list, stop calling, not interested in gambling ever, or any firm request to never be contacted.",
     response_template:
-      "COMPLIANCE: Politely apologize for the disturbance, assure them they will not be called again, say goodbye, and end the call. Do not pitch anything.",
+      "I'm sorry for the interruption — I'll make sure we don't call you again. Thanks for your time, and goodbye.",
     action_type: "end_call",
+    delivery: "verbatim",
     priority: 2,
     mode: "both",
   },
@@ -52,8 +60,9 @@ const handlers = [
     description:
       "Customer shows interest, asks what the call is about, what the offer/bonus/surprise is, or says okay tell me more.",
     response_template:
-      "Twenty no-deposit free spins are already waiting in their LuckySeven account — no deposit needed at all, they just log in and activate them. Available today only. Then ask if you can send the details via SMS. Do not mention the 300% deposit bonus unless they ask for more.",
+      "Great news — you've got twenty free spins waiting in your account already, no deposit needed. You just log in and activate them, and they're available today only. Would it be alright if I text you the details?",
     action_type: "give_offer",
+    delivery: "verbatim",
     priority: 10,
     mode: "both",
   },
@@ -63,8 +72,9 @@ const handlers = [
     description:
       "Customer asks if there is anything more, another bonus, a deposit offer, or about the extra treat mentioned in the SMS.",
     response_template:
-      "There is also an exclusive 300% bonus up to $500 on their deposit, minimum deposit $30. State clearly the 20 free spins need no deposit at all — the deposit only applies to this extra bonus. Mention this only once.",
+      "There's also an exclusive bonus — a three hundred percent match up to five hundred dollars on a deposit, with just a thirty dollar minimum. The twenty free spins themselves still need no deposit at all.",
     action_type: "answer",
+    delivery: "verbatim",
     priority: 11,
     mode: "both",
   },
@@ -74,8 +84,9 @@ const handlers = [
     description:
       "Customer agrees to receive details by SMS/text, says yes send it, text me, or asks for the details in writing.",
     response_template:
-      "Confirm and thank them. The SMS goes to the number you reached them on, containing the 20 free spins details plus one extra exclusive treat they can claim for more bonuses.",
+      "Perfect — I'll send that over to the number I reached you on right now. It'll have your free spins, plus one extra special treat you can claim.",
     action_type: "send_sms",
+    delivery: "verbatim",
     priority: 12,
     mode: "both",
   },
@@ -85,8 +96,9 @@ const handlers = [
     description:
       "Customer politely declines, says not right now, maybe later, or is hesitant but NOT angry and NOT asking to never be called.",
     response_template:
-      "Kindly acknowledge without pushing. Offer once to simply send the details via SMS so they can look later. If they decline that too, thank them warmly and wrap up.",
+      "Acknowledge kindly without pushing. Offer once to text the details so they can look later; if they still decline, thank them warmly and wrap up.",
     action_type: "answer",
+    delivery: "reword",
     priority: 13,
     mode: "both",
   },
@@ -96,8 +108,9 @@ const handlers = [
     description:
       "Customer says they are busy, driving, at work, in a meeting, or cannot talk right now.",
     response_template:
-      "Respect their time immediately. Offer to send the info via SMS instead so they can read it later, then wrap up quickly.",
+      "Respect their time right away. Offer to text the info so they can read it later, then wrap up quickly.",
     action_type: "answer",
+    delivery: "reword",
     priority: 14,
     mode: "both",
   },
@@ -107,9 +120,9 @@ const handlers = [
     intent_key: "wagering_requirements",
     description:
       "Customer asks about wagering requirements, playthrough, rollover, or conditions on winnings.",
-    response_template:
-      "The wagering requirement is 40 times the deposit. State it plainly, no hard sell after.",
+    response_template: "The wagering requirement is forty times the deposit.",
     action_type: "answer",
+    delivery: "verbatim",
     priority: 20,
     mode: "both",
   },
@@ -119,8 +132,9 @@ const handlers = [
     description:
       "Customer asks how much they need to deposit, the minimum deposit, or what it costs to claim.",
     response_template:
-      "The 20 free spins require NO deposit at all — say that first. The minimum deposit of $30 only applies to the optional 300% bonus offer.",
+      "There's no deposit needed at all for the twenty free spins. The thirty dollar minimum only applies if you'd like the extra bonus offer.",
     action_type: "answer",
+    delivery: "verbatim",
     priority: 21,
     mode: "both",
   },
@@ -130,8 +144,9 @@ const handlers = [
     description:
       "Customer asks where the free spins are, where to see them on the website, or says they cannot find them.",
     response_template:
-      "Click the notifications icon in the upper right corner of the page. If they still cannot locate it, ask them to contact live chat now for help.",
+      "You'll find them under the notifications icon in the top right corner of the page. If you can't spot it, our live chat team can help you right away.",
     action_type: "answer",
+    delivery: "verbatim",
     priority: 22,
     mode: "both",
   },
@@ -141,8 +156,9 @@ const handlers = [
     description:
       "Customer asks what game the free spins are for or what slot they can play.",
     response_template:
-      "The game will be shown when the 20 free spins appear in their account.",
+      "The game will be shown to you once the free spins appear in your account.",
     action_type: "answer",
+    delivery: "verbatim",
     priority: 23,
     mode: "both",
   },
@@ -152,8 +168,9 @@ const handlers = [
     description:
       "Customer asks for the website, the link, the URL, or where to log in.",
     response_template:
-      "The website is www.lucky7even.com — spell it out slowly: w w w dot lucky, the number seven, e v e n, dot com.",
+      "The website is w w w dot lucky seven even dot com — that's lucky, the number seven, e-v-e-n, dot com.",
     action_type: "answer",
+    delivery: "verbatim",
     priority: 24,
     mode: "both",
   },
@@ -164,6 +181,7 @@ const handlers = [
       "Customer asks how many times they can claim the offer or if they can get it again.",
     response_template: "The offer can only be claimed once.",
     action_type: "answer",
+    delivery: "verbatim",
     priority: 25,
     mode: "both",
   },
@@ -173,8 +191,9 @@ const handlers = [
     description:
       "Customer asks how you got their number, who gave you their contact details, or why you are calling them specifically.",
     response_template:
-      "Acknowledge the question directly — they recently registered an account at Lucky7even.com, which is where their number comes from. Then gently return to the conversation.",
+      "Reassure them: they recently registered an account at Lucky7even.com, which is where the number came from. Then gently steer back to the conversation.",
     action_type: "answer",
+    delivery: "reword",
     priority: 26,
     mode: "both",
   },
@@ -184,8 +203,9 @@ const handlers = [
     description:
       "Customer says they cannot log in, forgot their password, or have account access trouble.",
     response_template:
-      "Refer them to the chat support team on the website, or walk them through the reset password option on the login page. Do not attempt account changes yourself.",
+      "Point them to the live chat support team on the website, or walk them through the reset-password option on the login page. Do not make account changes yourself.",
     action_type: "answer",
+    delivery: "reword",
     priority: 27,
     mode: "both",
   },
@@ -195,8 +215,9 @@ const handlers = [
     description:
       "Customer says they are depositing right now, just made a deposit, or completed a deposit while on the call.",
     response_template:
-      "Congratulate them warmly and tell them to stay active to receive more promotions they can enjoy. Then move to wrap up.",
+      "Congratulate them warmly and encourage them to stay active for more promotions, then move to wrap up.",
     action_type: "answer",
+    delivery: "reword",
     priority: 28,
     mode: "both",
   },
@@ -206,8 +227,9 @@ const handlers = [
     description:
       "Someone other than the customer answered, or says the customer is not here, unavailable, or you have the wrong number.",
     response_template:
-      "End the call kindly — say you will just call some other time. Do NOT ask who answered, do NOT reveal any offer details.",
+      "No problem at all — I'll try again another time. Thanks, and have a great day!",
     action_type: "end_call",
+    delivery: "verbatim",
     priority: 29,
     mode: "both",
   },
@@ -217,24 +239,24 @@ const handlers = [
     description:
       "Conversation has naturally concluded — customer says goodbye, thanks, see you, or confirms they are all set.",
     response_template:
-      "Wish them a great day and say goodbye. Do NOT mention the free spins or the offer again in the closing.",
+      "Thanks so much for your time today — have a wonderful day. Goodbye!",
     action_type: "end_call",
+    delivery: "verbatim",
     priority: 30,
     mode: "both",
   },
 ];
 
-const SHORT_PROMPT = `[Identity] You are Tom, a clear, natural-sounding sales voice agent for LuckySeven Casino, calling newly registered customers about an exclusive time-limited offer.
+const SHORT_PROMPT = `[Identity] You are Tom — a warm, natural-sounding voice agent for Lucky Seven Casino, calling newly registered customers.
 
-[Style] Calm, human, never breathy or rushed; enunciate properly. Short replies — max two sentences, one question per utterance. Never repeat yourself or a question you already asked ("How does that sound?" max once). Pronounce the brand "Lucky Seven", never "Lucky Seven Even" unless spelling the URL. Vary words for the bonus (offer / bonus), do not overuse "Free Spins". Not exaggeratedly enthusiastic. Never call the customer by a name. Never say "small complimentary" or "small gift" — it is "special". Ignore background noise. Let the customer lead; never prolong.
+[Delivery & personality] Calm, human, and easy to talk to. Never rushed or breathy; enunciate clearly and mind your pacing. Keep replies short — one or two sentences — and let the customer lead. Friendly, not over-enthusiastic. Pronounce the brand "Lucky Seven". Ignore background noise. Never invent details.
 
-[Knowledge] You do NOT know offer details, prices, terms, or policies yourself. For ANY factual question, call lookup_answer with the question. To present the offer, call get_offer. When the customer agrees to receive details by text, call send_sms. When the conversation is over, call end_call_goodbye.
+[How knowledge reaches you] You don't know offer details, prices, terms, or policies on your own — your lines are supplied to you in the moment.
+- Most lines are spoken to the customer for you; just keep your tone warm and natural around them.
+- A system note starting with [STAFF] is a briefing: work that information into your next reply in your own words. Never mention staff, notes, tools, or systems, and never read a [STAFF] note out loud verbatim.
+- If you're asked something and have no line or note, call lookup_answer. Use get_offer to present the deal, send_sms to text details, and end_call_goodbye to wrap up.
 
-[Staff notes] Mid-call you may receive system messages starting with [STAFF]. They are authoritative briefing notes: deliver the information naturally in your own voice in your very next reply. Never read them verbatim, never mention staff, notes, tools, or systems. If a note starts with COMPLIANCE:, follow it exactly and immediately — it overrides everything else.
-
-[Opening] Introduce yourself, then: "I saw you registered an account recently at Lucky7even.com — does that sound familiar?" Do not state the offer immediately; build curiosity (they are one of a selected few for a totally free bonus) and wait for their response.
-
-[Safety] Encourage responsible gaming; never guarantee winnings. Mention only once that the offer is available today only. If there is no response after three attempts or it is voicemail, end the call without saying anything.`;
+[Fallback] With no line and no note, stay brief and human — acknowledge warmly and say you'll check on that.`;
 
 const { data: existing } = await sb.from("listener_handlers").select("intent_key");
 const have = new Set((existing ?? []).map((r) => r.intent_key));
