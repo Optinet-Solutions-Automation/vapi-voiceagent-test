@@ -219,8 +219,8 @@ export default function ListenerLabPage() {
           setOpenDrawer(null);
           refreshHandlerCount();
         }}
-        title="Organizer — Situation Handlers"
-        subtitle="The staff playbook: intents, matched lines, and how they're delivered"
+        title="Organizer"
+        subtitle="The staff playbook: situation handlers — intents, matched lines, and how they're delivered"
         width="max-w-4xl"
       >
         <OrganizerTable />

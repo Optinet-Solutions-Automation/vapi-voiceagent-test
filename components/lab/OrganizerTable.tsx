@@ -93,6 +93,8 @@ const EMPTY_DRAFT: Draft = {
   enabled: true,
 };
 
+const PAGE_SIZE = 8;
+
 export default function OrganizerTable() {
   const [handlers, setHandlers] = useState<ListenerHandler[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,6 +102,8 @@ export default function OrganizerTable() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   async function reload() {
     try {
@@ -115,6 +119,22 @@ export default function OrganizerTable() {
   useEffect(() => {
     reload();
   }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search]);
+
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? handlers.filter((h) =>
+        `${h.name} ${h.intent_key} ${h.description} ${h.response_template} ${h.action_type} ${h.delivery}`
+          .toLowerCase()
+          .includes(q)
+      )
+    : handlers;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageClamped = Math.min(page, totalPages);
+  const paginated = filtered.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE);
 
   async function handleSeed() {
     setSeeding(true);
@@ -182,12 +202,18 @@ export default function OrganizerTable() {
 
   return (
     <div className="rounded-xl border border-gray-700 bg-gray-800/50 overflow-hidden">
-      <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold text-white">Organizer — Situation Handlers</h2>
-          <p className="text-[11px] text-gray-500">
-            The staff&apos;s playbook: intents the router matches and what gets fed to the agent.
-          </p>
+      <div className="flex items-center gap-2 border-b border-gray-700 px-4 py-3">
+        <div className="relative flex-1">
+          <svg className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search handlers…"
+            className="w-full rounded-lg border border-gray-700 bg-gray-800 py-1.5 pl-8 pr-3 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+          />
         </div>
         <button
           onClick={() => setDraft({ ...EMPTY_DRAFT })}
@@ -214,7 +240,11 @@ export default function OrganizerTable() {
         </div>
       )}
 
-      {handlers.map((h) => (
+      {!loading && handlers.length > 0 && filtered.length === 0 && (
+        <p className="px-4 py-8 text-center text-sm text-gray-500">No handlers match &ldquo;{search}&rdquo;.</p>
+      )}
+
+      {paginated.map((h) => (
         <div
           key={h.id}
           className={`flex flex-wrap items-center gap-3 border-b border-gray-700/50 px-4 py-3 last:border-b-0 ${
@@ -312,6 +342,34 @@ export default function OrganizerTable() {
           </div>
         </div>
       ))}
+
+      {/* Pagination */}
+      {!loading && filtered.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between gap-2 border-t border-gray-700 px-4 py-2.5">
+          <p className="text-[11px] text-gray-500">
+            {(pageClamped - 1) * PAGE_SIZE + 1}–{Math.min(pageClamped * PAGE_SIZE, filtered.length)} of {filtered.length}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={pageClamped === 1}
+              className="rounded-lg border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition hover:bg-gray-700 disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <span className="px-1 py-1 text-xs text-gray-500">
+              {pageClamped} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={pageClamped === totalPages}
+              className="rounded-lg border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition hover:bg-gray-700 disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit modal */}
       {draft && (
