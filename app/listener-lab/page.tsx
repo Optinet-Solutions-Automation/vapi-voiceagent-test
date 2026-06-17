@@ -30,6 +30,9 @@ export default function ListenerLabPage() {
   const [recentEvents, setRecentEvents] = useState<LabCallEvent[]>([]);
   const [handlerCount, setHandlerCount] = useState<number | null>(null);
   const [openDrawer, setOpenDrawer] = useState<DrawerName>(null);
+  const [logsPage, setLogsPage] = useState(1);
+
+  const LOGS_PAGE_SIZE = 8;
 
   function refreshRuns() {
     listRecentLabEvents(1000)
@@ -79,9 +82,12 @@ export default function ListenerLabPage() {
               : null,
         };
       })
-      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))
-      .slice(0, 20);
+      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
   }, [recentEvents]);
+
+  const logsTotalPages = Math.max(1, Math.ceil(runs.length / LOGS_PAGE_SIZE));
+  const logsPageClamped = Math.min(logsPage, logsTotalPages);
+  const pagedRuns = runs.slice((logsPageClamped - 1) * LOGS_PAGE_SIZE, logsPageClamped * LOGS_PAGE_SIZE);
 
   const monitorCallId = callActive ? activeCallId : viewedCallId ?? activeCallId;
 
@@ -122,6 +128,7 @@ export default function ListenerLabPage() {
           <button
             onClick={() => {
               refreshRuns();
+              setLogsPage(1);
               setOpenDrawer("logs");
             }}
             className={tabBtn}
@@ -205,37 +212,67 @@ export default function ListenerLabPage() {
         {runs.length === 0 ? (
           <p className="py-8 text-center text-sm text-gray-500">No lab runs yet — start a test call.</p>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-gray-700">
-            {runs.map((r) => (
-              <button
-                key={r.callId}
-                onClick={() => {
-                  setViewedCallId(r.callId);
-                  setOpenDrawer(null);
-                }}
-                className={`flex w-full flex-wrap items-center gap-3 border-b border-gray-700/50 px-4 py-2.5 text-left transition last:border-b-0 hover:bg-gray-700/30 ${
-                  viewedCallId === r.callId ? "bg-gray-700/40" : ""
-                }`}
-              >
-                <span className="font-mono text-[11px] text-gray-500">{r.callId.slice(0, 8)}…</span>
-                <span className="text-xs text-gray-300">
-                  {new Date(r.startedAt).toLocaleString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </span>
-                <span className="text-[11px] text-gray-500">{r.events} events</span>
-                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
-                  {r.injections} injections
-                </span>
-                {r.avgLatencyMs != null && (
-                  <span className="text-[11px] font-semibold text-emerald-400">avg {r.avgLatencyMs} ms</span>
-                )}
-              </button>
-            ))}
-          </div>
+          <>
+            <div className="overflow-hidden rounded-xl border border-gray-700">
+              {pagedRuns.map((r) => (
+                <button
+                  key={r.callId}
+                  onClick={() => {
+                    setViewedCallId(r.callId);
+                    setOpenDrawer(null);
+                  }}
+                  className={`flex w-full flex-wrap items-center gap-3 border-b border-gray-700/50 px-4 py-2.5 text-left transition last:border-b-0 hover:bg-gray-700/30 ${
+                    viewedCallId === r.callId ? "bg-gray-700/40" : ""
+                  }`}
+                >
+                  <span className="font-mono text-[11px] text-gray-500">{r.callId.slice(0, 8)}…</span>
+                  <span className="text-xs text-gray-300">
+                    {new Date(r.startedAt).toLocaleString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                  <span className="text-[11px] text-gray-500">{r.events} events</span>
+                  <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+                    {r.injections} injections
+                  </span>
+                  {r.avgLatencyMs != null && (
+                    <span className="text-[11px] font-semibold text-emerald-400">avg {r.avgLatencyMs} ms</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {runs.length > LOGS_PAGE_SIZE && (
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <p className="text-[11px] text-gray-500">
+                  {(logsPageClamped - 1) * LOGS_PAGE_SIZE + 1}–
+                  {Math.min(logsPageClamped * LOGS_PAGE_SIZE, runs.length)} of {runs.length}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setLogsPage((p) => Math.max(1, p - 1))}
+                    disabled={logsPageClamped === 1}
+                    className="rounded-lg border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition hover:bg-gray-700 disabled:opacity-40"
+                  >
+                    Prev
+                  </button>
+                  <span className="px-1 py-1 text-xs text-gray-500">
+                    {logsPageClamped} / {logsTotalPages}
+                  </span>
+                  <button
+                    onClick={() => setLogsPage((p) => Math.min(logsTotalPages, p + 1))}
+                    disabled={logsPageClamped === logsTotalPages}
+                    className="rounded-lg border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition hover:bg-gray-700 disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </Drawer>
     </div>
