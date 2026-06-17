@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import LabAgentSetup from "@/components/lab/LabAgentSetup";
+import LabConfigForm from "@/components/lab/LabConfigForm";
 import OrganizerTable from "@/components/lab/OrganizerTable";
-import LabSettingsCard from "@/components/lab/LabSettingsCard";
 import LabCallPanel from "@/components/lab/LabCallPanel";
 import ListenerMonitor from "@/components/lab/ListenerMonitor";
 import Drawer from "@/components/lab/Drawer";
@@ -18,7 +17,7 @@ type Run = {
   avgLatencyMs: number | null;
 };
 
-type DrawerName = "setup" | "settings" | "organizer" | null;
+type DrawerName = "config" | "organizer" | null;
 
 export default function ListenerLabPage() {
   const [assistantId, setAssistantId] = useState("");
@@ -102,11 +101,12 @@ export default function ListenerLabPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => setOpenDrawer("setup")} className={tabBtn}>
+          <button onClick={() => setOpenDrawer("config")} className={tabBtn}>
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            Agent Setup
+            Configuration
           </button>
           <button onClick={() => setOpenDrawer("organizer")} className={tabBtn}>
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -118,13 +118,6 @@ export default function ListenerLabPage() {
                 {handlerCount}
               </span>
             )}
-          </button>
-          <button onClick={() => setOpenDrawer("settings")} className={tabBtn}>
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            Settings
           </button>
         </div>
       </header>
@@ -206,13 +199,13 @@ export default function ListenerLabPage() {
 
       {/* ── Config drawers (hidden by default) ── */}
       <Drawer
-        open={openDrawer === "setup"}
+        open={openDrawer === "config"}
         onClose={() => setOpenDrawer(null)}
-        title="Agent Setup"
-        subtitle="The politician: short behavior prompt + voice, then configure for the lab"
+        title="Configuration"
+        subtitle="Agent, prompt, voice, webhook, and listener tuning — one Save"
         width="max-w-2xl"
       >
-        <LabAgentSetup
+        <LabConfigForm
           onAssistantChange={(id, name) => {
             setAssistantId(id);
             setAssistantName(name);
@@ -231,16 +224,6 @@ export default function ListenerLabPage() {
         width="max-w-4xl"
       >
         <OrganizerTable />
-      </Drawer>
-
-      <Drawer
-        open={openDrawer === "settings"}
-        onClose={() => setOpenDrawer(null)}
-        title="Listener Settings"
-        subtitle="How aggressively the staff whispers"
-        width="max-w-lg"
-      >
-        <LabSettingsCard />
       </Drawer>
     </div>
   );
