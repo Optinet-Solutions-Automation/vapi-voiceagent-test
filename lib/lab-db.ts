@@ -44,6 +44,24 @@ export async function deleteHandler(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/** Rename a group across every handler that uses it. */
+export async function renameGroup(oldName: string, newName: string): Promise<void> {
+  const { error } = await supabase
+    .from("listener_handlers")
+    .update({ group_name: newName, updated_at: new Date().toISOString() })
+    .eq("group_name", oldName);
+  if (error) throw new Error(error.message);
+}
+
+/** Remove a group — handlers stay but become ungrouped. */
+export async function clearGroup(name: string): Promise<void> {
+  const { error } = await supabase
+    .from("listener_handlers")
+    .update({ group_name: "", updated_at: new Date().toISOString() })
+    .eq("group_name", name);
+  if (error) throw new Error(error.message);
+}
+
 // ── Settings ──────────────────────────────────────────────────
 
 export async function getLabSettings(): Promise<LabSettings | null> {

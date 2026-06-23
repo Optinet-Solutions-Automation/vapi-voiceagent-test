@@ -6,6 +6,8 @@ import {
   createHandler,
   updateHandler,
   deleteHandler,
+  renameGroup,
+  clearGroup,
 } from "@/lib/lab-db";
 import type { ListenerHandler } from "@/lib/database.types";
 
@@ -112,6 +114,8 @@ export default function OrganizerTable() {
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [showGroups, setShowGroups] = useState(false);
 
   async function reload() {
     try {
@@ -206,6 +210,29 @@ export default function OrganizerTable() {
     }
   }
 
+  async function handleRenameGroup(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) return;
+    try {
+      await renameGroup(oldName, trimmed);
+      if (groupFilter === oldName) setGroupFilter(trimmed);
+      await reload();
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to rename group");
+    }
+  }
+
+  async function handleDeleteGroup(name: string) {
+    if (!window.confirm(`Remove the group "${name}"? Handlers stay but become ungrouped.`)) return;
+    try {
+      await clearGroup(name);
+      if (groupFilter === name) setGroupFilter("");
+      await reload();
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to delete group");
+    }
+  }
+
   async function handleToggle(h: ListenerHandler) {
     try {
       await updateHandler(h.id, { enabled: !h.enabled });
@@ -246,8 +273,19 @@ export default function OrganizerTable() {
             ))}
           </select>
         )}
+        {groups.length > 0 && (
+          <button
+            onClick={() => setShowGroups(true)}
+            className="shrink-0 rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 transition hover:bg-gray-700"
+          >
+            Manage Groups
+          </button>
+        )}
         <button
-          onClick={() => setDraft({ ...EMPTY_DRAFT })}
+          onClick={() => {
+            setAddingGroup(false);
+            setDraft({ ...EMPTY_DRAFT });
+          }}
           className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-500"
         >
           + Add Handler
@@ -345,7 +383,8 @@ export default function OrganizerTable() {
 
           <div className="flex shrink-0 gap-1">
             <button
-              onClick={() =>
+              onClick={() => {
+                setAddingGroup(false);
                 setDraft({
                   id: h.id,
                   name: h.name,
@@ -358,8 +397,8 @@ export default function OrganizerTable() {
                   mode: h.mode,
                   priority: h.priority,
                   enabled: h.enabled,
-                })
-              }
+                });
+              }}
               className="rounded p-1.5 text-gray-500 transition hover:bg-gray-700 hover:text-gray-200"
               title="Edit"
             >
@@ -408,6 +447,57 @@ export default function OrganizerTable() {
         </div>
       )}
 
+      {/* Manage Groups modal */}
+      {showGroups && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setShowGroups(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-700 bg-gray-900 p-5 shadow-2xl space-y-3"
+          >
+            <div>
+              <h3 className="text-base font-bold text-white">Manage Groups</h3>
+              <p className="text-[11px] text-gray-500">
+                Rename or remove a group across all its handlers. To add a group, assign it on a handler.
+              </p>
+            </div>
+            {groups.length === 0 && <p className="text-sm text-gray-500">No groups yet.</p>}
+            {groups.map((g) => {
+              const count = handlers.filter((h) => h.group_name === g).length;
+              return (
+                <div key={g} className="flex items-center gap-2">
+                  <input
+                    defaultValue={g}
+                    onBlur={(e) => handleRenameGroup(g, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    }}
+                    className="flex-1 rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none"
+                  />
+                  <span className="shrink-0 text-[11px] text-gray-500">{count}</span>
+                  <button
+                    onClick={() => handleDeleteGroup(g)}
+                    className="shrink-0 rounded p-1.5 text-gray-500 transition hover:bg-gray-700 hover:text-rose-400"
+                    title="Remove group"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            })}
+            <p className="text-[10px] text-gray-600">Tip: editing a name and clicking away renames the group everywhere.</p>
+            <button
+              onClick={() => setShowGroups(false)}
+              className="w-full rounded-lg border border-gray-700 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-800"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Add/Edit modal */}
       {draft && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setDraft(null)}>
@@ -445,18 +535,36 @@ export default function OrganizerTable() {
               <label className="mb-1 block text-xs text-gray-400">
                 Group <span className="text-gray-600">(category for organizing &amp; filtering)</span>
               </label>
-              <input
-                className={inputCls}
-                list="handler-groups"
-                value={draft.group_name}
-                onChange={(e) => setDraft({ ...draft, group_name: e.target.value })}
-                placeholder="Promotions"
-              />
-              <datalist id="handler-groups">
+              <select
+                className={inputCls + " [color-scheme:dark]"}
+                value={addingGroup ? "__new__" : draft.group_name}
+                onChange={(e) => {
+                  if (e.target.value === "__new__") {
+                    setAddingGroup(true);
+                    setDraft({ ...draft, group_name: "" });
+                  } else {
+                    setAddingGroup(false);
+                    setDraft({ ...draft, group_name: e.target.value });
+                  }
+                }}
+              >
+                <option value="">(no group)</option>
                 {groups.map((g) => (
-                  <option key={g} value={g} />
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
                 ))}
-              </datalist>
+                <option value="__new__">+ New group…</option>
+              </select>
+              {addingGroup && (
+                <input
+                  className={inputCls + " mt-2"}
+                  value={draft.group_name}
+                  onChange={(e) => setDraft({ ...draft, group_name: e.target.value })}
+                  placeholder="New group name (e.g. Promotions)"
+                  autoFocus
+                />
+              )}
             </div>
 
             <div>
