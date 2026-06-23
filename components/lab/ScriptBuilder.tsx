@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
   Handle,
   Position,
@@ -15,6 +16,7 @@ import {
   type Edge,
   type Connection,
   type NodeProps,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -86,6 +88,7 @@ export default function ScriptBuilder({ onClose }: Props) {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selNodeId, setSelNodeId] = useState<string | null>(null);
   const [selEdgeId, setSelEdgeId] = useState<string | null>(null);
+  const [rf, setRf] = useState<ReactFlowInstance<Node, Edge> | null>(null);
 
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -178,19 +181,35 @@ export default function ScriptBuilder({ onClose }: Props) {
     [setEdges]
   );
 
-  function addNode(kind: Kind) {
+  function addNode(kind: Kind, position?: { x: number; y: number }) {
     const id = crypto.randomUUID();
     setNodes((ns) => [
       ...ns,
       {
         id,
         type: "lab",
-        position: { x: 120 + ns.length * 30, y: 80 + ns.length * 30 },
+        position: position ?? { x: 120 + ns.length * 30, y: 80 + ns.length * 30 },
         data: { kind, label: KIND_META[kind].label, scenarioId: null, scenarioName: null, config: {} } as NodeData,
       },
     ]);
     setSelNodeId(id);
     setSelEdgeId(null);
+  }
+
+  function onDragStartPalette(e: React.DragEvent, kind: Kind) {
+    e.dataTransfer.setData("application/reactflow", kind);
+    e.dataTransfer.effectAllowed = "move";
+  }
+  function onDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    const kind = e.dataTransfer.getData("application/reactflow") as Kind;
+    if (!kind || !KIND_META[kind] || !rf) return;
+    const position = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    addNode(kind, position);
   }
 
   function patchNodeData(id: string, patch: Partial<NodeData>) {
@@ -371,18 +390,25 @@ export default function ScriptBuilder({ onClose }: Props) {
           {(Object.keys(KIND_META) as Kind[]).map((k) => (
             <button
               key={k}
-              onClick={() => addNode(k)}
+              draggable={!!scriptId}
+              onDragStart={(e) => onDragStartPalette(e, k)}
+              onClick={() => scriptId && addNode(k)}
               disabled={!scriptId}
-              className={`w-full rounded-lg border-2 px-2.5 py-1.5 text-left text-xs font-medium text-gray-200 transition hover:brightness-125 disabled:opacity-40 ${KIND_META[k].color}`}
+              className={`flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 px-2.5 py-1.5 text-left text-xs font-medium text-gray-200 transition hover:brightness-125 active:cursor-grabbing disabled:opacity-40 ${KIND_META[k].color}`}
             >
+              <svg className="h-3 w-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" />
+                <circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" />
+                <circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" />
+              </svg>
               {KIND_META[k].label}
             </button>
           ))}
-          <p className="pt-2 text-[10px] text-gray-600">Drag from a box&rsquo;s bottom dot to another box&rsquo;s top dot to connect.</p>
+          <p className="pt-2 text-[10px] text-gray-600">Drag a box onto the canvas (or click to drop it). Then drag from a box&rsquo;s bottom dot to another box&rsquo;s top dot to connect.</p>
         </div>
 
         {/* Canvas */}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1" onDrop={onDrop} onDragOver={onDragOver}>
           {scriptId ? (
             <ReactFlow
               nodes={nodes}
@@ -390,6 +416,7 @@ export default function ScriptBuilder({ onClose }: Props) {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              onInit={setRf}
               onNodeClick={(_, n) => {
                 setSelNodeId(n.id);
                 setSelEdgeId(null);
@@ -404,9 +431,11 @@ export default function ScriptBuilder({ onClose }: Props) {
               }}
               nodeTypes={nodeTypes}
               colorMode="dark"
+              snapToGrid
+              snapGrid={[16, 16]}
               fitView
             >
-              <Background />
+              <Background variant={BackgroundVariant.Dots} gap={18} size={1.6} color="#3a4256" />
               <Controls />
             </ReactFlow>
           ) : (
