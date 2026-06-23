@@ -119,7 +119,7 @@ export default function OrganizerTable() {
       setHandlers(await listHandlers());
       setError(null);
     } catch (e: any) {
-      setError(e?.message ?? "Failed to load handlers");
+      setError(e?.message ?? "Failed to load scenarios");
     } finally {
       setLoading(false);
     }
@@ -161,7 +161,7 @@ export default function OrganizerTable() {
       }
       await reload();
     } catch (e: any) {
-      setError(e?.message ?? "Failed to seed handlers");
+      setError(e?.message ?? "Failed to seed scenarios");
     } finally {
       setSeeding(false);
     }
@@ -191,19 +191,19 @@ export default function OrganizerTable() {
       setDraft(null);
       await reload();
     } catch (e: any) {
-      setError(e?.message ?? "Failed to save handler");
+      setError(e?.message ?? "Failed to save scenario");
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm("Delete this handler?")) return;
+    if (!window.confirm("Delete this scenario?")) return;
     try {
       await deleteHandler(id);
       await reload();
     } catch (e: any) {
-      setError(e?.message ?? "Failed to delete handler");
+      setError(e?.message ?? "Failed to delete scenario");
     }
   }
 
@@ -214,7 +214,7 @@ export default function OrganizerTable() {
         hs.map((x) => (x.id === h.id ? { ...x, enabled: !x.enabled } : x))
       );
     } catch (e: any) {
-      setError(e?.message ?? "Failed to toggle handler");
+      setError(e?.message ?? "Failed to toggle scenario");
     }
   }
 
@@ -241,7 +241,7 @@ export default function OrganizerTable() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search handlers…"
+            placeholder="Search scenarios…"
             className="w-full rounded-lg border border-gray-700 bg-gray-800 py-1.5 pl-8 pr-3 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
           />
         </div>
@@ -266,29 +266,29 @@ export default function OrganizerTable() {
           }}
           className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-500"
         >
-          + Add Handler
+          + Add Scenario
         </button>
       </div>
 
       {error && <p className="px-4 py-2 text-xs text-red-400">{error}</p>}
 
-      {loading && <p className="px-4 py-8 text-center text-sm text-gray-500">Loading handlers...</p>}
+      {loading && <p className="px-4 py-8 text-center text-sm text-gray-500">Loading scenarios...</p>}
 
       {!loading && handlers.length === 0 && !draft && (
         <div className="px-4 py-8 text-center">
-          <p className="mb-3 text-sm text-gray-500">No handlers yet.</p>
+          <p className="mb-3 text-sm text-gray-500">No scenarios yet.</p>
           <button
             onClick={handleSeed}
             disabled={seeding}
             className="rounded-lg border border-gray-600 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-700 disabled:opacity-40"
           >
-            {seeding ? "Adding..." : "Add starter handlers (greeting, pricing, offer, SMS, goodbye)"}
+            {seeding ? "Adding..." : "Add starter scenarios (greeting, pricing, offer, SMS, goodbye)"}
           </button>
         </div>
       )}
 
       {!loading && handlers.length > 0 && filtered.length === 0 && (
-        <p className="px-4 py-8 text-center text-sm text-gray-500">No handlers match your filters.</p>
+        <p className="px-4 py-8 text-center text-sm text-gray-500">No scenarios match your filters.</p>
       )}
 
       {paginated.map((h) => (
@@ -434,7 +434,7 @@ export default function OrganizerTable() {
             className="relative max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-700 bg-gray-900 p-5 shadow-2xl space-y-3"
           >
             <h3 className="text-base font-bold text-white">
-              {draft.id ? "Edit Handler" : "New Handler"}
+              {draft.id ? "Edit Scenario" : "New Scenario"}
             </h3>
 
             <div className="grid grid-cols-2 gap-2">
@@ -627,7 +627,7 @@ export default function OrganizerTable() {
                 disabled={saving || !draft.name.trim() || !draft.intent_key.trim()}
                 className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-40"
               >
-                {saving ? "Saving..." : draft.id ? "Save Changes" : "Add Handler"}
+                {saving ? "Saving..." : draft.id ? "Save Changes" : "Add Scenario"}
               </button>
             </div>
           </div>

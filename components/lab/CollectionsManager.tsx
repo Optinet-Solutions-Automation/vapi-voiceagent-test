@@ -61,7 +61,7 @@ export default function CollectionsManager({ onActiveChange }: Props) {
       const ids = await getCollectionHandlerIds(id);
       setMembers(new Set(ids));
     } catch (e: any) {
-      setError(e?.message ?? "Failed to load members");
+      setError(e?.message ?? "Failed to load scenarios");
     }
   }
 
@@ -93,7 +93,7 @@ export default function CollectionsManager({ onActiveChange }: Props) {
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm("Delete this collection? Handlers are not deleted, only the bundle.")) return;
+    if (!window.confirm("Delete this collection? Scenarios are not deleted, only the bundle.")) return;
     try {
       if (activeId === id) {
         await saveLabSettings({ active_collection_id: null });
@@ -115,9 +115,9 @@ export default function CollectionsManager({ onActiveChange }: Props) {
     try {
       await setCollectionHandlers(selectedId, Array.from(members));
       await loadAll();
-      setNotice("Members saved.");
+      setNotice("Scenarios saved.");
     } catch (e: any) {
-      setError(e?.message ?? "Failed to save members");
+      setError(e?.message ?? "Failed to save scenarios");
     } finally {
       setBusy(false);
     }
@@ -161,7 +161,7 @@ export default function CollectionsManager({ onActiveChange }: Props) {
         <p className="text-[11px] uppercase tracking-wider text-gray-500">Active for test calls</p>
         <div className="mt-0.5 flex items-center justify-between gap-2">
           <p className="text-sm font-medium text-gray-200">
-            {activeId ? collections.find((c) => c.id === activeId)?.name ?? "—" : "All handlers (no collection)"}
+            {activeId ? collections.find((c) => c.id === activeId)?.name ?? "—" : "All scenarios (no collection)"}
           </p>
           {activeId && (
             <button
@@ -230,7 +230,7 @@ export default function CollectionsManager({ onActiveChange }: Props) {
                   onClick={() => (isSelected ? setSelectedId(null) : selectCollection(c.id))}
                   className="shrink-0 rounded-lg border border-gray-700 px-2 py-1 text-[11px] text-gray-300 transition hover:bg-gray-800"
                 >
-                  {isSelected ? "Close" : "Edit handlers"}
+                  {isSelected ? "Close" : "Edit scenarios"}
                 </button>
                 <button
                   onClick={() => handleDelete(c.id)}
@@ -251,9 +251,9 @@ export default function CollectionsManager({ onActiveChange }: Props) {
                       className={inputCls}
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Filter handlers…"
+                      placeholder="Filter scenarios…"
                     />
-                    <span className="shrink-0 text-[11px] text-gray-500">{members.size} handlers selected</span>
+                    <span className="shrink-0 text-[11px] text-gray-500">{members.size} scenarios selected</span>
                   </div>
                   <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-gray-700 p-1.5">
                     {filteredHandlers.map((h) => (
@@ -281,7 +281,7 @@ export default function CollectionsManager({ onActiveChange }: Props) {
                     disabled={busy}
                     className="mt-2 w-full rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-40"
                   >
-                    {busy ? "Saving…" : `Save handlers for ${selected?.name ?? "collection"}`}
+                    {busy ? "Saving…" : `Save scenarios for ${selected?.name ?? "collection"}`}
                   </button>
                 </div>
               )}

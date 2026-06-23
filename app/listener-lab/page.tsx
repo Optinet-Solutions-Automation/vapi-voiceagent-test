@@ -113,7 +113,7 @@ export default function ListenerLabPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Listener Lab</h1>
           <p className="mt-1 max-w-2xl text-sm text-gray-500">
-            Short behavior-only agent; knowledge and actions fed mid-call by the Organizer. Configure
+            Short behavior-only agent; knowledge and actions fed mid-call by the Playbook. Configure
             below, then run a test call. The classic long-prompt flow on the Call Dashboard stays
             untouched for comparison.
           </p>
@@ -130,7 +130,7 @@ export default function ListenerLabPage() {
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
             </svg>
-            Organizer
+            Playbook
             {handlerCount != null && (
               <span className="rounded-full bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-300">
                 {handlerCount}
@@ -210,9 +210,9 @@ export default function ListenerLabPage() {
           onClick={() => setOpenDrawer("collections")}
           className="rounded-full border border-gray-700 px-2.5 py-0.5 font-medium text-gray-300 transition hover:bg-gray-800"
         >
-          {activeCollectionName ?? "All handlers"}
+          {activeCollectionName ?? "All scenarios"}
         </button>
-        <span className="text-gray-600">— the listener only uses this collection&rsquo;s handlers</span>
+        <span className="text-gray-600">— the listener only uses this collection&rsquo;s scenarios</span>
       </div>
 
       {/* ── Config drawers (hidden by default) ── */}
@@ -237,8 +237,8 @@ export default function ListenerLabPage() {
           setOpenDrawer(null);
           refreshHandlerCount();
         }}
-        title="Organizer"
-        subtitle="The staff playbook: situation handlers — intents, matched lines, and how they're delivered"
+        title="Playbook"
+        subtitle="Your scenarios — each is a situation the agent may face, its matched line, and how it's delivered"
         width="max-w-4xl"
       >
         <OrganizerTable />
@@ -248,7 +248,7 @@ export default function ListenerLabPage() {
         open={openDrawer === "collections"}
         onClose={() => setOpenDrawer(null)}
         title="Collections"
-        subtitle="Campaign bundles — pick the handlers a campaign uses, then set one active to scope the test call"
+        subtitle="Campaign bundles — pick the scenarios a campaign uses, then set one active to scope the test call"
         width="max-w-2xl"
       >
         <CollectionsManager onActiveChange={(_id, name) => setActiveCollectionName(name)} />

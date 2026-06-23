@@ -131,7 +131,7 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
               onChange={(e) => setClientName(e.target.value)}
               disabled={isActive}
               placeholder="Chris"
-              title='Fills {{name}} in the "First Message" handler'
+              title='Fills {{name}} in the "First Message" scenario'
               className="w-28 rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
             />
           </div>
