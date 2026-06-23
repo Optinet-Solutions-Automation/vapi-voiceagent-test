@@ -511,9 +511,20 @@ async function runScriptFlow(
 
   const controlUrl = await getControlUrl(callId, controlUrlHint);
   const variables = { ...(state!.variables as Record<string, unknown>) };
-  const scenario = target.scenario_id
-    ? allHandlers.find((h) => h.id === target.scenario_id) ?? null
-    : null;
+
+  // Resolve which scenario this box speaks. A box can list candidate scenarios
+  // (config.candidateScenarioIds); among {primary + candidates} we prefer the
+  // one whose intent matches what the customer just said, else the primary.
+  const candidateIds = Array.isArray((target.config as Record<string, unknown>).candidateScenarioIds)
+    ? ((target.config as Record<string, unknown>).candidateScenarioIds as string[])
+    : [];
+  const poolIds = [target.scenario_id, ...candidateIds].filter(Boolean) as string[];
+  let scenario =
+    target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null;
+  if (candidateIds.length > 0) {
+    const byIntent = allHandlers.find((h) => poolIds.includes(h.id) && h.intent_key === intent);
+    scenario = byIntent ?? scenario ?? allHandlers.find((h) => h.id === poolIds[0]) ?? null;
+  }
   let injectedText = scenario?.response_template ?? "";
   let controlStatus: number | null = null;
 

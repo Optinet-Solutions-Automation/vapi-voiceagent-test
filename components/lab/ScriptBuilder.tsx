@@ -497,6 +497,62 @@ export default function ScriptBuilder({ onClose }: Props) {
                   </div>
                 )}
 
+                {(selNodeData.kind === "say" || selNodeData.kind === "switch") && (
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400">
+                      Also consider <span className="text-gray-600">(router picks the best fit at this step)</span>
+                    </label>
+                    {((selNodeData.config.candidateScenarioIds as string[]) ?? []).length > 0 && (
+                      <div className="mb-1.5 flex flex-wrap gap-1.5">
+                        {((selNodeData.config.candidateScenarioIds as string[]) ?? []).map((cid) => (
+                          <button
+                            key={cid}
+                            onClick={() =>
+                              patchNodeData(selNode.id, {
+                                config: {
+                                  ...selNodeData.config,
+                                  candidateScenarioIds: ((selNodeData.config.candidateScenarioIds as string[]) ?? []).filter(
+                                    (x) => x !== cid
+                                  ),
+                                },
+                              })
+                            }
+                            className="inline-flex items-center gap-1 rounded-full bg-indigo-500/15 px-2 py-0.5 text-[11px] font-medium text-indigo-300 hover:bg-indigo-500/25"
+                          >
+                            {scenarioName(cid) ?? "scenario"} <span className="text-indigo-400">×</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <select
+                      className={inputCls + " [color-scheme:dark]"}
+                      value=""
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        if (!id) return;
+                        const cur = (selNodeData.config.candidateScenarioIds as string[]) ?? [];
+                        if (id === selNodeData.scenarioId || cur.includes(id)) return;
+                        patchNodeData(selNode.id, {
+                          config: { ...selNodeData.config, candidateScenarioIds: [...cur, id] },
+                        });
+                      }}
+                    >
+                      <option value="">+ add candidate scenario…</option>
+                      {scenarios
+                        .filter(
+                          (s) =>
+                            s.id !== selNodeData.scenarioId &&
+                            !((selNodeData.config.candidateScenarioIds as string[]) ?? []).includes(s.id)
+                        )
+                        .map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
                 {selNodeData.kind === "start" && (
                   <div>
                     <label className="mb-1 block text-xs text-gray-400">Opening mode</label>
