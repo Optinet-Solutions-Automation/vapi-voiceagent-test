@@ -8,6 +8,7 @@ import {
   insertLabEvent,
   getLastInjectedEvent,
   getRecentTurns,
+  getCollectionHandlerIds,
 } from "@/lib/lab-db";
 import { classifyUtterance } from "@/lib/lab-router";
 import {
@@ -65,6 +66,22 @@ async function log(event: Parameters<typeof insertLabEvent>[0]) {
     await insertLabEvent(event);
   } catch (e) {
     console.error("[lab webhook] failed to log event:", e);
+  }
+}
+
+/** Restrict handlers to the active collection (if one is set and non-empty). */
+async function scopeToActiveCollection(
+  handlers: ListenerHandler[],
+  activeCollectionId: string | null | undefined
+): Promise<ListenerHandler[]> {
+  if (!activeCollectionId) return handlers;
+  try {
+    const ids = await getCollectionHandlerIds(activeCollectionId);
+    if (ids.length === 0) return handlers; // empty collection → don't lock everything out
+    const allowed = new Set(ids);
+    return handlers.filter((h) => allowed.has(h.id));
+  } catch {
+    return handlers;
   }
 }
 
@@ -141,6 +158,7 @@ async function handleToolCalls(
         h.intent_key !== "first_message" && // special: opening line, never routed
         (h.mode === "tool" || h.mode === "both")
     );
+    handlers = await scopeToActiveCollection(handlers, settings?.active_collection_id);
     if (settings?.router_model) routerModel = settings.router_model;
   } catch (e) {
     console.error("[lab webhook] failed to load handlers/settings:", e);
@@ -268,6 +286,7 @@ async function handleTranscript(
         h.intent_key !== "first_message" && // special: opening line, never routed
         (h.mode === "listener" || h.mode === "both")
     );
+    handlers = await scopeToActiveCollection(handlers, settings?.active_collection_id);
   } catch (e) {
     await log({
       call_id: callId,

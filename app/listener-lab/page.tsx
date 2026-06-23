@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import LabConfigForm from "@/components/lab/LabConfigForm";
 import OrganizerTable from "@/components/lab/OrganizerTable";
+import CollectionsManager from "@/components/lab/CollectionsManager";
 import LabCallPanel from "@/components/lab/LabCallPanel";
 import ListenerMonitor from "@/components/lab/ListenerMonitor";
 import RunTranscript from "@/components/lab/RunTranscript";
 import Drawer from "@/components/lab/Drawer";
-import { listRecentLabEvents, getLabSettings, listHandlers } from "@/lib/lab-db";
+import { listRecentLabEvents, getLabSettings, listHandlers, listCollections } from "@/lib/lab-db";
 import type { LabCallEvent } from "@/lib/database.types";
 
 type Run = {
@@ -18,7 +19,7 @@ type Run = {
   avgLatencyMs: number | null;
 };
 
-type DrawerName = "config" | "organizer" | "logs" | null;
+type DrawerName = "config" | "organizer" | "collections" | "logs" | null;
 
 export default function ListenerLabPage() {
   const [assistantId, setAssistantId] = useState("");
@@ -32,6 +33,7 @@ export default function ListenerLabPage() {
   const [handlerCount, setHandlerCount] = useState<number | null>(null);
   const [openDrawer, setOpenDrawer] = useState<DrawerName>(null);
   const [logsPage, setLogsPage] = useState(1);
+  const [activeCollectionName, setActiveCollectionName] = useState<string | null>(null);
 
   const LOGS_PAGE_SIZE = 8;
 
@@ -50,8 +52,16 @@ export default function ListenerLabPage() {
     // Seed the call panel with the saved lab assistant so "Start Call" works
     // without first opening the setup drawer.
     getLabSettings()
-      .then((s) => {
+      .then(async (s) => {
         if (s?.lab_assistant_id) setAssistantId(s.lab_assistant_id);
+        if (s?.active_collection_id) {
+          try {
+            const cols = await listCollections();
+            setActiveCollectionName(cols.find((c) => c.id === s.active_collection_id)?.name ?? null);
+          } catch {
+            /* ignore */
+          }
+        }
       })
       .catch(() => {});
     refreshRuns();
@@ -127,6 +137,12 @@ export default function ListenerLabPage() {
               </span>
             )}
           </button>
+          <button onClick={() => setOpenDrawer("collections")} className={tabBtn}>
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+            Collections
+          </button>
           <button
             onClick={() => {
               refreshRuns();
@@ -183,10 +199,21 @@ export default function ListenerLabPage() {
 
       {!assistantId && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300">
-          No lab assistant configured yet — open <strong>Agent Setup</strong> to pick one and click
-          &ldquo;Configure for Lab&rdquo; before starting a call.
+          No lab assistant configured yet — open <strong>Configuration</strong> to pick one and click
+          &ldquo;Save Configuration&rdquo; before starting a call.
         </div>
       )}
+
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <span className="uppercase tracking-wider">Active collection:</span>
+        <button
+          onClick={() => setOpenDrawer("collections")}
+          className="rounded-full border border-gray-700 px-2.5 py-0.5 font-medium text-gray-300 transition hover:bg-gray-800"
+        >
+          {activeCollectionName ?? "All handlers"}
+        </button>
+        <span className="text-gray-600">— the listener only uses this collection&rsquo;s handlers</span>
+      </div>
 
       {/* ── Config drawers (hidden by default) ── */}
       <Drawer
@@ -215,6 +242,16 @@ export default function ListenerLabPage() {
         width="max-w-4xl"
       >
         <OrganizerTable />
+      </Drawer>
+
+      <Drawer
+        open={openDrawer === "collections"}
+        onClose={() => setOpenDrawer(null)}
+        title="Collections"
+        subtitle="Campaign bundles — pick the handlers a campaign uses, then set one active to scope the test call"
+        width="max-w-2xl"
+      >
+        <CollectionsManager onActiveChange={(_id, name) => setActiveCollectionName(name)} />
       </Drawer>
 
       <Drawer

@@ -379,6 +379,7 @@ export type Database = {
           action_type: "answer" | "send_sms" | "give_offer" | "end_call" | "ignore";
           delivery: "verbatim" | "reword";
           group_name: string;
+          tags: string[];
           enabled: boolean;
           priority: number;
           mode: "tool" | "listener" | "both";
@@ -394,6 +395,7 @@ export type Database = {
           action_type?: "answer" | "send_sms" | "give_offer" | "end_call" | "ignore";
           delivery?: "verbatim" | "reword";
           group_name?: string;
+          tags?: string[];
           enabled?: boolean;
           priority?: number;
           mode?: "tool" | "listener" | "both";
@@ -409,6 +411,7 @@ export type Database = {
           action_type?: "answer" | "send_sms" | "give_offer" | "end_call" | "ignore";
           delivery?: "verbatim" | "reword";
           group_name?: string;
+          tags?: string[];
           enabled?: boolean;
           priority?: number;
           mode?: "tool" | "listener" | "both";
@@ -484,6 +487,7 @@ export type Database = {
           injection_cooldown_ms: number;
           trigger_response: boolean;
           server_url_override: string | null;
+          active_collection_id: string | null;
           updated_at: string;
         };
         Insert: {
@@ -495,6 +499,7 @@ export type Database = {
           injection_cooldown_ms?: number;
           trigger_response?: boolean;
           server_url_override?: string | null;
+          active_collection_id?: string | null;
           updated_at?: string;
         };
         Update: {
@@ -506,7 +511,47 @@ export type Database = {
           injection_cooldown_ms?: number;
           trigger_response?: boolean;
           server_url_override?: string | null;
+          active_collection_id?: string | null;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      listener_collections: {
+        Row: {
+          id: string;
+          name: string;
+          description: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          description?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          description?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      listener_collection_handlers: {
+        Row: {
+          collection_id: string;
+          handler_id: string;
+        };
+        Insert: {
+          collection_id: string;
+          handler_id: string;
+        };
+        Update: {
+          collection_id?: string;
+          handler_id?: string;
         };
         Relationships: [];
       };
@@ -533,3 +578,4 @@ export type AgentConfig = Database["public"]["Tables"]["agent_configs"]["Row"];
 export type ListenerHandler = Database["public"]["Tables"]["listener_handlers"]["Row"];
 export type LabCallEvent = Database["public"]["Tables"]["lab_call_events"]["Row"];
 export type LabSettings = Database["public"]["Tables"]["lab_settings"]["Row"];
+export type ListenerCollection = Database["public"]["Tables"]["listener_collections"]["Row"];

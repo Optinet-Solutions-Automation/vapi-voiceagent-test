@@ -6,8 +6,6 @@ import {
   createHandler,
   updateHandler,
   deleteHandler,
-  renameGroup,
-  clearGroup,
 } from "@/lib/lab-db";
 import type { ListenerHandler } from "@/lib/database.types";
 
@@ -30,7 +28,7 @@ const STARTER_HANDLERS = [
     response_template: "Greet them warmly and briefly say why you're calling.",
     action_type: "answer" as const,
     delivery: "reword" as const,
-    group_name: "Greeting",
+    tags: ["Greeting"],
     priority: 10,
   },
   {
@@ -40,7 +38,7 @@ const STARTER_HANDLERS = [
     response_template: "The standard plan is forty-nine dollars a month, with no setup fee.",
     action_type: "answer" as const,
     delivery: "verbatim" as const,
-    group_name: "Q&A",
+    tags: ["Q&A"],
     priority: 20,
   },
   {
@@ -50,7 +48,7 @@ const STARTER_HANDLERS = [
     response_template: "We've got a special three hundred percent deposit bonus available today only.",
     action_type: "give_offer" as const,
     delivery: "verbatim" as const,
-    group_name: "Promotions",
+    tags: ["Promotions"],
     priority: 30,
   },
   {
@@ -60,7 +58,7 @@ const STARTER_HANDLERS = [
     response_template: "Perfect — I'll text you the details right now.",
     action_type: "send_sms" as const,
     delivery: "verbatim" as const,
-    group_name: "SMS",
+    tags: ["SMS"],
     priority: 40,
   },
   {
@@ -70,7 +68,7 @@ const STARTER_HANDLERS = [
     response_template: "Thanks so much for your time today. Have a great day. Goodbye!",
     action_type: "end_call" as const,
     delivery: "verbatim" as const,
-    group_name: "Closing",
+    tags: ["Closing"],
     priority: 50,
   },
 ];
@@ -83,7 +81,7 @@ type Draft = {
   response_template: string;
   action_type: ListenerHandler["action_type"];
   delivery: ListenerHandler["delivery"];
-  group_name: string;
+  tags: string[];
   mode: ListenerHandler["mode"];
   priority: number;
   enabled: boolean;
@@ -96,7 +94,7 @@ const EMPTY_DRAFT: Draft = {
   response_template: "",
   action_type: "answer",
   delivery: "verbatim",
-  group_name: "",
+  tags: [],
   mode: "both",
   priority: 100,
   enabled: true,
@@ -112,10 +110,9 @@ export default function OrganizerTable() {
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [search, setSearch] = useState("");
-  const [groupFilter, setGroupFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [page, setPage] = useState(1);
-  const [addingGroup, setAddingGroup] = useState(false);
-  const [showGroups, setShowGroups] = useState(false);
+  const [newTag, setNewTag] = useState("");
 
   async function reload() {
     try {
@@ -134,18 +131,18 @@ export default function OrganizerTable() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, groupFilter]);
+  }, [search, tagFilter]);
 
-  const groups = Array.from(
-    new Set(handlers.map((h) => h.group_name).filter(Boolean))
+  const allTags = Array.from(
+    new Set(handlers.flatMap((h) => h.tags ?? []).filter(Boolean))
   ).sort();
 
   const q = search.trim().toLowerCase();
   const filtered = handlers.filter((h) => {
-    if (groupFilter && h.group_name !== groupFilter) return false;
+    if (tagFilter && !(h.tags ?? []).includes(tagFilter)) return false;
     if (
       q &&
-      !`${h.name} ${h.intent_key} ${h.description} ${h.response_template} ${h.action_type} ${h.delivery} ${h.group_name}`
+      !`${h.name} ${h.intent_key} ${h.description} ${h.response_template} ${h.action_type} ${h.delivery} ${(h.tags ?? []).join(" ")}`
         .toLowerCase()
         .includes(q)
     )
@@ -181,7 +178,7 @@ export default function OrganizerTable() {
         response_template: draft.response_template,
         action_type: draft.action_type,
         delivery: draft.delivery,
-        group_name: draft.group_name.trim(),
+        tags: draft.tags,
         mode: draft.mode,
         priority: draft.priority,
         enabled: draft.enabled,
@@ -210,29 +207,6 @@ export default function OrganizerTable() {
     }
   }
 
-  async function handleRenameGroup(oldName: string, newName: string) {
-    const trimmed = newName.trim();
-    if (!trimmed || trimmed === oldName) return;
-    try {
-      await renameGroup(oldName, trimmed);
-      if (groupFilter === oldName) setGroupFilter(trimmed);
-      await reload();
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to rename group");
-    }
-  }
-
-  async function handleDeleteGroup(name: string) {
-    if (!window.confirm(`Remove the group "${name}"? Handlers stay but become ungrouped.`)) return;
-    try {
-      await clearGroup(name);
-      if (groupFilter === name) setGroupFilter("");
-      await reload();
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to delete group");
-    }
-  }
-
   async function handleToggle(h: ListenerHandler) {
     try {
       await updateHandler(h.id, { enabled: !h.enabled });
@@ -242,6 +216,18 @@ export default function OrganizerTable() {
     } catch (e: any) {
       setError(e?.message ?? "Failed to toggle handler");
     }
+  }
+
+  function addTag(tag: string) {
+    if (!draft) return;
+    const t = tag.trim();
+    if (!t || draft.tags.includes(t)) return;
+    setDraft({ ...draft, tags: [...draft.tags, t] });
+    setNewTag("");
+  }
+  function removeTag(tag: string) {
+    if (!draft) return;
+    setDraft({ ...draft, tags: draft.tags.filter((t) => t !== tag) });
   }
 
   return (
@@ -259,31 +245,23 @@ export default function OrganizerTable() {
             className="w-full rounded-lg border border-gray-700 bg-gray-800 py-1.5 pl-8 pr-3 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
           />
         </div>
-        {groups.length > 0 && (
+        {allTags.length > 0 && (
           <select
-            value={groupFilter}
-            onChange={(e) => setGroupFilter(e.target.value)}
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
             className="shrink-0 rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]"
           >
-            <option value="">All groups</option>
-            {groups.map((g) => (
-              <option key={g} value={g}>
-                {g}
+            <option value="">All tags</option>
+            {allTags.map((t) => (
+              <option key={t} value={t}>
+                {t}
               </option>
             ))}
           </select>
         )}
-        {groups.length > 0 && (
-          <button
-            onClick={() => setShowGroups(true)}
-            className="shrink-0 rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 transition hover:bg-gray-700"
-          >
-            Manage Groups
-          </button>
-        )}
         <button
           onClick={() => {
-            setAddingGroup(false);
+            setNewTag("");
             setDraft({ ...EMPTY_DRAFT });
           }}
           className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-500"
@@ -310,7 +288,7 @@ export default function OrganizerTable() {
       )}
 
       {!loading && handlers.length > 0 && filtered.length === 0 && (
-        <p className="px-4 py-8 text-center text-sm text-gray-500">No handlers match &ldquo;{search}&rdquo;.</p>
+        <p className="px-4 py-8 text-center text-sm text-gray-500">No handlers match your filters.</p>
       )}
 
       {paginated.map((h) => (
@@ -337,11 +315,11 @@ export default function OrganizerTable() {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium text-gray-200">{h.name}</span>
-              {h.group_name && (
-                <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-300">
-                  {h.group_name}
+              {(h.tags ?? []).map((t) => (
+                <span key={t} className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-300">
+                  {t}
                 </span>
-              )}
+              ))}
               <code className="rounded bg-gray-700/60 px-1.5 py-0.5 text-[10px] text-gray-400">
                 {h.intent_key}
               </code>
@@ -384,7 +362,7 @@ export default function OrganizerTable() {
           <div className="flex shrink-0 gap-1">
             <button
               onClick={() => {
-                setAddingGroup(false);
+                setNewTag("");
                 setDraft({
                   id: h.id,
                   name: h.name,
@@ -393,7 +371,7 @@ export default function OrganizerTable() {
                   response_template: h.response_template,
                   action_type: h.action_type,
                   delivery: h.delivery,
-                  group_name: h.group_name,
+                  tags: h.tags ?? [],
                   mode: h.mode,
                   priority: h.priority,
                   enabled: h.enabled,
@@ -447,57 +425,6 @@ export default function OrganizerTable() {
         </div>
       )}
 
-      {/* Manage Groups modal */}
-      {showGroups && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setShowGroups(false)}>
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-700 bg-gray-900 p-5 shadow-2xl space-y-3"
-          >
-            <div>
-              <h3 className="text-base font-bold text-white">Manage Groups</h3>
-              <p className="text-[11px] text-gray-500">
-                Rename or remove a group across all its handlers. To add a group, assign it on a handler.
-              </p>
-            </div>
-            {groups.length === 0 && <p className="text-sm text-gray-500">No groups yet.</p>}
-            {groups.map((g) => {
-              const count = handlers.filter((h) => h.group_name === g).length;
-              return (
-                <div key={g} className="flex items-center gap-2">
-                  <input
-                    defaultValue={g}
-                    onBlur={(e) => handleRenameGroup(g, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                    }}
-                    className="flex-1 rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none"
-                  />
-                  <span className="shrink-0 text-[11px] text-gray-500">{count}</span>
-                  <button
-                    onClick={() => handleDeleteGroup(g)}
-                    className="shrink-0 rounded p-1.5 text-gray-500 transition hover:bg-gray-700 hover:text-rose-400"
-                    title="Remove group"
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                </div>
-              );
-            })}
-            <p className="text-[10px] text-gray-600">Tip: editing a name and clicking away renames the group everywhere.</p>
-            <button
-              onClick={() => setShowGroups(false)}
-              className="w-full rounded-lg border border-gray-700 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-800"
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Add/Edit modal */}
       {draft && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setDraft(null)}>
@@ -533,37 +460,60 @@ export default function OrganizerTable() {
 
             <div>
               <label className="mb-1 block text-xs text-gray-400">
-                Group <span className="text-gray-600">(category for organizing &amp; filtering)</span>
+                Tags <span className="text-gray-600">(categories for organizing &amp; filtering)</span>
               </label>
-              <select
-                className={inputCls + " [color-scheme:dark]"}
-                value={addingGroup ? "__new__" : draft.group_name}
-                onChange={(e) => {
-                  if (e.target.value === "__new__") {
-                    setAddingGroup(true);
-                    setDraft({ ...draft, group_name: "" });
-                  } else {
-                    setAddingGroup(false);
-                    setDraft({ ...draft, group_name: e.target.value });
-                  }
-                }}
-              >
-                <option value="">(no group)</option>
-                {groups.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-                <option value="__new__">+ New group…</option>
-              </select>
-              {addingGroup && (
+              {draft.tags.length > 0 && (
+                <div className="mb-1.5 flex flex-wrap gap-1.5">
+                  {draft.tags.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => removeTag(t)}
+                      className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-[11px] font-medium text-purple-300 hover:bg-purple-500/25"
+                      title="Remove tag"
+                    >
+                      {t}
+                      <span className="text-purple-400">×</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
                 <input
-                  className={inputCls + " mt-2"}
-                  value={draft.group_name}
-                  onChange={(e) => setDraft({ ...draft, group_name: e.target.value })}
-                  placeholder="New group name (e.g. Promotions)"
-                  autoFocus
+                  className={inputCls}
+                  value={newTag}
+                  onChange={(e) => setNewTag(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addTag(newTag);
+                    }
+                  }}
+                  placeholder="Add a tag (e.g. Promotions) and press Enter"
                 />
+                <button
+                  type="button"
+                  onClick={() => addTag(newTag)}
+                  disabled={!newTag.trim()}
+                  className="shrink-0 rounded-md border border-gray-700 px-3 py-1.5 text-xs text-gray-300 transition hover:bg-gray-800 disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+              {allTags.filter((t) => !draft.tags.includes(t)).length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {allTags
+                    .filter((t) => !draft.tags.includes(t))
+                    .map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => addTag(t)}
+                        className="rounded-full border border-gray-700 px-2 py-0.5 text-[10px] text-gray-400 transition hover:bg-gray-800 hover:text-gray-200"
+                      >
+                        + {t}
+                      </button>
+                    ))}
+                </div>
               )}
             </div>
 

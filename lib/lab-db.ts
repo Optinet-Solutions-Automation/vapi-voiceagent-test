@@ -2,7 +2,13 @@
 // Same style as lib/db.ts; the supabase client is isomorphic so the webhook route
 // can use these server-side too.
 import { supabase } from "./supabase";
-import type { ListenerHandler, LabCallEvent, LabSettings, Database } from "./database.types";
+import type {
+  ListenerHandler,
+  LabCallEvent,
+  LabSettings,
+  ListenerCollection,
+  Database,
+} from "./database.types";
 
 type HandlerInsert = Database["public"]["Tables"]["listener_handlers"]["Insert"];
 type HandlerUpdate = Database["public"]["Tables"]["listener_handlers"]["Update"];
@@ -60,6 +66,66 @@ export async function clearGroup(name: string): Promise<void> {
     .update({ group_name: "", updated_at: new Date().toISOString() })
     .eq("group_name", name);
   if (error) throw new Error(error.message);
+}
+
+// ── Collections (campaign bundles) ────────────────────────────
+
+export async function listCollections(): Promise<ListenerCollection[]> {
+  const { data, error } = await supabase
+    .from("listener_collections")
+    .select("*")
+    .order("name", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function createCollection(name: string, description = ""): Promise<ListenerCollection> {
+  const { data, error } = await supabase
+    .from("listener_collections")
+    .insert({ name, description })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function updateCollection(
+  id: string,
+  updates: { name?: string; description?: string }
+): Promise<void> {
+  const { error } = await supabase
+    .from("listener_collections")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteCollection(id: string): Promise<void> {
+  const { error } = await supabase.from("listener_collections").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+/** Handler IDs that belong to a collection. */
+export async function getCollectionHandlerIds(collectionId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("listener_collection_handlers")
+    .select("handler_id")
+    .eq("collection_id", collectionId);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => r.handler_id);
+}
+
+/** Replace a collection's membership with the given handler IDs. */
+export async function setCollectionHandlers(collectionId: string, handlerIds: string[]): Promise<void> {
+  const del = await supabase
+    .from("listener_collection_handlers")
+    .delete()
+    .eq("collection_id", collectionId);
+  if (del.error) throw new Error(del.error.message);
+  if (handlerIds.length === 0) return;
+  const rows = handlerIds.map((handler_id) => ({ collection_id: collectionId, handler_id }));
+  const ins = await supabase.from("listener_collection_handlers").insert(rows);
+  if (ins.error) throw new Error(ins.error.message);
 }
 
 // ── Settings ──────────────────────────────────────────────────
