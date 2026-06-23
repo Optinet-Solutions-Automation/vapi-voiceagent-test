@@ -230,7 +230,7 @@ export default function CollectionsManager({ onActiveChange }: Props) {
                   onClick={() => (isSelected ? setSelectedId(null) : selectCollection(c.id))}
                   className="shrink-0 rounded-lg border border-gray-700 px-2 py-1 text-[11px] text-gray-300 transition hover:bg-gray-800"
                 >
-                  {isSelected ? "Close" : "Edit members"}
+                  {isSelected ? "Close" : "Edit handlers"}
                 </button>
                 <button
                   onClick={() => handleDelete(c.id)}
@@ -253,7 +253,7 @@ export default function CollectionsManager({ onActiveChange }: Props) {
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Filter handlers…"
                     />
-                    <span className="shrink-0 text-[11px] text-gray-500">{members.size} selected</span>
+                    <span className="shrink-0 text-[11px] text-gray-500">{members.size} handlers selected</span>
                   </div>
                   <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-gray-700 p-1.5">
                     {filteredHandlers.map((h) => (
@@ -281,7 +281,7 @@ export default function CollectionsManager({ onActiveChange }: Props) {
                     disabled={busy}
                     className="mt-2 w-full rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-40"
                   >
-                    {busy ? "Saving…" : `Save ${selected?.name ?? "collection"} members`}
+                    {busy ? "Saving…" : `Save handlers for ${selected?.name ?? "collection"}`}
                   </button>
                 </div>
               )}
