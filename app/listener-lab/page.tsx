@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import LabConfigForm from "@/components/lab/LabConfigForm";
 import OrganizerTable from "@/components/lab/OrganizerTable";
 import CollectionsManager from "@/components/lab/CollectionsManager";
+import ScriptBuilder from "@/components/lab/ScriptBuilder";
 import LabCallPanel from "@/components/lab/LabCallPanel";
 import ListenerMonitor from "@/components/lab/ListenerMonitor";
 import RunTranscript from "@/components/lab/RunTranscript";
@@ -34,6 +35,7 @@ export default function ListenerLabPage() {
   const [openDrawer, setOpenDrawer] = useState<DrawerName>(null);
   const [logsPage, setLogsPage] = useState(1);
   const [activeCollectionName, setActiveCollectionName] = useState<string | null>(null);
+  const [showScriptBuilder, setShowScriptBuilder] = useState(false);
 
   const LOGS_PAGE_SIZE = 8;
 
@@ -142,6 +144,12 @@ export default function ListenerLabPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
             Collections
+          </button>
+          <button onClick={() => setShowScriptBuilder(true)} className={tabBtn}>
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0H5a2 2 0 01-2-2v-4m6 6h10a2 2 0 002-2v-4M3 9h18M3 15h18" />
+            </svg>
+            Script Builder
           </button>
           <button
             onClick={() => {
@@ -253,6 +261,8 @@ export default function ListenerLabPage() {
       >
         <CollectionsManager onActiveChange={(_id, name) => setActiveCollectionName(name)} />
       </Drawer>
+
+      {showScriptBuilder && <ScriptBuilder onClose={() => setShowScriptBuilder(false)} />}
 
       <Drawer
         open={openDrawer === "logs"}

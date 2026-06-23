@@ -488,6 +488,7 @@ export type Database = {
           trigger_response: boolean;
           server_url_override: string | null;
           active_collection_id: string | null;
+          active_script_id: string | null;
           updated_at: string;
         };
         Insert: {
@@ -500,6 +501,7 @@ export type Database = {
           trigger_response?: boolean;
           server_url_override?: string | null;
           active_collection_id?: string | null;
+          active_script_id?: string | null;
           updated_at?: string;
         };
         Update: {
@@ -512,6 +514,7 @@ export type Database = {
           trigger_response?: boolean;
           server_url_override?: string | null;
           active_collection_id?: string | null;
+          active_script_id?: string | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -555,6 +558,123 @@ export type Database = {
         };
         Relationships: [];
       };
+      listener_scripts: {
+        Row: {
+          id: string;
+          name: string;
+          description: string;
+          collection_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          description?: string;
+          collection_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          description?: string;
+          collection_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      listener_script_nodes: {
+        Row: {
+          id: string;
+          script_id: string;
+          type: string;
+          scenario_id: string | null;
+          label: string;
+          config: Record<string, unknown>;
+          pos_x: number;
+          pos_y: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          script_id: string;
+          type: string;
+          scenario_id?: string | null;
+          label?: string;
+          config?: Record<string, unknown>;
+          pos_x?: number;
+          pos_y?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          script_id?: string;
+          type?: string;
+          scenario_id?: string | null;
+          label?: string;
+          config?: Record<string, unknown>;
+          pos_x?: number;
+          pos_y?: number;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      listener_script_edges: {
+        Row: {
+          id: string;
+          script_id: string;
+          source_node_id: string;
+          target_node_id: string;
+          condition: Record<string, unknown>;
+          label: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          script_id: string;
+          source_node_id: string;
+          target_node_id: string;
+          condition?: Record<string, unknown>;
+          label?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          script_id?: string;
+          source_node_id?: string;
+          target_node_id?: string;
+          condition?: Record<string, unknown>;
+          label?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      lab_call_flow_state: {
+        Row: {
+          call_id: string;
+          script_id: string | null;
+          current_node_id: string | null;
+          variables: Record<string, unknown>;
+          updated_at: string;
+        };
+        Insert: {
+          call_id: string;
+          script_id?: string | null;
+          current_node_id?: string | null;
+          variables?: Record<string, unknown>;
+          updated_at?: string;
+        };
+        Update: {
+          call_id?: string;
+          script_id?: string | null;
+          current_node_id?: string | null;
+          variables?: Record<string, unknown>;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {};
     Functions: {};
@@ -579,3 +699,6 @@ export type ListenerHandler = Database["public"]["Tables"]["listener_handlers"][
 export type LabCallEvent = Database["public"]["Tables"]["lab_call_events"]["Row"];
 export type LabSettings = Database["public"]["Tables"]["lab_settings"]["Row"];
 export type ListenerCollection = Database["public"]["Tables"]["listener_collections"]["Row"];
+export type ListenerScript = Database["public"]["Tables"]["listener_scripts"]["Row"];
+export type ListenerScriptNode = Database["public"]["Tables"]["listener_script_nodes"]["Row"];
+export type ListenerScriptEdge = Database["public"]["Tables"]["listener_script_edges"]["Row"];

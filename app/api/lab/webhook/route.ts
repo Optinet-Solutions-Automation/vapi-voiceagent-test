@@ -9,7 +9,11 @@ import {
   getLastInjectedEvent,
   getRecentTurns,
   getCollectionHandlerIds,
+  getScriptGraph,
+  getFlowState,
+  upsertFlowState,
 } from "@/lib/lab-db";
+import { findStartNode, nodeById, pickNextEdge } from "@/lib/lab-flow";
 import { classifyUtterance } from "@/lib/lab-router";
 import {
   getControlUrl,
@@ -352,6 +356,29 @@ async function handleTranscript(
     meta: { raw: cls.raw },
   });
 
+  // ── Script runtime: if a script is active, try to advance the flow first.
+  //    Reactive scenarios still handle anything the flow doesn't consume.
+  if (settings.active_script_id) {
+    try {
+      const advanced = await runScriptFlow(
+        callId,
+        controlUrlHint,
+        settings.active_script_id,
+        cls.intent,
+        utteranceAt,
+        classifiedAt
+      );
+      if (advanced) return; // flow handled this turn
+    } catch (e) {
+      await log({
+        call_id: callId,
+        event_type: "error",
+        content: "script flow failed",
+        meta: { error: e instanceof Error ? e.message : String(e) },
+      });
+    }
+  }
+
   // Decision gate — the conflict protocol
   if (cls.intent === "none" || cls.confidence < settings.confidence_threshold) {
     await log({
@@ -449,4 +476,94 @@ async function handleTranscript(
       meta: { error: e instanceof Error ? e.message : String(e) },
     });
   }
+}
+
+// ── Script runtime (graph-walker) ─────────────────────────────
+// Returns true if the flow advanced and handled this turn.
+async function runScriptFlow(
+  callId: string,
+  controlUrlHint: string | null,
+  scriptId: string,
+  intent: string,
+  utteranceAt: Date,
+  classifiedAt: number
+): Promise<boolean> {
+  const [graph, allHandlers] = await Promise.all([getScriptGraph(scriptId), listHandlers()]);
+  if (graph.nodes.length === 0) return false;
+
+  // Resolve / initialise the current node for this call.
+  let state = await getFlowState(callId).catch(() => null);
+  if (!state || state.script_id !== scriptId || !state.current_node_id) {
+    const start = findStartNode(graph.nodes);
+    if (!start) return false;
+    state = { call_id: callId, script_id: scriptId, current_node_id: start.id, variables: {} } as Awaited<
+      ReturnType<typeof getFlowState>
+    >;
+    await upsertFlowState(callId, scriptId, start.id, {});
+  }
+
+  const tags = allHandlers.find((h) => h.intent_key === intent)?.tags ?? [];
+  const edge = pickNextEdge(graph.edges, state!.current_node_id!, intent, tags);
+  if (!edge) return false; // off-script → let reactive layer handle it
+
+  const target = nodeById(graph.nodes, edge.target_node_id);
+  if (!target) return false;
+
+  const controlUrl = await getControlUrl(callId, controlUrlHint);
+  const variables = { ...(state!.variables as Record<string, unknown>) };
+  const scenario = target.scenario_id
+    ? allHandlers.find((h) => h.id === target.scenario_id) ?? null
+    : null;
+  let injectedText = scenario?.response_template ?? "";
+  let controlStatus: number | null = null;
+
+  if (controlUrl) {
+    if (target.type === "end") {
+      injectedText = scenario?.response_template || "Thanks for your time today. Goodbye!";
+      const r = await injectSay(controlUrl, injectedText, true);
+      controlStatus = r.status;
+      if (!r.ok) setTimeout(() => endCall(controlUrl).catch(() => {}), 4000);
+    } else if (target.type === "transfer") {
+      injectedText =
+        scenario?.response_template || "Thanks — let me connect you to one of our team now.";
+      const r = await injectSay(controlUrl, injectedText, false);
+      controlStatus = r.status;
+      // (Actual SIP/number transfer wiring is a later step; v1 announces + logs.)
+    } else if (target.type === "set_variable") {
+      const name = String((target.config as Record<string, unknown>).name ?? "").trim();
+      if (name) variables[name] = (target.config as Record<string, unknown>).value ?? true;
+    } else if (scenario) {
+      // say / switch / send_sms with a scenario line
+      const r =
+        scenario.delivery === "verbatim"
+          ? await injectSay(controlUrl, injectedText, false)
+          : await injectStaffNote(controlUrl, injectedText, true);
+      controlStatus = r.status;
+    }
+  }
+
+  await upsertFlowState(callId, scriptId, target.id, variables);
+
+  const injectedAtMs = Date.now();
+  await log({
+    call_id: callId,
+    event_type: "injected",
+    content: injectedText || `→ ${target.label || target.type}`,
+    intent_key: intent,
+    handler_id: scenario?.id ?? null,
+    action_type: `flow:${target.type}`,
+    utterance_at: utteranceAt.toISOString(),
+    classified_at: new Date(classifiedAt).toISOString(),
+    injected_at: new Date(injectedAtMs).toISOString(),
+    latency_ms: injectedAtMs - utteranceAt.getTime(),
+    meta: {
+      flow: true,
+      fromNode: state!.current_node_id,
+      toNode: target.id,
+      nodeType: target.type,
+      edgeCondition: edge.condition,
+      controlStatus,
+    },
+  });
+  return true;
 }

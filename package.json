@@ -13,6 +13,7 @@
     "@types/node": "^25.3.5",
     "@types/react": "^19.2.14",
     "@vapi-ai/web": "^2.5.2",
+    "@xyflow/react": "^12.11.1",
     "next": "^16.1.6",
     "openai": "^6.27.0",
     "postcss": "^8.5.8",

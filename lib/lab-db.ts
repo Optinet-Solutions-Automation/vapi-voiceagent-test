@@ -7,6 +7,9 @@ import type {
   LabCallEvent,
   LabSettings,
   ListenerCollection,
+  ListenerScript,
+  ListenerScriptNode,
+  ListenerScriptEdge,
   Database,
 } from "./database.types";
 
@@ -128,6 +131,97 @@ export async function setCollectionHandlers(collectionId: string, handlerIds: st
   if (ins.error) throw new Error(ins.error.message);
 }
 
+// ── Scripts (visual call-flow builder) ────────────────────────
+
+export async function listScripts(): Promise<ListenerScript[]> {
+  const { data, error } = await supabase
+    .from("listener_scripts")
+    .select("*")
+    .order("name", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function createScript(name: string, collectionId: string | null = null): Promise<ListenerScript> {
+  const { data, error } = await supabase
+    .from("listener_scripts")
+    .insert({ name, collection_id: collectionId })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function updateScript(
+  id: string,
+  updates: { name?: string; description?: string; collection_id?: string | null }
+): Promise<void> {
+  const { error } = await supabase
+    .from("listener_scripts")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteScript(id: string): Promise<void> {
+  const { error } = await supabase.from("listener_scripts").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export type ScriptGraph = { nodes: ListenerScriptNode[]; edges: ListenerScriptEdge[] };
+
+export async function getScriptGraph(scriptId: string): Promise<ScriptGraph> {
+  const [nodesRes, edgesRes] = await Promise.all([
+    supabase.from("listener_script_nodes").select("*").eq("script_id", scriptId),
+    supabase.from("listener_script_edges").select("*").eq("script_id", scriptId),
+  ]);
+  if (nodesRes.error) throw new Error(nodesRes.error.message);
+  if (edgesRes.error) throw new Error(edgesRes.error.message);
+  return { nodes: nodesRes.data ?? [], edges: edgesRes.data ?? [] };
+}
+
+type NodeInput = {
+  id: string;
+  type: string;
+  scenario_id: string | null;
+  label: string;
+  config: Record<string, unknown>;
+  pos_x: number;
+  pos_y: number;
+};
+type EdgeInput = {
+  id: string;
+  source_node_id: string;
+  target_node_id: string;
+  condition: Record<string, unknown>;
+  label: string;
+};
+
+/** Replace the whole graph for a script (delete-then-insert). */
+export async function saveScriptGraph(
+  scriptId: string,
+  nodes: NodeInput[],
+  edges: EdgeInput[]
+): Promise<void> {
+  // Edges first (FK to nodes), then nodes.
+  await supabase.from("listener_script_edges").delete().eq("script_id", scriptId);
+  await supabase.from("listener_script_nodes").delete().eq("script_id", scriptId);
+  if (nodes.length) {
+    const nrows = nodes.map((n) => ({ ...n, script_id: scriptId }));
+    const ni = await supabase.from("listener_script_nodes").insert(nrows);
+    if (ni.error) throw new Error(ni.error.message);
+  }
+  if (edges.length) {
+    const erows = edges.map((e) => ({ ...e, script_id: scriptId }));
+    const ei = await supabase.from("listener_script_edges").insert(erows);
+    if (ei.error) throw new Error(ei.error.message);
+  }
+  await supabase
+    .from("listener_scripts")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", scriptId);
+}
+
 // ── Settings ──────────────────────────────────────────────────
 
 export async function getLabSettings(): Promise<LabSettings | null> {
@@ -144,6 +238,34 @@ export async function saveLabSettings(updates: SettingsUpdate): Promise<void> {
   const { error } = await supabase
     .from("lab_settings")
     .upsert({ id: "default", ...updates, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+}
+
+// ── Flow state (runtime graph-walker) ─────────────────────────
+
+export async function getFlowState(callId: string) {
+  const { data, error } = await supabase
+    .from("lab_call_flow_state")
+    .select("*")
+    .eq("call_id", callId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function upsertFlowState(
+  callId: string,
+  scriptId: string | null,
+  currentNodeId: string | null,
+  variables: Record<string, unknown>
+): Promise<void> {
+  const { error } = await supabase.from("lab_call_flow_state").upsert({
+    call_id: callId,
+    script_id: scriptId,
+    current_node_id: currentNodeId,
+    variables,
+    updated_at: new Date().toISOString(),
+  });
   if (error) throw new Error(error.message);
 }
 
