@@ -169,6 +169,7 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
 
       <TranscriptPanel
         messages={messages}
+        dense
         title="Call Transcript"
         emptyText="Start a call to test the listener architecture."
       />

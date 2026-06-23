@@ -50,6 +50,7 @@ export default function RunTranscript({ callId }: Props) {
       )}
       <TranscriptPanel
         messages={messages}
+        dense
         title="Call Transcript"
         emptyText={
           loading

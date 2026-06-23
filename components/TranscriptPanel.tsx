@@ -12,6 +12,8 @@ type Props = {
   emptyText?: string;
   /** When true, the panel grows to fill its flex container instead of using a fixed max-height */
   fillHeight?: boolean;
+  /** When true, use smaller text/padding to match the Listener Monitor */
+  dense?: boolean;
 };
 
 export default function TranscriptPanel({
@@ -19,6 +21,7 @@ export default function TranscriptPanel({
   title = "Live Transcript",
   emptyText = "Start a voice session to see the conversation here.",
   fillHeight = false,
+  dense = false,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [openCommentId, setOpenCommentId] = useState<string | null>(null);
@@ -35,9 +38,9 @@ export default function TranscriptPanel({
         </h2>
       </div>
 
-      <div className={`overflow-y-auto p-3 space-y-3 sm:p-5 sm:space-y-4 ${fillHeight ? "flex-1 min-h-0" : "min-h-[200px] max-h-[60dvh] sm:min-h-[300px] sm:max-h-[600px]"}`}>
+      <div className={`overflow-y-auto ${dense ? "p-3 space-y-2" : "p-3 space-y-3 sm:p-5 sm:space-y-4"} ${fillHeight ? "flex-1 min-h-0" : "min-h-[200px] max-h-[60dvh] sm:min-h-[300px] sm:max-h-[600px]"}`}>
         {messages.length === 0 && (
-          <p className="text-gray-500 text-sm text-center py-8">{emptyText}</p>
+          <p className={`text-gray-500 text-center py-8 ${dense ? "text-xs" : "text-sm"}`}>{emptyText}</p>
         )}
 
         {messages.map((msg, i) => {
@@ -49,16 +52,16 @@ export default function TranscriptPanel({
               <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div className="max-w-[92%] space-y-1 sm:max-w-[85%]">
                   <div
-                    className={`rounded-lg px-3 py-2 sm:px-4 sm:py-2.5 ${
+                    className={`rounded-lg ${dense ? "px-2.5 py-1.5" : "px-3 py-2 sm:px-4 sm:py-2.5"} ${
                       msg.role === "user"
                         ? "bg-indigo-600 text-white"
                         : "bg-gray-700 text-gray-100"
                     }`}
                   >
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider opacity-70">
+                    <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider opacity-70">
                       {msg.role === "user" ? "You" : "Agent"}
                     </div>
-                    <p className="text-sm leading-relaxed">{msg.content}</p>
+                    <p className={`leading-relaxed ${dense ? "text-xs" : "text-sm"}`}>{msg.content}</p>
                   </div>
 
                   {hasDbId && (
