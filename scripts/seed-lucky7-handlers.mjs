@@ -19,6 +19,7 @@ const handlers = [
   {
     name: "First Message (call opening)",
     intent_key: "first_message",
+    group_name: "Greeting",
     description:
       "SPECIAL: not routed — this template is spoken as the agent's opening line when the call starts. Use {{name}} for the client's name.",
     response_template:
@@ -32,6 +33,7 @@ const handlers = [
   {
     name: "Gambling Problem",
     intent_key: "gambling_problem",
+    group_name: "Compliance",
     description:
       "Customer says they have a gambling problem, gambling addiction, are trying to quit gambling, or that gambling has hurt them or their family.",
     response_template:
@@ -44,6 +46,7 @@ const handlers = [
   {
     name: "Do Not Call / Opt Out",
     intent_key: "do_not_call",
+    group_name: "Compliance",
     description:
       "Customer is angry, says do not call again, remove me from your list, stop calling, not interested in gambling ever, or any firm request to never be contacted.",
     response_template:
@@ -57,6 +60,7 @@ const handlers = [
   {
     name: "Main Offer — 20 No-Deposit Free Spins",
     intent_key: "main_offer",
+    group_name: "Promotions",
     description:
       "Customer shows interest, asks what the call is about, what the offer/bonus/surprise is, or says okay tell me more.",
     response_template:
@@ -69,6 +73,7 @@ const handlers = [
   {
     name: "Upsell — 300% Deposit Bonus",
     intent_key: "upsell_offer",
+    group_name: "Promotions",
     description:
       "Customer asks if there is anything more, another bonus, a deposit offer, or about the extra treat mentioned in the SMS.",
     response_template:
@@ -81,6 +86,7 @@ const handlers = [
   {
     name: "Send SMS Consent",
     intent_key: "sms_consent",
+    group_name: "SMS",
     description:
       "Customer agrees to receive details by SMS/text, says yes send it, text me, or asks for the details in writing.",
     response_template:
@@ -93,6 +99,7 @@ const handlers = [
   {
     name: "Not Interested (soft)",
     intent_key: "not_interested_soft",
+    group_name: "Objections",
     description:
       "Customer politely declines, says not right now, maybe later, or is hesitant but NOT angry and NOT asking to never be called.",
     response_template:
@@ -105,6 +112,7 @@ const handlers = [
   {
     name: "No Time / Busy",
     intent_key: "no_time",
+    group_name: "Objections",
     description:
       "Customer says they are busy, driving, at work, in a meeting, or cannot talk right now.",
     response_template:
@@ -117,6 +125,7 @@ const handlers = [
   {
     name: "Cannot Act Now / Offer Timing",
     intent_key: "cant_act_now",
+    group_name: "Objections",
     description:
       "Customer can't log in or act right now or for a while (busy, away, no access for days) and is really asking whether the offer still stands or what happens to it — this is about TIMING of the offer, NOT a technical login error.",
     response_template:
@@ -130,6 +139,7 @@ const handlers = [
   {
     name: "Wagering Requirements",
     intent_key: "wagering_requirements",
+    group_name: "Q&A",
     description:
       "Customer asks about wagering requirements, playthrough, rollover, or conditions on winnings.",
     response_template: "The wagering requirement is forty times the deposit.",
@@ -141,6 +151,7 @@ const handlers = [
   {
     name: "Minimum Deposit",
     intent_key: "minimum_deposit",
+    group_name: "Q&A",
     description:
       "Customer asks how much they need to deposit, the minimum deposit, or what it costs to claim.",
     response_template:
@@ -153,6 +164,7 @@ const handlers = [
   {
     name: "Where to Find the Spins",
     intent_key: "where_find_spins",
+    group_name: "Q&A",
     description:
       "Customer asks where the free spins are, where to see them on the website, or says they cannot find them.",
     response_template:
@@ -165,6 +177,7 @@ const handlers = [
   {
     name: "Which Game",
     intent_key: "which_game",
+    group_name: "Q&A",
     description:
       "Customer asks what game the free spins are for or what slot they can play.",
     response_template:
@@ -177,6 +190,7 @@ const handlers = [
   {
     name: "Website URL",
     intent_key: "website_url",
+    group_name: "Q&A",
     description:
       "Customer asks for the website, the link, the URL, or where to log in.",
     response_template:
@@ -189,6 +203,7 @@ const handlers = [
   {
     name: "Claim Limit",
     intent_key: "claim_limit",
+    group_name: "Q&A",
     description:
       "Customer asks how many times they can claim the offer or if they can get it again.",
     response_template: "The offer can only be claimed once.",
@@ -200,6 +215,7 @@ const handlers = [
   {
     name: "How Did You Get My Number",
     intent_key: "how_got_number",
+    group_name: "Q&A",
     description:
       "Customer asks how you got their number, who gave you their contact details, or why you are calling them specifically.",
     response_template:
@@ -212,6 +228,7 @@ const handlers = [
   {
     name: "Login Help",
     intent_key: "login_help",
+    group_name: "Support",
     description:
       "Customer reports a TECHNICAL problem accessing their account — forgot password, password not working, account locked, getting an error when logging in. NOT about offer timing, being busy, or being unable to log in until later.",
     response_template:
@@ -224,6 +241,7 @@ const handlers = [
   {
     name: "Deposit In Progress",
     intent_key: "deposit_in_progress",
+    group_name: "Q&A",
     description:
       "Customer says they are depositing right now, just made a deposit, or completed a deposit while on the call.",
     response_template:
@@ -236,6 +254,7 @@ const handlers = [
   {
     name: "Wrong Person / Unavailable",
     intent_key: "wrong_person",
+    group_name: "Closing",
     description:
       "Someone other than the customer answered, or says the customer is not here, unavailable, or you have the wrong number.",
     response_template:
@@ -248,6 +267,7 @@ const handlers = [
   {
     name: "Goodbye",
     intent_key: "goodbye",
+    group_name: "Closing",
     description:
       "Conversation has naturally concluded — customer says goodbye, thanks, see you, or confirms they are all set.",
     response_template:

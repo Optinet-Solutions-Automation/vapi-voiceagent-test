@@ -28,6 +28,7 @@ const STARTER_HANDLERS = [
     response_template: "Greet them warmly and briefly say why you're calling.",
     action_type: "answer" as const,
     delivery: "reword" as const,
+    group_name: "Greeting",
     priority: 10,
   },
   {
@@ -37,6 +38,7 @@ const STARTER_HANDLERS = [
     response_template: "The standard plan is forty-nine dollars a month, with no setup fee.",
     action_type: "answer" as const,
     delivery: "verbatim" as const,
+    group_name: "Q&A",
     priority: 20,
   },
   {
@@ -46,6 +48,7 @@ const STARTER_HANDLERS = [
     response_template: "We've got a special three hundred percent deposit bonus available today only.",
     action_type: "give_offer" as const,
     delivery: "verbatim" as const,
+    group_name: "Promotions",
     priority: 30,
   },
   {
@@ -55,6 +58,7 @@ const STARTER_HANDLERS = [
     response_template: "Perfect — I'll text you the details right now.",
     action_type: "send_sms" as const,
     delivery: "verbatim" as const,
+    group_name: "SMS",
     priority: 40,
   },
   {
@@ -64,6 +68,7 @@ const STARTER_HANDLERS = [
     response_template: "Thanks so much for your time today. Have a great day. Goodbye!",
     action_type: "end_call" as const,
     delivery: "verbatim" as const,
+    group_name: "Closing",
     priority: 50,
   },
 ];
@@ -76,6 +81,7 @@ type Draft = {
   response_template: string;
   action_type: ListenerHandler["action_type"];
   delivery: ListenerHandler["delivery"];
+  group_name: string;
   mode: ListenerHandler["mode"];
   priority: number;
   enabled: boolean;
@@ -88,6 +94,7 @@ const EMPTY_DRAFT: Draft = {
   response_template: "",
   action_type: "answer",
   delivery: "verbatim",
+  group_name: "",
   mode: "both",
   priority: 100,
   enabled: true,
@@ -103,6 +110,7 @@ export default function OrganizerTable() {
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [search, setSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState("");
   const [page, setPage] = useState(1);
 
   async function reload() {
@@ -122,16 +130,24 @@ export default function OrganizerTable() {
 
   useEffect(() => {
     setPage(1);
-  }, [search]);
+  }, [search, groupFilter]);
+
+  const groups = Array.from(
+    new Set(handlers.map((h) => h.group_name).filter(Boolean))
+  ).sort();
 
   const q = search.trim().toLowerCase();
-  const filtered = q
-    ? handlers.filter((h) =>
-        `${h.name} ${h.intent_key} ${h.description} ${h.response_template} ${h.action_type} ${h.delivery}`
-          .toLowerCase()
-          .includes(q)
-      )
-    : handlers;
+  const filtered = handlers.filter((h) => {
+    if (groupFilter && h.group_name !== groupFilter) return false;
+    if (
+      q &&
+      !`${h.name} ${h.intent_key} ${h.description} ${h.response_template} ${h.action_type} ${h.delivery} ${h.group_name}`
+        .toLowerCase()
+        .includes(q)
+    )
+      return false;
+    return true;
+  });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageClamped = Math.min(page, totalPages);
   const paginated = filtered.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE);
@@ -161,6 +177,7 @@ export default function OrganizerTable() {
         response_template: draft.response_template,
         action_type: draft.action_type,
         delivery: draft.delivery,
+        group_name: draft.group_name.trim(),
         mode: draft.mode,
         priority: draft.priority,
         enabled: draft.enabled,
@@ -215,6 +232,20 @@ export default function OrganizerTable() {
             className="w-full rounded-lg border border-gray-700 bg-gray-800 py-1.5 pl-8 pr-3 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
           />
         </div>
+        {groups.length > 0 && (
+          <select
+            value={groupFilter}
+            onChange={(e) => setGroupFilter(e.target.value)}
+            className="shrink-0 rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]"
+          >
+            <option value="">All groups</option>
+            {groups.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+        )}
         <button
           onClick={() => setDraft({ ...EMPTY_DRAFT })}
           className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-500"
@@ -268,6 +299,11 @@ export default function OrganizerTable() {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium text-gray-200">{h.name}</span>
+              {h.group_name && (
+                <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-300">
+                  {h.group_name}
+                </span>
+              )}
               <code className="rounded bg-gray-700/60 px-1.5 py-0.5 text-[10px] text-gray-400">
                 {h.intent_key}
               </code>
@@ -318,6 +354,7 @@ export default function OrganizerTable() {
                   response_template: h.response_template,
                   action_type: h.action_type,
                   delivery: h.delivery,
+                  group_name: h.group_name,
                   mode: h.mode,
                   priority: h.priority,
                   enabled: h.enabled,
@@ -402,6 +439,24 @@ export default function OrganizerTable() {
                   placeholder="pricing_question"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-gray-400">
+                Group <span className="text-gray-600">(category for organizing &amp; filtering)</span>
+              </label>
+              <input
+                className={inputCls}
+                list="handler-groups"
+                value={draft.group_name}
+                onChange={(e) => setDraft({ ...draft, group_name: e.target.value })}
+                placeholder="Promotions"
+              />
+              <datalist id="handler-groups">
+                {groups.map((g) => (
+                  <option key={g} value={g} />
+                ))}
+              </datalist>
             </div>
 
             <div>
