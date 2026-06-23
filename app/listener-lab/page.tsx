@@ -5,6 +5,7 @@ import LabConfigForm from "@/components/lab/LabConfigForm";
 import OrganizerTable from "@/components/lab/OrganizerTable";
 import LabCallPanel from "@/components/lab/LabCallPanel";
 import ListenerMonitor from "@/components/lab/ListenerMonitor";
+import RunTranscript from "@/components/lab/RunTranscript";
 import Drawer from "@/components/lab/Drawer";
 import { listRecentLabEvents, getLabSettings, listHandlers } from "@/lib/lab-db";
 import type { LabCallEvent } from "@/lib/database.types";
@@ -90,6 +91,7 @@ export default function ListenerLabPage() {
   const pagedRuns = runs.slice((logsPageClamped - 1) * LOGS_PAGE_SIZE, logsPageClamped * LOGS_PAGE_SIZE);
 
   const monitorCallId = callActive ? activeCallId : viewedCallId ?? activeCallId;
+  const reviewing = !callActive && !!viewedCallId;
 
   const tabBtn =
     "inline-flex items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-gray-800";
@@ -141,22 +143,43 @@ export default function ListenerLabPage() {
         </div>
       </header>
 
-      {/* Primary workspace: live test + monitor */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <LabCallPanel
-          assistantId={assistantId}
-          onCallStarted={(callId) => {
-            setActiveCallId(callId);
-            setViewedCallId(null);
-            setCallActive(true);
-          }}
-          onCallEnded={() => {
-            setCallActive(false);
-            setTimeout(refreshRuns, 4000);
-          }}
-        />
-        <ListenerMonitor callId={monitorCallId} active={callActive} />
-      </div>
+      {/* Reviewing a past run: show its transcript + listener timeline side by side */}
+      {reviewing ? (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-white">
+              Reviewing call <span className="font-mono text-gray-400">{viewedCallId!.slice(0, 8)}…</span>
+            </h2>
+            <button
+              onClick={() => setViewedCallId(null)}
+              className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 transition hover:bg-gray-800"
+            >
+              ← Back to test call
+            </button>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <RunTranscript callId={viewedCallId!} />
+            <ListenerMonitor callId={viewedCallId} active={false} />
+          </div>
+        </>
+      ) : (
+        /* Primary workspace: live test + monitor */
+        <div className="grid gap-4 lg:grid-cols-2">
+          <LabCallPanel
+            assistantId={assistantId}
+            onCallStarted={(callId) => {
+              setActiveCallId(callId);
+              setViewedCallId(null);
+              setCallActive(true);
+            }}
+            onCallEnded={() => {
+              setCallActive(false);
+              setTimeout(refreshRuns, 4000);
+            }}
+          />
+          <ListenerMonitor callId={monitorCallId} active={callActive} />
+        </div>
+      )}
 
       {!assistantId && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300">
