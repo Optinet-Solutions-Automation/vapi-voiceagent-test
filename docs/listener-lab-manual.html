@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Listener Lab — User Manual</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #1f2430; font-size: 11pt; line-height: 1.5; margin: 0;
+  }
+  h1, h2, h3 { color: #15192a; line-height: 1.25; }
+  h1 { font-size: 22pt; margin: 0 0 4pt; }
+  h2 { font-size: 15pt; margin: 22pt 0 6pt; padding-bottom: 4pt; border-bottom: 2px solid #6366f1; }
+  h3 { font-size: 12pt; margin: 14pt 0 4pt; color: #4338ca; }
+  p { margin: 0 0 8pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 18pt; }
+  li { margin: 0 0 4pt; }
+  code { background: #eef0f6; padding: 1px 5px; border-radius: 4px; font-family: "Consolas", monospace; font-size: 9.5pt; color: #3730a3; }
+  strong { color: #15192a; }
+  .cover { text-align: center; padding-top: 55mm; page-break-after: always; }
+  .cover .badge { display: inline-block; background: #6366f1; color: #fff; font-weight: 700; letter-spacing: 2px; font-size: 10pt; padding: 6px 16px; border-radius: 999px; }
+  .cover h1 { font-size: 34pt; margin: 18pt 0 6pt; }
+  .cover .sub { color: #5b6478; font-size: 13pt; }
+  .cover .meta { margin-top: 38mm; color: #8a92a6; font-size: 10pt; }
+  .lead { font-size: 12pt; color: #3a4256; background: #f4f5fb; border-left: 4px solid #6366f1; padding: 10pt 14pt; border-radius: 0 8px 8px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 8pt 0 12pt; font-size: 9.5pt; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e5ee; vertical-align: top; }
+  th { background: #f0f1f8; color: #2b3147; font-weight: 700; }
+  .tag { display: inline-block; font-size: 8.5pt; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .verbatim { background: #e0f2fe; color: #075985; }
+  .reword { background: #fef3c7; color: #92400e; }
+  .callout { background: #f4f5fb; border: 1px solid #d9ddee; border-radius: 8px; padding: 10pt 12pt; margin: 8pt 0 12pt; }
+  .callout.warn { background: #fff7ed; border-color: #fdba74; }
+  .callout.tip { background: #ecfdf5; border-color: #6ee7b7; }
+  .callout .k { font-weight: 700; color: #15192a; }
+  .pagebreak { page-break-before: always; }
+  .muted { color: #6b7280; }
+  .mono { font-family: "Consolas", monospace; white-space: pre; font-size: 9pt; color: #3a4256; }
+  h2 { page-break-after: avoid; }
+  table, .callout { page-break-inside: avoid; }
+  .pill { display:inline-block; background:#ede9fe; color:#5b21b6; border-radius:999px; padding:1px 8px; font-size:9pt; font-weight:600; }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<section class="cover">
+  <span class="badge">VOIZO</span>
+  <h1>Listener Lab</h1>
+  <div class="sub">AI Voice Agent Training — User Manual</div>
+  <div class="meta">
+    Build, tune, and test voice agents that think like a team, not a script.<br/><br/>
+    Version 2.1 · includes Scenarios, Tags, Collections &amp; the Script Builder
+  </div>
+</section>
+
+<!-- INTRO -->
+<h2>1. What is the Listener Lab?</h2>
+<p class="lead">
+  The Listener Lab is a new way to train an AI voice agent. Instead of writing one enormous prompt that
+  tries to cover every situation, you give the agent a short personality and let a smart backend
+  &ldquo;listener&rdquo; feed it the right words at the right moment — live, during the call.
+</p>
+
+<h3>The idea: a politician and their staff</h3>
+<p>
+  Picture a politician at a press conference. They have the charisma, the voice, and the delivery — but they
+  don&rsquo;t personally know every fact. Behind the scenes, a team listens to each question, finds the answer, and
+  feeds it through an earpiece. The politician simply delivers it, smoothly and on-brand.
+</p>
+<ul>
+  <li><strong>The agent is the politician</strong> — it carries only a short prompt describing its personality
+    and delivery. It holds no product facts, prices, or policies.</li>
+  <li><strong>The Playbook is the staff&rsquo;s knowledge</strong> — a library of Scenarios, each with the exact
+    line or briefing to use for a given situation.</li>
+  <li><strong>The Listener is the earpiece</strong> — it follows the live conversation, recognises what the
+    customer is really asking, and feeds the agent the right answer in real time.</li>
+</ul>
+
+<h3>Why this beats one long prompt</h3>
+<ul>
+  <li><strong>Consistency &amp; compliance</strong> — critical lines (prices, terms, legal wording) are spoken
+    exactly as written, every time.</li>
+  <li><strong>Easy to tune</strong> — you edit one small Scenario, not paragraph 14 of a 3,000-word prompt.</li>
+  <li><strong>Faster, smarter responses</strong> — answers are pre-defined and delivered the moment they&rsquo;re needed.</li>
+  <li><strong>Safe to experiment</strong> — everything happens in the lab; your live agents are never touched
+    until you decide a setup is ready.</li>
+</ul>
+
+<!-- KEY TERMS -->
+<h2>2. The Building Blocks</h2>
+<p>Four ideas, from smallest to largest. Each builds on the one before it:</p>
+<table>
+  <tr><th>Term</th><th>What it is</th></tr>
+  <tr><td><strong>Scenario</strong></td><td>The core unit. One situation the agent may face + the line to say + how to deliver it. (e.g. &ldquo;customer asks about pricing&rdquo;).</td></tr>
+  <tr><td><strong>Tag</strong></td><td>A category label on a Scenario, for organising and filtering — e.g. <span class="pill">Promotions</span> <span class="pill">Q&amp;A</span>. A Scenario can have several.</td></tr>
+  <tr><td><strong>Playbook</strong></td><td>Your whole library of Scenarios.</td></tr>
+  <tr><td><strong>Collection</strong></td><td>A named bundle of Scenarios chosen for one campaign. Setting a Collection &ldquo;active&rdquo; narrows the agent to just those Scenarios.</td></tr>
+  <tr><td><strong>Script</strong></td><td>A visual call-flow that orders Scenarios into steps with branching — built on the canvas (Section 8).</td></tr>
+</table>
+<table>
+  <tr><th>Also good to know</th><th>Meaning</th></tr>
+  <tr><td><strong>Listener / Router</strong></td><td>The backend that hears each customer utterance and decides which Scenario it matches.</td></tr>
+  <tr><td><strong>Intent</strong></td><td>The meaning behind what the customer said.</td></tr>
+  <tr><td><strong>Delivery</strong></td><td>How a line reaches the customer: <span class="tag verbatim">verbatim</span> (word-for-word) or <span class="tag reword">reword</span> (rephrased naturally).</td></tr>
+  <tr><td><strong>Injection</strong></td><td>The moment the Listener feeds a line into the live call.</td></tr>
+</table>
+
+<!-- GETTING STARTED -->
+<h2 class="pagebreak">3. Getting Started</h2>
+<ol>
+  <li>Open the application, sign in by selecting your agent, and click <strong>Listener Lab</strong> in the sidebar.</li>
+  <li>The page opens on the main workspace: the <strong>Live Test Call</strong> panel and the
+    <strong>Listener Monitor</strong>, side by side.</li>
+</ol>
+<p>Across the top are the buttons that open everything else:</p>
+<table>
+  <tr><th>Button</th><th>Opens</th></tr>
+  <tr><td><strong>Configuration</strong></td><td>The agent, voice, behaviour prompt, webhook, and listener tuning — one form, one Save.</td></tr>
+  <tr><td><strong>Playbook</strong></td><td>Your Scenarios, with tags, search and filtering.</td></tr>
+  <tr><td><strong>Collections</strong></td><td>Campaign bundles of Scenarios; set one active to scope a call.</td></tr>
+  <tr><td><strong>Script Builder</strong></td><td>The visual call-flow canvas.</td></tr>
+  <tr><td><strong>Logs</strong></td><td>Past test calls, each with its transcript and listener timeline.</td></tr>
+</table>
+
+<!-- CONFIGURATION -->
+<h2>4. Configuration</h2>
+<p>Open <strong>Configuration</strong>, fill it in once, and press <strong>Save Configuration</strong> — a single
+  button that saves your settings, applies the prompt &amp; voice, and prepares the agent for the lab.</p>
+<table>
+  <tr><th>Field</th><th>What it does</th></tr>
+  <tr><td><strong>Assistant</strong></td><td>Which voice agent the lab controls. <strong>Use a dedicated test agent</strong> — saving overwrites its tools and settings.</td></tr>
+  <tr><td><strong>Voice</strong></td><td>The voice the agent speaks with.</td></tr>
+  <tr><td><strong>Short Behaviour Prompt</strong></td><td>The agent&rsquo;s entire personality — tone, pacing, how to treat briefings. Deliberately short: <em>how</em> to speak, never <em>what</em>. Knowledge lives in the Playbook.</td></tr>
+  <tr><td><strong>Webhook Server URL</strong></td><td>Where the live call sends events. Pre-set on the hosted site — leave blank.</td></tr>
+  <tr><td><strong>Router Model</strong></td><td>The AI that classifies each utterance.</td></tr>
+  <tr><td><strong>Confidence Threshold</strong></td><td>How sure the Listener must be before feeding a line. Below it, the agent handles the moment alone. <span class="muted">(Suggested 0.70)</span></td></tr>
+  <tr><td><strong>Injection Cooldown</strong></td><td>Minimum gap between two whispers, so the staff doesn&rsquo;t interrupt constantly. <span class="muted">(Suggested 4000 ms)</span></td></tr>
+  <tr><td><strong>Trigger immediate response</strong></td><td>On = agent speaks the instant a line arrives; Off = it weaves the line into its next natural turn (gentler).</td></tr>
+</table>
+
+<!-- PLAYBOOK & SCENARIOS -->
+<h2 class="pagebreak">5. The Playbook &amp; Scenarios</h2>
+<p>This is the heart of training. Each <strong>Scenario</strong> describes one situation and what the agent
+  should do. Use the search box and the tag filter to find them; <strong>+ Add Scenario</strong> to create one.</p>
+<table>
+  <tr><th>Field</th><th>What it means</th></tr>
+  <tr><td><strong>Name</strong></td><td>A friendly label, e.g. &ldquo;Wagering Requirements&rdquo;.</td></tr>
+  <tr><td><strong>Intent Key</strong></td><td>A unique machine ID, e.g. <code>wagering_requirements</code>.</td></tr>
+  <tr><td><strong>Tags</strong></td><td>One or more category labels (Promotions, Q&amp;A…). Type and press Enter, or click a suggestion.</td></tr>
+  <tr><td><strong>Match Guidance</strong></td><td><strong>The most important field.</strong> Describes <em>when</em> this Scenario should fire — the ways a customer might phrase it. The Listener reads this to decide matches.</td></tr>
+  <tr><td><strong>Response</strong></td><td>Either the exact line to speak (verbatim) or a briefing to rephrase (reword).</td></tr>
+  <tr><td><strong>Delivery</strong></td><td><span class="tag verbatim">verbatim</span> for facts/prices/compliance; <span class="tag reword">reword</span> for soft, conversational moments.</td></tr>
+  <tr><td><strong>Action</strong></td><td><code>answer</code>, <code>give_offer</code>, <code>send_sms</code>, <code>end_call</code>, or <code>ignore</code>.</td></tr>
+  <tr><td><strong>Mode</strong></td><td>Where it&rsquo;s active: <code>tool</code> (only when the agent asks), <code>listener</code> (proactive push), or <code>both</code>.</td></tr>
+  <tr><td><strong>Priority</strong></td><td>Tie-breaker when situations overlap — lower number wins. Keep compliance at 1&ndash;9, offer flow 10&ndash;19, Q&amp;A 20+.</td></tr>
+</table>
+
+<h3>Verbatim vs. Reword</h3>
+<div class="callout">
+  <p><span class="k">Use <span class="tag verbatim">verbatim</span> when exact words matter:</span> prices, terms,
+  legal lines, the offer, goodbyes — spoken precisely as written, every time.</p>
+  <p style="margin:0"><span class="k">Use <span class="tag reword">reword</span> when the moment is conversational:</span>
+  reassurance, soft objections — the agent rephrases the briefing in its own warm voice.</p>
+</div>
+
+<!-- COLLECTIONS -->
+<h2>6. Collections (per-campaign bundles)</h2>
+<p>A <strong>Collection</strong> is a named set of Scenarios assembled for one campaign — e.g. &ldquo;Lucky7 AU
+  Reactivation&rdquo;. It lets you reuse the same Scenarios across campaigns while running only the ones a given
+  campaign needs.</p>
+<table>
+  <tr><th>Action</th><th>How</th></tr>
+  <tr><td><strong>Create</strong></td><td>Type a name and click <strong>+ Create</strong>.</td></tr>
+  <tr><td><strong>Choose its Scenarios</strong></td><td>Click <strong>Edit scenarios</strong> and tick the ones this campaign uses, then Save.</td></tr>
+  <tr><td><strong>Set Active</strong></td><td>Click <strong>Set active</strong>. While a Collection is active, the Listener <em>only</em> considers its Scenarios — tighter, faster, no cross-campaign bleed. <strong>Clear</strong> returns to all Scenarios.</td></tr>
+  <tr><td><strong>Rename / Delete</strong></td><td>Edit the name inline; the trash icon removes the bundle (the Scenarios themselves are kept).</td></tr>
+</table>
+<p class="muted">The active Collection is shown on the main page so you always know the scope of a test call.</p>
+
+<!-- RUNNING A CALL -->
+<h2 class="pagebreak">7. Running a Test Call</h2>
+<ol>
+  <li>(Optional) Type a <strong>Client Name</strong> — the agent greets them by name.</li>
+  <li>Click <strong>Start Call</strong>, allow the microphone, and speak as the customer.</li>
+  <li>Watch the <strong>Listener Monitor</strong> update live; click <strong>End Call</strong> when done.</li>
+</ol>
+<h3>Reading the Listener Monitor</h3>
+<table>
+  <tr><th>Event</th><th>Meaning</th></tr>
+  <tr><td><strong>heard</strong></td><td>What the customer said (final transcript).</td></tr>
+  <tr><td><strong>classified</strong></td><td>The matched intent and confidence score.</td></tr>
+  <tr><td><strong>injected</strong></td><td>A line was fed to the agent — with the response time in milliseconds. Flow steps show as <code>flow:&lt;type&gt;</code>.</td></tr>
+  <tr><td><strong>skipped</strong></td><td>No line fed, with the reason (low confidence, small talk, or cooldown).</td></tr>
+  <tr><td><strong>tool call / result</strong></td><td>The agent asked for knowledge itself and received it.</td></tr>
+</table>
+<p>The <strong>average response time</strong> badge is the key measure of whether the experience feels natural.
+  In <strong>Logs</strong>, each past run shows its full <strong>transcript</strong> next to its listener timeline.</p>
+
+<!-- SCRIPT BUILDER -->
+<h2 class="pagebreak">8. The Script Builder (call flows)</h2>
+<p class="lead">
+  Scenarios are <em>reactive</em> — they fire whenever the customer triggers them. A <strong>Script</strong> adds a
+  <em>proactive</em> spine: a visual flow that walks the call through ordered steps — intro → offer → ask for SMS →
+  close — while Scenarios still answer anything off-script.
+</p>
+<p>Open <strong>Script Builder</strong> for a full-screen canvas, much like an automation workflow tool. The canvas
+  has a dotted grid; <strong>drag a box from the left palette onto it</strong> (boxes snap to the grid), then connect
+  them by dragging from one box&rsquo;s bottom dot to another&rsquo;s top dot.</p>
+
+<h3>The boxes</h3>
+<table>
+  <tr><th>Box</th><th>What it does</th></tr>
+  <tr><td><strong>Start</strong></td><td>The entry point. Choose <em>Agent speaks first</em> or <em>Wait for the customer to speak</em>.</td></tr>
+  <tr><td><strong>Say</strong></td><td>Speaks a Scenario&rsquo;s line, then waits for the reply. The main box.</td></tr>
+  <tr><td><strong>Branch</strong></td><td>Splits the path based on the customer&rsquo;s reply (draw several arrows out, one per outcome).</td></tr>
+  <tr><td><strong>Send SMS</strong></td><td>Fires the text.</td></tr>
+  <tr><td><strong>Set Variable</strong></td><td>Stores a value (e.g. <code>consent = true</code>).</td></tr>
+  <tr><td><strong>Transfer to Human</strong></td><td>Hands the call to a person (phone number).</td></tr>
+  <tr><td><strong>End Call</strong></td><td>Wraps up, optionally with a goodbye Scenario.</td></tr>
+</table>
+
+<h3>The arrows (conditions)</h3>
+<p>Click any arrow to set <em>when</em> it&rsquo;s taken:</p>
+<ul>
+  <li><strong>Always</strong> — move straight on.</li>
+  <li><strong>If intent is…</strong> — branch on what the customer meant (e.g. agreed → SMS).</li>
+  <li><strong>If reply is tagged…</strong> — branch by tag.</li>
+  <li><strong>Otherwise</strong> — the fallback path so the flow never dead-ends.</li>
+</ul>
+<p>Say and Branch boxes can also <strong>scope which tags are active</strong> at that step — narrowing what the
+  agent will entertain mid-flow.</p>
+
+<h3>Multiple scenarios at one box</h3>
+<p>A Say or Branch box can hold more than one Scenario, in two ways that combine:</p>
+<ul>
+  <li><strong>Candidate scenarios</strong> — add several lines under &ldquo;Also consider&rdquo;; when the flow reaches
+    the box, the router speaks whichever candidate best matches what the customer just said (falling back to the
+    primary). Great for offer variants.</li>
+  <li><strong>Tag scope</strong> — allow any Scenario carrying a given tag to fire at that step.</li>
+</ul>
+
+<h3>A simple flow</h3>
+<p class="mono">Start → Greeting → Give Offer → ( Branch )
+                                 agreed → Send SMS → Close
+                               declined → Objection → Close
+                              question → (answered reactively, returns)</p>
+
+<h3>Making it run</h3>
+<ol>
+  <li>Build the flow, click <strong>Save</strong>.</li>
+  <li>Click <strong>Set active</strong> — that script now drives your test calls.</li>
+  <li>Start a call: the flow advances step-by-step on each reply, while off-script questions are still answered
+    by the matching Scenario, then control returns to the flow.</li>
+</ol>
+<div class="callout tip">
+  <p style="margin:0"><span class="k">Tip:</span> Collections decide <em>which</em> Scenarios a campaign can use;
+  a Script decides the <em>order</em> they flow in. Use them together — an active Collection plus an active Script.</p>
+</div>
+
+<!-- TUNING -->
+<h2 class="pagebreak">9. The Tuning Loop</h2>
+<p>Training is a cycle: <strong>test → observe → adjust → repeat.</strong> Edits apply on the next utterance —
+  even mid-call.</p>
+<table>
+  <tr><th>If you notice…</th><th>Do this</th></tr>
+  <tr><td>The agent gave a wrong or vague answer</td><td>Edit that Scenario&rsquo;s <strong>Response</strong>.</td></tr>
+  <tr><td>The Listener missed a situation</td><td>Improve the Scenario&rsquo;s <strong>Match Guidance</strong>, or add a new Scenario.</td></tr>
+  <tr><td>A line was reworded that needed to be exact</td><td>Switch its <strong>Delivery</strong> to verbatim.</td></tr>
+  <tr><td>It fires on things it shouldn&rsquo;t</td><td>Raise the <strong>Confidence Threshold</strong> or sharpen Match Guidance.</td></tr>
+  <tr><td>The agent talks over itself</td><td>Turn off <strong>Trigger immediate response</strong>.</td></tr>
+  <tr><td>A campaign should use fewer Scenarios</td><td>Put them in a <strong>Collection</strong> and set it active.</td></tr>
+</table>
+
+<!-- TROUBLESHOOTING -->
+<h2>10. Troubleshooting</h2>
+<table>
+  <tr><th>Symptom</th><th>Likely cause &amp; fix</th></tr>
+  <tr><td>The agent can&rsquo;t hear me</td><td>Check the microphone for the site and your system input level. Bluetooth headsets sometimes use a profile with no mic — switch to hands-free.</td></tr>
+  <tr><td>Monitor stays empty during a call</td><td>The agent isn&rsquo;t configured. Open <strong>Configuration</strong> and press <strong>Save Configuration</strong>.</td></tr>
+  <tr><td>Classifications show errors</td><td>The AI account behind the router is out of credit, or the model name is wrong. Top up or correct the Router Model.</td></tr>
+  <tr><td>The agent answered the wrong thing</td><td>Check the <strong>heard</strong> line. If the words are right but the intent is wrong, improve the Match Guidance.</td></tr>
+  <tr><td>A page errors on load</td><td>A one-time database setup step may be pending — contact your administrator.</td></tr>
+</table>
+<div class="callout tip">
+  <p style="margin:0"><span class="k">Remember:</span> nothing in the Listener Lab affects your live production
+  agents. It is a safe sandbox for building and proving a setup before rollout.</p>
+</div>
+
+<!-- APPENDIX -->
+<h2 class="pagebreak">Appendix — Example Playbook</h2>
+<p>The lab ships with a complete example built from a real sales script, to show how a full Playbook looks.
+  <span class="tag verbatim">verbatim</span> lines are spoken exactly; <span class="tag reword">reword</span> lines
+  are rephrased by the agent.</p>
+<table>
+  <tr><th>P</th><th>Scenario</th><th>Tag</th><th>Action</th><th>Delivery</th></tr>
+  <tr><td>0</td><td>First Message (call opening)</td><td>Greeting</td><td>answer</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>1</td><td>Gambling Problem</td><td>Compliance</td><td>end_call</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>2</td><td>Do Not Call / Opt Out</td><td>Compliance</td><td>end_call</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>10</td><td>Main Offer — 20 No-Deposit Free Spins</td><td>Promotions</td><td>give_offer</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>11</td><td>Upsell — 300% Deposit Bonus</td><td>Promotions</td><td>answer</td><td><span class="tag reword">reword</span></td></tr>
+  <tr><td>12</td><td>Send SMS Consent</td><td>SMS</td><td>send_sms</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>13</td><td>Not Interested (soft)</td><td>Objections</td><td>answer</td><td><span class="tag reword">reword</span></td></tr>
+  <tr><td>14</td><td>No Time / Busy</td><td>Objections</td><td>answer</td><td><span class="tag reword">reword</span></td></tr>
+  <tr><td>16</td><td>Cannot Act Now / Offer Timing</td><td>Objections</td><td>answer</td><td><span class="tag reword">reword</span></td></tr>
+  <tr><td>20</td><td>Wagering Requirements</td><td>Q&amp;A</td><td>answer</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>21</td><td>Minimum Deposit</td><td>Q&amp;A</td><td>answer</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>22</td><td>Where to Find the Spins</td><td>Q&amp;A</td><td>answer</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>23</td><td>Which Game</td><td>Q&amp;A</td><td>answer</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>24</td><td>Website URL</td><td>Q&amp;A</td><td>answer</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>25</td><td>Claim Limit</td><td>Q&amp;A</td><td>answer</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>26</td><td>How Did You Get My Number</td><td>Q&amp;A</td><td>answer</td><td><span class="tag reword">reword</span></td></tr>
+  <tr><td>27</td><td>Login Help</td><td>Support</td><td>answer</td><td><span class="tag reword">reword</span></td></tr>
+  <tr><td>28</td><td>Deposit In Progress</td><td>Q&amp;A</td><td>answer</td><td><span class="tag reword">reword</span></td></tr>
+  <tr><td>29</td><td>Wrong Person / Unavailable</td><td>Closing</td><td>end_call</td><td><span class="tag verbatim">verbatim</span></td></tr>
+  <tr><td>30</td><td>Goodbye</td><td>Closing</td><td>end_call</td><td><span class="tag verbatim">verbatim</span></td></tr>
+</table>
+
+<p class="muted" style="margin-top:24pt; text-align:center; border-top:1px solid #e2e5ee; padding-top:10pt;">
+  Voizo — Listener Lab User Manual · Version 2.1
+</p>
+
+</body>
+</html>
