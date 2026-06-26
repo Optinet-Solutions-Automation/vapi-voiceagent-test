@@ -13,7 +13,7 @@ import {
   getFlowState,
   upsertFlowState,
 } from "@/lib/lab-db";
-import { findStartNode, nodeById, pickNextEdge } from "@/lib/lab-flow";
+import { findStartNode, nodeById, pickNextEdge, edgeIsLoop, contentTypeOf } from "@/lib/lab-flow";
 import { classifyUtterance } from "@/lib/lab-router";
 import {
   getControlUrl,
@@ -478,103 +478,168 @@ async function handleTranscript(
   }
 }
 
-// ── Script runtime (graph-walker) ─────────────────────────────
-// Returns true if the flow advanced and handled this turn.
+// ── Script runtime (graph-walker, v1/experimental) ────────────
+// Walks the active script for the call. Advances through non-speaking steps
+// (no-op, sub-workflow enter, sub-return) on a single turn, stopping when a box
+// speaks/acts or the call ends. Returns true if the flow handled this turn.
+type Frame = { scriptId: string; returnNodeId: string };
+
 async function runScriptFlow(
   callId: string,
   controlUrlHint: string | null,
-  scriptId: string,
+  activeScriptId: string,
   intent: string,
   utteranceAt: Date,
   classifiedAt: number
 ): Promise<boolean> {
-  const [graph, allHandlers] = await Promise.all([getScriptGraph(scriptId), listHandlers()]);
+  const allHandlers = await listHandlers();
+  const tagsOf = (it: string) => allHandlers.find((h) => h.intent_key === it)?.tags ?? [];
+
+  const state = await getFlowState(callId).catch(() => null);
+  let currentScriptId = state?.script_id ?? activeScriptId;
+  let variables: Record<string, unknown> = { ...((state?.variables as Record<string, unknown>) ?? {}) };
+  if (!Array.isArray(variables.__stack)) variables.__stack = [] as Frame[];
+  let currentNodeId = state?.current_node_id ?? null;
+
+  let graph = await getScriptGraph(currentScriptId);
   if (graph.nodes.length === 0) return false;
 
-  // Resolve / initialise the current node for this call.
-  let state = await getFlowState(callId).catch(() => null);
-  if (!state || state.script_id !== scriptId || !state.current_node_id) {
+  if (!currentNodeId || !graph.nodes.find((n) => n.id === currentNodeId)) {
     const start = findStartNode(graph.nodes);
     if (!start) return false;
-    state = { call_id: callId, script_id: scriptId, current_node_id: start.id, variables: {} } as Awaited<
-      ReturnType<typeof getFlowState>
-    >;
-    await upsertFlowState(callId, scriptId, start.id, {});
+    currentNodeId = start.id;
+    await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
   }
-
-  const tags = allHandlers.find((h) => h.intent_key === intent)?.tags ?? [];
-  const edge = pickNextEdge(graph.edges, state!.current_node_id!, intent, tags);
-  if (!edge) return false; // off-script → let reactive layer handle it
-
-  const target = nodeById(graph.nodes, edge.target_node_id);
-  if (!target) return false;
 
   const controlUrl = await getControlUrl(callId, controlUrlHint);
-  const variables = { ...(state!.variables as Record<string, unknown>) };
 
-  // Resolve which scenario this box speaks. A box can list candidate scenarios
-  // (config.candidateScenarioIds); among {primary + candidates} we prefer the
-  // one whose intent matches what the customer just said, else the primary.
-  const candidateIds = Array.isArray((target.config as Record<string, unknown>).candidateScenarioIds)
-    ? ((target.config as Record<string, unknown>).candidateScenarioIds as string[])
-    : [];
-  const poolIds = [target.scenario_id, ...candidateIds].filter(Boolean) as string[];
-  let scenario =
-    target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null;
-  if (candidateIds.length > 0) {
-    const byIntent = allHandlers.find((h) => poolIds.includes(h.id) && h.intent_key === intent);
-    scenario = byIntent ?? scenario ?? allHandlers.find((h) => h.id === poolIds[0]) ?? null;
+  async function flowLog(content: string, target: { id: string; label: string }, ct: string, edgeCond: unknown, scenarioId: string | null) {
+    const ms = Date.now();
+    await log({
+      call_id: callId,
+      event_type: "injected",
+      content: content || `→ ${target.label || ct}`,
+      intent_key: intent,
+      handler_id: scenarioId,
+      action_type: `flow:${ct}`,
+      utterance_at: utteranceAt.toISOString(),
+      classified_at: new Date(classifiedAt).toISOString(),
+      injected_at: new Date(ms).toISOString(),
+      latency_ms: ms - utteranceAt.getTime(),
+      meta: { flow: true, toNode: target.id, nodeType: ct, edgeCondition: edgeCond },
+    });
   }
-  let injectedText = scenario?.response_template ?? "";
-  let controlStatus: number | null = null;
 
-  if (controlUrl) {
-    if (target.type === "end") {
-      injectedText = scenario?.response_template || "Thanks for your time today. Goodbye!";
-      const r = await injectSay(controlUrl, injectedText, true);
-      controlStatus = r.status;
-      if (!r.ok) setTimeout(() => endCall(controlUrl).catch(() => {}), 4000);
-    } else if (target.type === "transfer") {
-      injectedText =
-        scenario?.response_template || "Thanks — let me connect you to one of our team now.";
-      const r = await injectSay(controlUrl, injectedText, false);
-      controlStatus = r.status;
-      // (Actual SIP/number transfer wiring is a later step; v1 announces + logs.)
-    } else if (target.type === "set_variable") {
-      const name = String((target.config as Record<string, unknown>).name ?? "").trim();
-      if (name) variables[name] = (target.config as Record<string, unknown>).value ?? true;
+  let guard = 0;
+  while (guard++ < 12) {
+    const result = (variables.__lastResult as string) ?? null;
+    const edge = pickNextEdge(graph.edges, currentNodeId!, intent, tagsOf(intent), result);
+    if (!edge) return false; // off-script → reactive layer handles it
+
+    if (edgeIsLoop(edge)) {
+      const key = "__loop_" + edge.id;
+      const n = (variables[key] as number) ?? 0;
+      const max = ((edge.condition as Record<string, unknown>).maxLoops as number) ?? 3;
+      if (n >= max) return false; // loop exhausted
+      variables[key] = n + 1;
+    }
+
+    const target = nodeById(graph.nodes, edge.target_node_id);
+    if (!target) return false;
+    if (result) variables.__lastResult = null; // consume result after a branch used it
+
+    const ct = contentTypeOf(target);
+    const cfg = target.config as Record<string, unknown>;
+
+    // ── Non-speaking steps: advance through them on the same turn ──
+    if (ct === "noop") {
+      currentNodeId = target.id;
+      await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
+      await flowLog("", target, ct, edge.condition, null);
+      continue;
+    }
+
+    if (ct === "subworkflow") {
+      const subId = cfg.subworkflowId as string | undefined;
+      if (subId) {
+        (variables.__stack as Frame[]).push({ scriptId: currentScriptId, returnNodeId: target.id });
+        graph = await getScriptGraph(subId);
+        currentScriptId = subId;
+        currentNodeId = findStartNode(graph.nodes)?.id ?? target.id;
+        await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
+        await flowLog(`↳ enter sub-workflow`, target, ct, edge.condition, null);
+        continue;
+      }
+      currentNodeId = target.id;
+      await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
+      continue;
+    }
+
+    if (ct === "end") {
+      const stack = variables.__stack as Frame[];
+      if (stack.length > 0) {
+        // Sub-workflow finished → return its result to the parent.
+        const frame = stack.pop()!;
+        variables.__lastResult = (cfg.resultName as string) || target.label || "done";
+        currentScriptId = frame.scriptId;
+        graph = await getScriptGraph(currentScriptId);
+        currentNodeId = frame.returnNodeId;
+        await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
+        await flowLog(`↩ return: ${variables.__lastResult}`, target, "return", edge.condition, null);
+        continue;
+      }
+      // Top-level end → goodbye + hang up.
+      const scn = target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null;
+      const text = scn?.response_template || "Thanks for your time today. Goodbye!";
+      if (controlUrl) {
+        const r = await injectSay(controlUrl, text, true);
+        if (!r.ok) setTimeout(() => endCall(controlUrl).catch(() => {}), 4000);
+      }
+      currentNodeId = target.id;
+      await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
+      await flowLog(text, target, ct, edge.condition, scn?.id ?? null);
+      return true;
+    }
+
+    // ── Speaking / action steps: consume the turn ──
+    currentNodeId = target.id;
+    let scenario: ListenerHandler | null = null;
+    let injectedText = "";
+
+    if (ct === "scenario") {
+      const cands = [target.scenario_id, ...((cfg.candidateScenarioIds as string[]) ?? [])].filter(Boolean) as string[];
+      scenario =
+        allHandlers.find((h) => cands.includes(h.id) && h.intent_key === intent) ??
+        (target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null) ??
+        (cands[0] ? allHandlers.find((h) => h.id === cands[0]) ?? null : null);
+    } else if (ct === "collection") {
+      const ids = cfg.collectionId ? await getCollectionHandlerIds(cfg.collectionId as string).catch(() => []) : [];
+      scenario =
+        allHandlers.find((h) => ids.includes(h.id) && h.intent_key === intent) ??
+        (ids[0] ? allHandlers.find((h) => h.id === ids[0]) ?? null : null);
+    } else if (ct === "send_sms") {
+      scenario = target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null;
+    } else if (ct === "transfer") {
+      scenario = target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null;
+    }
+
+    if (ct === "send_sms") {
+      injectedText = scenario?.response_template || "The SMS with the details is on its way. Confirm that to the customer.";
+      if (controlUrl) await injectStaffNote(controlUrl, injectedText, true);
+    } else if (ct === "transfer") {
+      injectedText = scenario?.response_template || "Thanks — let me connect you to one of our team now.";
+      if (controlUrl) await injectSay(controlUrl, injectedText, false);
     } else if (scenario) {
-      // say / switch / send_sms with a scenario line
-      const r =
+      injectedText = scenario.response_template ?? "";
+      if (controlUrl)
         scenario.delivery === "verbatim"
           ? await injectSay(controlUrl, injectedText, false)
           : await injectStaffNote(controlUrl, injectedText, true);
-      controlStatus = r.status;
     }
+
+    await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
+    await flowLog(injectedText, target, ct, edge.condition, scenario?.id ?? null);
+    return true;
   }
-
-  await upsertFlowState(callId, scriptId, target.id, variables);
-
-  const injectedAtMs = Date.now();
-  await log({
-    call_id: callId,
-    event_type: "injected",
-    content: injectedText || `→ ${target.label || target.type}`,
-    intent_key: intent,
-    handler_id: scenario?.id ?? null,
-    action_type: `flow:${target.type}`,
-    utterance_at: utteranceAt.toISOString(),
-    classified_at: new Date(classifiedAt).toISOString(),
-    injected_at: new Date(injectedAtMs).toISOString(),
-    latency_ms: injectedAtMs - utteranceAt.getTime(),
-    meta: {
-      flow: true,
-      fromNode: state!.current_node_id,
-      toNode: target.id,
-      nodeType: target.type,
-      edgeCondition: edge.condition,
-      controlStatus,
-    },
-  });
-  return true;
+  return false;
 }
