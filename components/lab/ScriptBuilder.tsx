@@ -33,7 +33,7 @@ import {
 import type { ListenerScript, ListenerHandler, ListenerCollection } from "@/lib/database.types";
 
 // ── Content types a Step box can hold ─────────────────────────
-type Content = "scenario" | "collection" | "subworkflow" | "noop" | "send_sms" | "transfer" | "end";
+type Content = "scenario" | "collection" | "subworkflow" | "noop" | "send_sms" | "transfer" | "return" | "end";
 
 const CONTENT_META: Record<Content, { label: string; color: string; terminal?: boolean }> = {
   scenario: { label: "Scenario", color: "border-indigo-500 bg-indigo-500/10" },
@@ -42,6 +42,7 @@ const CONTENT_META: Record<Content, { label: string; color: string; terminal?: b
   noop: { label: "No-op", color: "border-gray-500 bg-gray-500/10" },
   send_sms: { label: "Send SMS", color: "border-amber-500 bg-amber-500/10" },
   transfer: { label: "Transfer", color: "border-orange-500 bg-orange-500/10", terminal: true },
+  return: { label: "Return result", color: "border-lime-500 bg-lime-500/10", terminal: true },
   end: { label: "End Call", color: "border-rose-500 bg-rose-500/10", terminal: true },
 };
 
@@ -158,6 +159,7 @@ export default function ScriptBuilder({ onClose }: Props) {
     if (c === "collection") return collectionName(d.config.collectionId as string) ? `▣ ${collectionName(d.config.collectionId as string)}` : "(pick a collection)";
     if (c === "subworkflow") return scriptName(d.config.subworkflowId as string) ? `⤳ ${scriptName(d.config.subworkflowId as string)}` : "(pick a workflow)";
     if (c === "transfer") return (d.config.number as string) || "(phone number)";
+    if (c === "return") return `↩ ${(d.config.resultName as string) || "result"}`;
     return null;
   }
 
@@ -635,7 +637,8 @@ export default function ScriptBuilder({ onClose }: Props) {
                         <option value="subworkflow">Run a Sub-workflow</option>
                         <option value="send_sms">Send SMS</option>
                         <option value="transfer">Transfer to human</option>
-                        <option value="end">End call</option>
+                        <option value="return">Return to parent (with result)</option>
+                        <option value="end">End call (hang up)</option>
                         <option value="noop">No-op (do nothing)</option>
                       </select>
                     </div>
@@ -729,6 +732,14 @@ export default function ScriptBuilder({ onClose }: Props) {
                       <div>
                         <label className="mb-1 block text-xs text-gray-400">Transfer to (phone number)</label>
                         <input className={inputCls} value={(sd.config.number as string) ?? ""} onChange={(e) => patchConfig(selNode.id, { number: e.target.value })} placeholder="+1..." />
+                      </div>
+                    )}
+
+                    {content === "return" && (
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-400">Result <span className="text-gray-600">(handed back to the parent workflow)</span></label>
+                        <input className={inputCls} value={(sd.config.resultName as string) ?? ""} onChange={(e) => patchConfig(selNode.id, { resultName: e.target.value })} placeholder="e.g. qualified" />
+                        <p className="mt-1 text-[10px] text-gray-600">The parent can branch its next arrow on this result. Use this (not End Call) as a sub-workflow&rsquo;s normal exit.</p>
                       </div>
                     )}
 

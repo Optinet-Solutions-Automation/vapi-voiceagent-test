@@ -43,9 +43,9 @@ const sStart = randomUUID(), sIntro = randomUUID(), sQual = randomUUID(), sNot =
 const subNodes = [
   { id: sStart, type: "start", scenario_id: null, label: "Start", config: { mode: "agent_first" }, pos_x: 300, pos_y: 24 },
   { id: sIntro, type: "step", scenario_id: scn("first_message"), label: "Intro line", config: { contentType: "scenario" }, pos_x: 300, pos_y: 150 },
-  { id: sQual, type: "step", scenario_id: null, label: "Qualified", config: { contentType: "end", resultName: "qualified" }, pos_x: 90, pos_y: 300 },
-  { id: sNot, type: "step", scenario_id: null, label: "Not qualified", config: { contentType: "end", resultName: "not_qualified" }, pos_x: 300, pos_y: 320 },
-  { id: sUnk, type: "step", scenario_id: null, label: "Unknown", config: { contentType: "end", resultName: "unknown" }, pos_x: 510, pos_y: 300 },
+  { id: sQual, type: "step", scenario_id: null, label: "Qualified", config: { contentType: "return", resultName: "qualified" }, pos_x: 90, pos_y: 300 },
+  { id: sNot, type: "step", scenario_id: null, label: "Not qualified", config: { contentType: "return", resultName: "not_qualified" }, pos_x: 300, pos_y: 320 },
+  { id: sUnk, type: "step", scenario_id: null, label: "Unknown", config: { contentType: "return", resultName: "unknown" }, pos_x: 510, pos_y: 300 },
 ];
 const subEdges = [
   { id: randomUUID(), source_node_id: sStart, target_node_id: sIntro, condition: { kind: "plain" }, label: "" },

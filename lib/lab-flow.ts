@@ -5,6 +5,18 @@ export function findStartNode(nodes: ListenerScriptNode[]): ListenerScriptNode |
   return nodes.find((n) => n.type === "start") ?? null;
 }
 
+/** Entry node: a Start box if present, else a box with no incoming edge, else the first box.
+ *  Lets a (sub-)workflow omit a Start box and just begin at its root. */
+export function findEntryNode(
+  nodes: ListenerScriptNode[],
+  edges: ListenerScriptEdge[]
+): ListenerScriptNode | null {
+  const start = nodes.find((n) => n.type === "start");
+  if (start) return start;
+  const targeted = new Set(edges.map((e) => e.target_node_id));
+  return nodes.find((n) => !targeted.has(n.id)) ?? nodes[0] ?? null;
+}
+
 export function nodeById(nodes: ListenerScriptNode[], id: string | null): ListenerScriptNode | null {
   if (!id) return null;
   return nodes.find((n) => n.id === id) ?? null;

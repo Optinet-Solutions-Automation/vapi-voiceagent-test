@@ -13,7 +13,7 @@ import {
   getFlowState,
   upsertFlowState,
 } from "@/lib/lab-db";
-import { findStartNode, nodeById, pickNextEdge, edgeIsLoop, contentTypeOf } from "@/lib/lab-flow";
+import { findEntryNode, nodeById, pickNextEdge, edgeIsLoop, contentTypeOf } from "@/lib/lab-flow";
 import { classifyUtterance } from "@/lib/lab-router";
 import {
   getControlUrl,
@@ -505,9 +505,9 @@ async function runScriptFlow(
   if (graph.nodes.length === 0) return false;
 
   if (!currentNodeId || !graph.nodes.find((n) => n.id === currentNodeId)) {
-    const start = findStartNode(graph.nodes);
-    if (!start) return false;
-    currentNodeId = start.id;
+    const entry = findEntryNode(graph.nodes, graph.edges);
+    if (!entry) return false;
+    currentNodeId = entry.id;
     await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
   }
 
@@ -565,7 +565,7 @@ async function runScriptFlow(
         (variables.__stack as Frame[]).push({ scriptId: currentScriptId, returnNodeId: target.id });
         graph = await getScriptGraph(subId);
         currentScriptId = subId;
-        currentNodeId = findStartNode(graph.nodes)?.id ?? target.id;
+        currentNodeId = findEntryNode(graph.nodes, graph.edges)?.id ?? target.id;
         await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
         await flowLog(`↳ enter sub-workflow`, target, ct, edge.condition, null);
         continue;
@@ -575,10 +575,11 @@ async function runScriptFlow(
       continue;
     }
 
-    if (ct === "end") {
+    // Return → hand control + a result back to the parent workflow.
+    // (Legacy: an `end` box inside a sub-workflow also returns, for back-compat.)
+    if (ct === "return" || (ct === "end" && (variables.__stack as Frame[]).length > 0)) {
       const stack = variables.__stack as Frame[];
       if (stack.length > 0) {
-        // Sub-workflow finished → return its result to the parent.
         const frame = stack.pop()!;
         variables.__lastResult = (cfg.resultName as string) || target.label || "done";
         currentScriptId = frame.scriptId;
@@ -588,7 +589,11 @@ async function runScriptFlow(
         await flowLog(`↩ return: ${variables.__lastResult}`, target, "return", edge.condition, null);
         continue;
       }
-      // Top-level end → goodbye + hang up.
+      // Return at top level (no parent) → just end the call gracefully.
+    }
+
+    if (ct === "end" || ct === "return") {
+      // End Call (or a top-level Return) → goodbye + hang up.
       const scn = target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null;
       const text = scn?.response_template || "Thanks for your time today. Goodbye!";
       if (controlUrl) {
