@@ -13,7 +13,7 @@ import {
   getFlowState,
   upsertFlowState,
 } from "@/lib/lab-db";
-import { findEntryNode, nodeById, pickNextEdge, edgeIsLoop, contentTypeOf } from "@/lib/lab-flow";
+import { findEntryNode, nodeById, pickNextEdge, contentTypeOf } from "@/lib/lab-flow";
 import { classifyUtterance } from "@/lib/lab-router";
 import {
   getControlUrl,
@@ -530,19 +530,20 @@ async function runScriptFlow(
     });
   }
 
-  let guard = 0;
-  while (guard++ < 12) {
-    const result = (variables.__lastResult as string) ?? null;
-    const edge = pickNextEdge(graph.edges, currentNodeId!, intent, tagsOf(intent), result);
-    if (!edge) return false; // off-script → reactive layer handles it
+  const bumpLoop = (nodeId: string) => {
+    const key = "__loop_" + nodeId;
+    const n = ((variables[key] as number) ?? 0) + 1;
+    variables[key] = n;
+    return n;
+  };
 
-    if (edgeIsLoop(edge)) {
-      const key = "__loop_" + edge.id;
-      const n = (variables[key] as number) ?? 0;
-      const max = ((edge.condition as Record<string, unknown>).maxLoops as number) ?? 3;
-      if (n >= max) return false; // loop exhausted
-      variables[key] = n + 1;
-    }
+  let guard = 0;
+  while (guard++ < 16) {
+    const result = (variables.__lastResult as string) ?? null;
+    const currentNode = nodeById(graph.nodes, currentNodeId!);
+    if (!currentNode) return false;
+    const edge = pickNextEdge(currentNode, graph.edges, { intent, tags: tagsOf(intent), result, bumpLoop });
+    if (!edge) return false; // nowhere to go → reactive layer handles it
 
     const target = nodeById(graph.nodes, edge.target_node_id);
     if (!target) return false;
@@ -551,12 +552,20 @@ async function runScriptFlow(
     const ct = contentTypeOf(target);
     const cfg = target.config as Record<string, unknown>;
 
-    // ── Non-speaking steps: advance through them on the same turn ──
-    if (ct === "noop") {
+    // ── Control / pass-through boxes: advance on the same turn ──
+    if (ct === "noop" || ct === "ifelse" || ct === "loop") {
       currentNodeId = target.id;
       await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
       await flowLog("", target, ct, edge.condition, null);
       continue;
+    }
+
+    // ── Wait box: pause here and wait for the next customer utterance ──
+    if (ct === "wait") {
+      currentNodeId = target.id;
+      await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
+      await flowLog("", target, ct, edge.condition, null);
+      return true;
     }
 
     if (ct === "subworkflow") {

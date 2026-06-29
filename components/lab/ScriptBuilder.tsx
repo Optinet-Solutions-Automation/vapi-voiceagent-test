@@ -33,12 +33,26 @@ import {
 import type { ListenerScript, ListenerHandler, ListenerCollection } from "@/lib/database.types";
 
 // ── Content types a Step box can hold ─────────────────────────
-type Content = "scenario" | "collection" | "subworkflow" | "noop" | "send_sms" | "transfer" | "return" | "end";
+type Content =
+  | "scenario"
+  | "collection"
+  | "subworkflow"
+  | "wait"
+  | "ifelse"
+  | "loop"
+  | "noop"
+  | "send_sms"
+  | "transfer"
+  | "return"
+  | "end";
 
 const CONTENT_META: Record<Content, { label: string; color: string; terminal?: boolean }> = {
   scenario: { label: "Scenario", color: "border-indigo-500 bg-indigo-500/10" },
   collection: { label: "Collection", color: "border-fuchsia-500 bg-fuchsia-500/10" },
   subworkflow: { label: "Sub-workflow", color: "border-teal-500 bg-teal-500/10" },
+  wait: { label: "Wait", color: "border-sky-500 bg-sky-500/10" },
+  ifelse: { label: "If / Else", color: "border-yellow-500 bg-yellow-500/10" },
+  loop: { label: "Loop", color: "border-amber-500 bg-amber-500/10" },
   noop: { label: "No-op", color: "border-gray-500 bg-gray-500/10" },
   send_sms: { label: "Send SMS", color: "border-amber-500 bg-amber-500/10" },
   transfer: { label: "Transfer", color: "border-orange-500 bg-orange-500/10", terminal: true },
@@ -57,17 +71,33 @@ type NodeData = {
   subtitle?: string | null;
 };
 
+// Source handles a box exposes (id used as edge.sourceHandle for routing).
+function sourceHandlesFor(isStart: boolean, content: Content): { id: string; label?: string; color?: string }[] {
+  if (isStart) return [{ id: "out" }];
+  if (CONTENT_META[content].terminal) return [];
+  if (content === "ifelse")
+    return [
+      { id: "then", label: "Then", color: "#34d399" },
+      { id: "else", label: "Else", color: "#f87171" },
+    ];
+  if (content === "loop")
+    return [
+      { id: "loop", label: "Repeat", color: "#f59e0b" },
+      { id: "exit", label: "Exit", color: "#9ca3af" },
+    ];
+  return [{ id: "out" }];
+}
+
 // ── Custom node ───────────────────────────────────────────────
 function FlowNode({ data, selected }: NodeProps) {
   const d = data as NodeData;
   const isStart = d.kind === "start";
   const content = (d.config.contentType as Content) ?? "scenario";
-  const meta = isStart
-    ? { label: "Start", color: "border-emerald-500 bg-emerald-500/10", terminal: false }
-    : CONTENT_META[content];
+  const meta = isStart ? { label: "Start call", color: "border-emerald-500 bg-emerald-500/10" } : CONTENT_META[content];
+  const handles = sourceHandlesFor(isStart, content);
   return (
     <div
-      className={`min-w-[160px] max-w-[230px] rounded-lg border-2 px-3 py-2 text-left shadow ${meta.color} ${
+      className={`min-w-[160px] max-w-[230px] rounded-lg border-2 px-3 ${handles.length === 2 ? "pb-5 pt-2" : "py-2"} text-left shadow ${meta.color} ${
         selected ? "ring-2 ring-white/60" : ""
       }`}
     >
@@ -75,7 +105,22 @@ function FlowNode({ data, selected }: NodeProps) {
       <p className="text-[10px] font-bold uppercase tracking-wider text-gray-300">{meta.label}</p>
       <p className="truncate text-sm font-medium text-white">{d.label || meta.label}</p>
       {d.subtitle && <p className="mt-0.5 truncate text-[11px] text-gray-400">{d.subtitle}</p>}
-      {!meta.terminal && <Handle type="source" position={Position.Bottom} />}
+      {handles.map((h, i) => {
+        const left = handles.length === 2 ? (i === 0 ? "30%" : "70%") : "50%";
+        return (
+          <span key={h.id}>
+            <Handle id={h.id} type="source" position={Position.Bottom} style={{ left, background: h.color }} />
+            {h.label && (
+              <span
+                className="absolute bottom-0.5 -translate-x-1/2 text-[8px] font-semibold text-gray-300"
+                style={{ left }}
+              >
+                {h.label}
+              </span>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -133,8 +178,6 @@ export default function ScriptBuilder({ onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [palTab, setPalTab] = useState<"boxes" | "scenarios" | "collections" | "workflows">("boxes");
-  const [palSearch, setPalSearch] = useState("");
 
   const allTags = useMemo(
     () => Array.from(new Set(scenarios.flatMap((s) => s.tags ?? []).filter(Boolean))).sort(),
@@ -162,6 +205,13 @@ export default function ScriptBuilder({ onClose }: Props) {
     if (c === "subworkflow") return scriptName(d.config.subworkflowId as string) ? `⤳ ${scriptName(d.config.subworkflowId as string)}` : "(pick a workflow)";
     if (c === "transfer") return (d.config.number as string) || "(phone number)";
     if (c === "return") return `↩ ${(d.config.resultName as string) || "result"}`;
+    if (c === "ifelse") {
+      const by = (d.config.condBy as string) ?? "intent";
+      const val = (d.config.condValue as string) ?? "";
+      return `if ${by}: ${val || "?"}`;
+    }
+    if (c === "loop") return `up to ${(d.config.maxLoops as number) ?? 3}×`;
+    if (c === "wait") return "wait for caller";
     return null;
   }
 
@@ -202,13 +252,16 @@ export default function ScriptBuilder({ onClose }: Props) {
       return { id: n.id, type: "lab", position: { x: n.pos_x, y: n.pos_y }, data };
     });
     const rfEdges: Edge[] = g.edges.map((e) => {
-      const cond = normalizeCondition(e.condition as Record<string, unknown>);
+      const condRaw = (e.condition ?? {}) as Record<string, unknown>;
+      const cond = normalizeCondition(condRaw);
+      const handle = (condRaw.handle as string | undefined) ?? legacyHandle(cond);
       return {
         id: e.id,
         source: e.source_node_id,
         target: e.target_node_id,
-        ...edgeStyle(cond),
-        data: { condition: cond },
+        sourceHandle: handle && handle !== "out" ? handle : undefined,
+        ...edgeVisualByHandle(handle),
+        data: { condition: { ...cond, handle } },
         markerEnd: { type: MarkerType.ArrowClosed },
       };
     });
@@ -245,43 +298,45 @@ export default function ScriptBuilder({ onClose }: Props) {
     }
   }
 
-  function edgeLabel(c: EdgeCond): string {
-    if (c.kind === "plain") return "";
+  // Legacy condition edges → a handle name so old graphs still render sensibly.
+  function legacyHandle(c: EdgeCond): string {
     if (c.kind === "loop") return "loop";
-    if (c.by === "else") return "otherwise";
-    if (c.by === "intent") return `if intent: ${c.value ?? "?"}`;
-    if (c.by === "tag") return `if tag: ${c.value ?? "?"}`;
-    if (c.by === "result") return `if result: ${c.value ?? "?"}`;
-    return "branch";
+    if (c.kind === "branch") return c.by === "else" ? "else" : "then";
+    return "out";
   }
-  function edgeStyle(c: EdgeCond): Partial<Edge> {
-    if (c.kind === "loop")
-      return { label: edgeLabel(c), animated: true, style: { stroke: "#f59e0b", strokeDasharray: "5 4" } };
-    if (c.kind === "branch") return { label: edgeLabel(c), style: { stroke: "#818cf8" } };
-    return { label: "", style: { stroke: "#6b7280" } };
+  function edgeVisualByHandle(handle?: string): Partial<Edge> {
+    switch (handle) {
+      case "then":
+        return { label: "Then", style: { stroke: "#34d399" } };
+      case "else":
+        return { label: "Else", style: { stroke: "#f87171" } };
+      case "loop":
+        return { label: "Repeat", animated: true, style: { stroke: "#f59e0b", strokeDasharray: "5 4" } };
+      case "exit":
+        return { label: "Exit", style: { stroke: "#9ca3af" } };
+      default:
+        return { label: "", style: { stroke: "#6b7280" } };
+    }
   }
 
   const onConnect = useCallback(
     (c: Connection) =>
       setEdges((eds) =>
         addEdge(
-          { ...c, ...edgeStyle({ kind: "plain" }), data: { condition: { kind: "plain" } }, markerEnd: { type: MarkerType.ArrowClosed } },
+          {
+            ...c,
+            ...edgeVisualByHandle(c.sourceHandle ?? undefined),
+            data: { condition: { kind: "plain", handle: c.sourceHandle ?? "out" } },
+            markerEnd: { type: MarkerType.ArrowClosed },
+          },
           eds
         )
       ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges]
   );
 
   // ── Add / drag nodes ──
-  function addNode(kind: Kind, position?: { x: number; y: number }) {
-    const id = crypto.randomUUID();
-    const config: Record<string, unknown> = kind === "start" ? { mode: "agent_first" } : { contentType: "scenario" };
-    const data: NodeData = { kind, label: kind === "start" ? "Start" : "Step", scenarioId: null, config };
-    data.subtitle = subtitleFor(data);
-    setNodes((ns) => [...ns, { id, type: "lab", position: position ?? { x: 140 + ns.length * 30, y: 80 + ns.length * 30 }, data }]);
-    setSelNodeId(id);
-    setSelEdgeId(null);
-  }
   function dropNode(data: NodeData, position?: { x: number; y: number }) {
     const id = crypto.randomUUID();
     data.subtitle = subtitleFor(data);
@@ -289,15 +344,15 @@ export default function ScriptBuilder({ onClose }: Props) {
     setSelNodeId(id);
     setSelEdgeId(null);
   }
-  function addSubworkflow(subId: string, position?: { x: number; y: number }) {
-    const name = scriptName(subId);
-    dropNode({ kind: "step", label: name ? `Run ${name}` : "Sub-workflow", scenarioId: null, config: { contentType: "subworkflow", subworkflowId: subId } }, position);
-  }
-  function addScenarioNode(scnId: string, position?: { x: number; y: number }) {
-    dropNode({ kind: "step", label: scenarioName(scnId) ?? "Scenario", scenarioId: scnId, config: { contentType: "scenario" } }, position);
-  }
-  function addCollectionNode(colId: string, position?: { x: number; y: number }) {
-    dropNode({ kind: "step", label: collectionName(colId) ?? "Collection", scenarioId: null, config: { contentType: "collection", collectionId: colId } }, position);
+  // payload is "start" or a Content type ("scenario","collection","subworkflow","wait","ifelse","loop","end").
+  function createBox(payload: string, position?: { x: number; y: number }) {
+    if (payload === "start") {
+      dropNode({ kind: "start", label: "Start call", scenarioId: null, config: { mode: "agent_first" } }, position);
+      return;
+    }
+    const content = payload as Content;
+    if (!CONTENT_META[content]) return;
+    dropNode({ kind: "step", label: CONTENT_META[content].label, scenarioId: null, config: { contentType: content } }, position);
   }
   function onDragStartPalette(e: React.DragEvent, payload: string) {
     e.dataTransfer.setData("application/reactflow", payload);
@@ -311,12 +366,19 @@ export default function ScriptBuilder({ onClose }: Props) {
     e.preventDefault();
     const payload = e.dataTransfer.getData("application/reactflow");
     if (!payload || !rf) return;
-    const position = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    if (payload.startsWith("sub:")) addSubworkflow(payload.slice(4), position);
-    else if (payload.startsWith("scn:")) addScenarioNode(payload.slice(4), position);
-    else if (payload.startsWith("col:")) addCollectionNode(payload.slice(4), position);
-    else if (payload === "start" || payload === "step") addNode(payload, position);
+    createBox(payload, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
   }
+
+  const PALETTE: { payload: string; label: string; cls: string }[] = [
+    { payload: "start", label: "Start call", cls: "border-emerald-500 bg-emerald-500/10" },
+    { payload: "scenario", label: "Scenario", cls: "border-indigo-500 bg-indigo-500/10" },
+    { payload: "collection", label: "Collection", cls: "border-fuchsia-500 bg-fuchsia-500/10" },
+    { payload: "subworkflow", label: "Sub-workflow", cls: "border-teal-500 bg-teal-500/10" },
+    { payload: "wait", label: "Wait", cls: "border-sky-500 bg-sky-500/10" },
+    { payload: "ifelse", label: "If / Else", cls: "border-yellow-500 bg-yellow-500/10" },
+    { payload: "loop", label: "Loop", cls: "border-amber-500 bg-amber-500/10" },
+    { payload: "end", label: "End call", cls: "border-rose-500 bg-rose-500/10" },
+  ];
 
   function patchNodeData(id: string, patch: Partial<NodeData>) {
     setNodes((ns) =>
@@ -339,10 +401,6 @@ export default function ScriptBuilder({ onClose }: Props) {
       })
     );
   }
-  function setEdgeCond(id: string, cond: EdgeCond) {
-    setEdges((es) => es.map((e) => (e.id === id ? { ...e, ...edgeStyle(cond), data: { condition: cond } } : e)));
-  }
-
   function deleteSelected() {
     if (selNodeId) {
       setNodes((ns) => ns.filter((n) => n.id !== selNodeId));
@@ -362,23 +420,28 @@ export default function ScriptBuilder({ onClose }: Props) {
     try {
       const nodeRows = nodes.map((n) => {
         const d = n.data as NodeData;
+        const ct = (d.config.contentType ?? "scenario") as string;
         return {
           id: n.id,
           type: d.kind, // 'start' | 'step'
-          scenario_id: (d.config.contentType ?? "scenario") === "scenario" ? d.scenarioId : null,
+          scenario_id: ct === "scenario" || ct === "end" ? d.scenarioId : null,
           label: d.label,
           config: d.config ?? {},
           pos_x: n.position.x,
           pos_y: n.position.y,
         };
       });
-      const edgeRows = edges.map((e) => ({
-        id: e.id,
-        source_node_id: e.source,
-        target_node_id: e.target,
-        condition: ((e.data as { condition?: EdgeCond })?.condition ?? { kind: "plain" }) as Record<string, unknown>,
-        label: typeof e.label === "string" ? e.label : "",
-      }));
+      const edgeRows = edges.map((e) => {
+        const cond = ((e.data as { condition?: Record<string, unknown> })?.condition ?? { kind: "plain" }) as Record<string, unknown>;
+        return {
+          id: e.id,
+          source_node_id: e.source,
+          target_node_id: e.target,
+          // Persist which output handle the arrow leaves from (then/else/loop/exit) inside condition.
+          condition: { ...cond, handle: e.sourceHandle ?? cond.handle ?? "out" },
+          label: typeof e.label === "string" ? e.label : "",
+        };
+      });
       await saveScriptGraph(scriptId, nodeRows, edgeRows);
       setNotice("Script saved.");
     } catch (e: unknown) {
@@ -439,7 +502,6 @@ export default function ScriptBuilder({ onClose }: Props) {
   const selNode = nodes.find((n) => n.id === selNodeId) ?? null;
   const sd = selNode ? (selNode.data as NodeData) : null;
   const selEdge = edges.find((e) => e.id === selEdgeId) ?? null;
-  const selCond = (selEdge?.data as { condition?: EdgeCond } | undefined)?.condition ?? { kind: "plain" };
   const content = (sd?.config.contentType as Content) ?? "scenario";
 
   return (
@@ -497,135 +559,26 @@ export default function ScriptBuilder({ onClose }: Props) {
 
       <div className="flex min-h-0 flex-1">
         {/* Palette */}
-        <div className="flex w-52 shrink-0 flex-col border-r border-gray-800">
-          {/* Tabs */}
-          <div className="flex shrink-0 border-b border-gray-800 text-[11px]">
-            {([
-              ["boxes", "Boxes"],
-              ["scenarios", "Scenarios"],
-              ["collections", "Coll."],
-              ["workflows", "Flows"],
-            ] as const).map(([key, label]) => (
+        <div className="flex w-44 shrink-0 flex-col border-r border-gray-800">
+          <p className="shrink-0 border-b border-gray-800 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500">Boxes</p>
+          <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
+            {PALETTE.map((b) => (
               <button
-                key={key}
-                onClick={() => setPalTab(key)}
-                className={`flex-1 px-2 py-2 font-medium transition ${
-                  palTab === key ? "bg-gray-800 text-white" : "text-gray-500 hover:text-gray-300"
-                }`}
+                key={b.payload}
+                draggable={!!scriptId}
+                onDragStart={(e) => onDragStartPalette(e, b.payload)}
+                onClick={() => scriptId && createBox(b.payload)}
+                disabled={!scriptId}
+                title={`Drag onto the canvas`}
+                className={`flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 px-2.5 py-1.5 text-left text-xs font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40 ${b.cls}`}
               >
-                {label}
+                {b.label}
               </button>
             ))}
           </div>
-
-          {(palTab === "scenarios" || palTab === "collections" || palTab === "workflows") && (
-            <div className="shrink-0 border-b border-gray-800 p-2">
-              <input
-                value={palSearch}
-                onChange={(e) => setPalSearch(e.target.value)}
-                placeholder="Filter…"
-                className="w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
-              />
-            </div>
-          )}
-
-          <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
-            {palTab === "boxes" && (
-              <>
-                <button
-                  draggable={!!scriptId}
-                  onDragStart={(e) => onDragStartPalette(e, "start")}
-                  onClick={() => scriptId && addNode("start")}
-                  disabled={!scriptId}
-                  className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-emerald-500 bg-emerald-500/10 px-2.5 py-1.5 text-left text-xs font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
-                >
-                  Start
-                </button>
-                <button
-                  draggable={!!scriptId}
-                  onDragStart={(e) => onDragStartPalette(e, "step")}
-                  onClick={() => scriptId && addNode("step")}
-                  disabled={!scriptId}
-                  className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-indigo-500 bg-indigo-500/10 px-2.5 py-1.5 text-left text-xs font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
-                >
-                  <svg className="h-3 w-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" />
-                    <circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" />
-                    <circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" />
-                  </svg>
-                  Step
-                </button>
-                <p className="pt-1 text-[10px] text-gray-600">
-                  A generic <strong>Step</strong> you configure after dropping. Or grab a ready-made box from the
-                  Scenarios / Collections / Flows tabs.
-                </p>
-              </>
-            )}
-
-            {palTab === "scenarios" &&
-              scenarios
-                .filter((s) => !palSearch || `${s.name} ${(s.tags ?? []).join(" ")}`.toLowerCase().includes(palSearch.toLowerCase()))
-                .map((s) => (
-                  <button
-                    key={s.id}
-                    draggable={!!scriptId}
-                    onDragStart={(e) => onDragStartPalette(e, "scn:" + s.id)}
-                    onClick={() => scriptId && addScenarioNode(s.id)}
-                    disabled={!scriptId}
-                    title={`Drop a box that speaks "${s.name}"`}
-                    className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-indigo-500/70 bg-indigo-500/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
-                  >
-                    <span className="truncate">{s.name}</span>
-                  </button>
-                ))}
-
-            {palTab === "collections" &&
-              (collections.filter((c) => !palSearch || c.name.toLowerCase().includes(palSearch.toLowerCase())).length === 0 ? (
-                <p className="px-1 text-[10px] text-gray-600">No collections yet — create them in the Collections drawer.</p>
-              ) : (
-                collections
-                  .filter((c) => !palSearch || c.name.toLowerCase().includes(palSearch.toLowerCase()))
-                  .map((c) => (
-                    <button
-                      key={c.id}
-                      draggable={!!scriptId}
-                      onDragStart={(e) => onDragStartPalette(e, "col:" + c.id)}
-                      onClick={() => scriptId && addCollectionNode(c.id)}
-                      disabled={!scriptId}
-                      title={`Drop a box that uses the "${c.name}" collection`}
-                      className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-fuchsia-500/70 bg-fuchsia-500/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
-                    >
-                      <span className="shrink-0 text-fuchsia-300">▣</span>
-                      <span className="truncate">{c.name}</span>
-                    </button>
-                  ))
-              ))}
-
-            {palTab === "workflows" &&
-              (scripts.filter((s) => s.id !== scriptId && (!palSearch || s.name.toLowerCase().includes(palSearch.toLowerCase()))).length === 0 ? (
-                <p className="px-1 text-[10px] text-gray-600">No other scripts to use as sub-workflows yet.</p>
-              ) : (
-                scripts
-                  .filter((s) => s.id !== scriptId && (!palSearch || s.name.toLowerCase().includes(palSearch.toLowerCase())))
-                  .map((s) => (
-                    <button
-                      key={s.id}
-                      draggable={!!scriptId}
-                      onDragStart={(e) => onDragStartPalette(e, "sub:" + s.id)}
-                      onClick={() => scriptId && addSubworkflow(s.id)}
-                      disabled={!scriptId}
-                      title={`Drop a box that runs "${s.name}"`}
-                      className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-teal-500/70 bg-teal-500/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
-                    >
-                      <span className="shrink-0 text-teal-300">⤳</span>
-                      <span className="truncate">{s.name}</span>
-                    </button>
-                  ))
-              ))}
-          </div>
-
           <p className="shrink-0 border-t border-gray-800 p-2 text-[10px] text-gray-600">
-            Connect boxes dot-to-dot. Click an arrow to make it a branch or loop.
+            Drag a box onto the canvas, then click it to configure. Connect boxes dot-to-dot — arrows are just
+            connectors. Branching lives in the If/Else and Loop boxes (drag from their Then / Else / Repeat / Exit dots).
           </p>
         </div>
 
@@ -714,6 +667,9 @@ export default function ScriptBuilder({ onClose }: Props) {
                         <option value="scenario">Run a Scenario</option>
                         <option value="collection">Use a Collection (agent picks)</option>
                         <option value="subworkflow">Run a Sub-workflow</option>
+                        <option value="wait">Wait for the customer</option>
+                        <option value="ifelse">If / Else (branch)</option>
+                        <option value="loop">Loop</option>
                         <option value="send_sms">Send SMS</option>
                         <option value="transfer">Transfer to human</option>
                         <option value="return">Return to parent (with result)</option>
@@ -814,6 +770,67 @@ export default function ScriptBuilder({ onClose }: Props) {
                       </div>
                     )}
 
+                    {content === "wait" && (
+                      <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[11px] text-gray-500">
+                        Pauses here and waits for the customer to speak before following its arrow. Speaks nothing.
+                      </p>
+                    )}
+
+                    {content === "ifelse" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">Check the customer&rsquo;s reply by</label>
+                          <select
+                            className={inputCls + " [color-scheme:dark]"}
+                            value={(sd.config.condBy as string) ?? "intent"}
+                            onChange={(e) => patchConfig(selNode.id, { condBy: e.target.value, condValue: "" })}
+                          >
+                            <option value="intent">Intent</option>
+                            <option value="tag">Tag</option>
+                            <option value="result">Sub-workflow result</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">Equals</label>
+                          {(sd.config.condBy as string) === "tag" ? (
+                            <select className={inputCls + " [color-scheme:dark]"} value={(sd.config.condValue as string) ?? ""} onChange={(e) => patchConfig(selNode.id, { condValue: e.target.value })}>
+                              <option value="">(pick a tag)</option>
+                              {allTags.map((t) => (<option key={t} value={t}>{t}</option>))}
+                            </select>
+                          ) : (sd.config.condBy as string) === "result" ? (
+                            <input className={inputCls} value={(sd.config.condValue as string) ?? ""} onChange={(e) => patchConfig(selNode.id, { condValue: e.target.value })} placeholder="e.g. qualified" />
+                          ) : (
+                            <select className={inputCls + " [color-scheme:dark]"} value={(sd.config.condValue as string) ?? ""} onChange={(e) => patchConfig(selNode.id, { condValue: e.target.value })}>
+                              <option value="">(pick an intent)</option>
+                              {scenarios.map((s) => (<option key={s.id} value={s.intent_key}>{s.intent_key}</option>))}
+                            </select>
+                          )}
+                        </div>
+                        <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
+                          Connect the green <strong>Then</strong> dot to the box used when this is true, and the red
+                          <strong> Else</strong> dot to the fallback.
+                        </p>
+                      </>
+                    )}
+
+                    {content === "loop" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">Max repeats</label>
+                          <input
+                            type="number"
+                            className={inputCls}
+                            value={(sd.config.maxLoops as number) ?? 3}
+                            onChange={(e) => patchConfig(selNode.id, { maxLoops: Number(e.target.value) || 1 })}
+                          />
+                        </div>
+                        <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
+                          Connect the <strong>Repeat</strong> dot back to the box(es) to repeat, and the
+                          <strong> Exit</strong> dot to where the call continues once the limit is hit.
+                        </p>
+                      </>
+                    )}
+
                     {content === "return" && (
                       <div>
                         <label className="mb-1 block text-xs text-gray-400">Result <span className="text-gray-600">(handed back to the parent workflow)</span></label>
@@ -864,90 +881,20 @@ export default function ScriptBuilder({ onClose }: Props) {
               </>
             )}
 
-            {/* Edge config */}
+            {/* Edge config — arrows are plain connectors; branching lives in If/Else & Loop boxes */}
             {selEdge && (
-              <>
-                <div>
-                  <label className="mb-1 block text-xs text-gray-400">Arrow type</label>
-                  <select
-                    className={inputCls + " [color-scheme:dark]"}
-                    value={selCond.kind}
-                    onChange={(e) => {
-                      const kind = e.target.value as EdgeCond["kind"];
-                      if (kind === "branch") setEdgeCond(selEdge.id, { kind, by: "intent", value: "" });
-                      else if (kind === "loop") setEdgeCond(selEdge.id, { kind, maxLoops: 3 });
-                      else setEdgeCond(selEdge.id, { kind: "plain" });
-                    }}
-                  >
-                    <option value="plain">Plain — just go next</option>
-                    <option value="branch">Branch — if/else condition</option>
-                    <option value="loop">Loop — go back</option>
-                  </select>
-                </div>
-
-                {selCond.kind === "branch" && (
-                  <>
-                    <div>
-                      <label className="mb-1 block text-xs text-gray-400">Branch on</label>
-                      <select
-                        className={inputCls + " [color-scheme:dark]"}
-                        value={selCond.by ?? "intent"}
-                        onChange={(e) => setEdgeCond(selEdge.id, { kind: "branch", by: e.target.value, value: e.target.value === "else" ? undefined : "" })}
-                      >
-                        <option value="intent">Intent</option>
-                        <option value="tag">Tag</option>
-                        <option value="result">Sub-workflow result</option>
-                        <option value="else">Otherwise (fallback)</option>
-                      </select>
-                    </div>
-                    {selCond.by === "intent" && (
-                      <select
-                        className={inputCls + " [color-scheme:dark]"}
-                        value={selCond.value ?? ""}
-                        onChange={(e) => setEdgeCond(selEdge.id, { kind: "branch", by: "intent", value: e.target.value })}
-                      >
-                        <option value="">(pick an intent)</option>
-                        {scenarios.map((s) => (
-                          <option key={s.id} value={s.intent_key}>{s.intent_key}</option>
-                        ))}
-                      </select>
-                    )}
-                    {selCond.by === "tag" && (
-                      <select
-                        className={inputCls + " [color-scheme:dark]"}
-                        value={selCond.value ?? ""}
-                        onChange={(e) => setEdgeCond(selEdge.id, { kind: "branch", by: "tag", value: e.target.value })}
-                      >
-                        <option value="">(pick a tag)</option>
-                        {allTags.map((t) => (
-                          <option key={t} value={t}>{t}</option>
-                        ))}
-                      </select>
-                    )}
-                    {selCond.by === "result" && (
-                      <input
-                        className={inputCls}
-                        value={selCond.value ?? ""}
-                        onChange={(e) => setEdgeCond(selEdge.id, { kind: "branch", by: "result", value: e.target.value })}
-                        placeholder="result value, e.g. qualified"
-                      />
-                    )}
-                  </>
-                )}
-
-                {selCond.kind === "loop" && (
-                  <div>
-                    <label className="mb-1 block text-xs text-gray-400">Max loops</label>
-                    <input
-                      type="number"
-                      className={inputCls}
-                      value={selCond.maxLoops ?? 3}
-                      onChange={(e) => setEdgeCond(selEdge.id, { kind: "loop", maxLoops: Number(e.target.value) || 1 })}
-                    />
-                    <p className="mt-1 text-[10px] text-gray-600">Sends the call back to the target box, up to this many times.</p>
-                  </div>
-                )}
-              </>
+              <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[11px] text-gray-400">
+                {(() => {
+                  const h = (selEdge.data as { condition?: { handle?: string } } | undefined)?.condition?.handle;
+                  if (h === "then") return "This is the Then path of an If/Else box.";
+                  if (h === "else") return "This is the Else (fallback) path of an If/Else box.";
+                  if (h === "loop") return "This is the Repeat path of a Loop box.";
+                  if (h === "exit") return "This is the Exit path of a Loop box.";
+                  return "A plain connector — the call moves to the next box.";
+                })()}
+                <br />
+                <span className="text-gray-600">Use Delete above to remove it.</span>
+              </p>
             )}
           </div>
         )}
