@@ -188,46 +188,56 @@ export default function ScriptBuilder({ onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenarios, collections, scripts]);
 
+  function graphToFlow(g: Awaited<ReturnType<typeof getScriptGraph>>): { rfNodes: Node[]; rfEdges: Edge[] } {
+    const rfNodes: Node[] = g.nodes.map((n) => {
+      const isStart = n.type === "start";
+      const cfg = (n.config ?? {}) as Record<string, unknown>;
+      if (!isStart && !cfg.contentType) cfg.contentType = legacyToContent(n.type) ?? "scenario";
+      const data: NodeData = { kind: isStart ? "start" : "step", label: n.label, scenarioId: n.scenario_id, config: cfg };
+      data.subtitle = subtitleFor(data);
+      return { id: n.id, type: "lab", position: { x: n.pos_x, y: n.pos_y }, data };
+    });
+    const rfEdges: Edge[] = g.edges.map((e) => {
+      const cond = normalizeCondition(e.condition as Record<string, unknown>);
+      return {
+        id: e.id,
+        source: e.source_node_id,
+        target: e.target_node_id,
+        ...edgeStyle(cond),
+        data: { condition: cond },
+        markerEnd: { type: MarkerType.ArrowClosed },
+      };
+    });
+    return { rfNodes, rfEdges };
+  }
+
   async function loadScript(id: string) {
     setScriptId(id);
     setSelNodeId(null);
     setSelEdgeId(null);
     try {
-      const g = await getScriptGraph(id);
-      setNodes(
-        g.nodes.map((n) => {
-          const isStart = n.type === "start";
-          const cfg = (n.config ?? {}) as Record<string, unknown>;
-          // Normalise legacy node type → content type
-          if (!isStart && !cfg.contentType) {
-            const c = legacyToContent(n.type) ?? "scenario";
-            cfg.contentType = c;
-          }
-          const data: NodeData = {
-            kind: isStart ? "start" : "step",
-            label: n.label,
-            scenarioId: n.scenario_id,
-            config: cfg,
-          };
-          data.subtitle = subtitleFor(data);
-          return { id: n.id, type: "lab", position: { x: n.pos_x, y: n.pos_y }, data };
-        })
-      );
-      setEdges(
-        g.edges.map((e) => {
-          const cond = normalizeCondition(e.condition as Record<string, unknown>);
-          return {
-            id: e.id,
-            source: e.source_node_id,
-            target: e.target_node_id,
-            ...edgeStyle(cond),
-            data: { condition: cond },
-            markerEnd: { type: MarkerType.ArrowClosed },
-          };
-        })
-      );
+      const { rfNodes, rfEdges } = graphToFlow(await getScriptGraph(id));
+      setNodes(rfNodes);
+      setEdges(rfEdges);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load script");
+    }
+  }
+
+  // ── Sub-workflow preview (double-click a sub-workflow box) ──
+  const [preview, setPreview] = useState<{ id: string; name: string; nodes: Node[]; edges: Edge[] } | null>(null);
+  async function openPreview(subId: string) {
+    try {
+      const { rfNodes, rfEdges } = graphToFlow(await getScriptGraph(subId));
+      setPreview({ id: subId, name: scriptName(subId) ?? "Sub-workflow", nodes: rfNodes, edges: rfEdges });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to open sub-workflow");
+    }
+  }
+  function onNodeDoubleClick(_: React.MouseEvent, n: Node) {
+    const d = n.data as NodeData;
+    if (d.kind === "step" && (d.config.contentType as Content) === "subworkflow" && d.config.subworkflowId) {
+      openPreview(d.config.subworkflowId as string);
     }
   }
 
@@ -552,6 +562,7 @@ export default function ScriptBuilder({ onClose }: Props) {
                 setSelNodeId(n.id);
                 setSelEdgeId(null);
               }}
+              onNodeDoubleClick={onNodeDoubleClick}
               onEdgeClick={(_, e) => {
                 setSelEdgeId(e.id);
                 setSelNodeId(null);
@@ -710,7 +721,7 @@ export default function ScriptBuilder({ onClose }: Props) {
                             <option key={s.id} value={s.id}>{s.name}</option>
                           ))}
                         </select>
-                        <p className="mt-1 text-[10px] text-gray-600">When it finishes it returns a result; branch the next arrow on that result.</p>
+                        <p className="mt-1 text-[10px] text-gray-600">When it finishes it returns a result; branch the next arrow on that result. Double-click the box on the canvas to preview its flow.</p>
                       </div>
                     )}
 
@@ -851,6 +862,55 @@ export default function ScriptBuilder({ onClose }: Props) {
           </div>
         )}
       </div>
+
+      {/* Sub-workflow preview (read-only) */}
+      {preview && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6" onClick={() => setPreview(null)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative flex h-[80vh] w-[85vw] max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-950 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-gray-800 px-4 py-2.5">
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500">Sub-workflow preview</p>
+                <p className="truncate text-sm font-bold text-white">{preview.name}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const id = preview.id;
+                    setPreview(null);
+                    loadScript(id);
+                  }}
+                  className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800"
+                >
+                  Open for editing
+                </button>
+                <button onClick={() => setPreview(null)} className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1">
+              <ReactFlow
+                nodes={preview.nodes}
+                edges={preview.edges}
+                nodeTypes={nodeTypes}
+                colorMode="dark"
+                fitView
+                nodesDraggable={false}
+                nodesConnectable={false}
+                elementsSelectable={false}
+                proOptions={{ hideAttribution: true }}
+              >
+                <Background variant={BackgroundVariant.Dots} gap={18} size={1.6} color="#3a4256" />
+                <Controls showInteractive={false} />
+              </ReactFlow>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
