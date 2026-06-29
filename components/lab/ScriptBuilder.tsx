@@ -268,8 +268,22 @@ export default function ScriptBuilder({ onClose }: Props) {
     setSelNodeId(id);
     setSelEdgeId(null);
   }
-  function onDragStartPalette(e: React.DragEvent, kind: Kind) {
-    e.dataTransfer.setData("application/reactflow", kind);
+  function addSubworkflow(subId: string, position?: { x: number; y: number }) {
+    const id = crypto.randomUUID();
+    const name = scriptName(subId);
+    const data: NodeData = {
+      kind: "step",
+      label: name ? `Run ${name}` : "Sub-workflow",
+      scenarioId: null,
+      config: { contentType: "subworkflow", subworkflowId: subId },
+    };
+    data.subtitle = subtitleFor(data);
+    setNodes((ns) => [...ns, { id, type: "lab", position: position ?? { x: 140 + ns.length * 30, y: 80 + ns.length * 30 }, data }]);
+    setSelNodeId(id);
+    setSelEdgeId(null);
+  }
+  function onDragStartPalette(e: React.DragEvent, payload: string) {
+    e.dataTransfer.setData("application/reactflow", payload);
     e.dataTransfer.effectAllowed = "move";
   }
   function onDragOver(e: React.DragEvent) {
@@ -278,9 +292,14 @@ export default function ScriptBuilder({ onClose }: Props) {
   }
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
-    const kind = e.dataTransfer.getData("application/reactflow") as Kind;
-    if ((kind !== "start" && kind !== "step") || !rf) return;
-    addNode(kind, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+    const payload = e.dataTransfer.getData("application/reactflow");
+    if (!payload || !rf) return;
+    const position = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    if (payload.startsWith("sub:")) {
+      addSubworkflow(payload.slice(4), position);
+    } else if (payload === "start" || payload === "step") {
+      addNode(payload, position);
+    }
   }
 
   function patchNodeData(id: string, patch: Partial<NodeData>) {
@@ -491,6 +510,31 @@ export default function ScriptBuilder({ onClose }: Props) {
             Drag a <strong>Step</strong> onto the canvas, then click it to choose what it does — a scenario,
             a collection, a sub-workflow, an action, or no-op.
           </p>
+
+          {scripts.filter((s) => s.id !== scriptId).length > 0 && (
+            <div className="border-t border-gray-800 pt-2">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">Sub-workflows</p>
+              <div className="space-y-1">
+                {scripts
+                  .filter((s) => s.id !== scriptId)
+                  .map((s) => (
+                    <button
+                      key={s.id}
+                      draggable={!!scriptId}
+                      onDragStart={(e) => onDragStartPalette(e, "sub:" + s.id)}
+                      onClick={() => scriptId && addSubworkflow(s.id)}
+                      disabled={!scriptId}
+                      title={`Drop a box that runs "${s.name}"`}
+                      className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-teal-500/70 bg-teal-500/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
+                    >
+                      <span className="shrink-0 text-teal-300">⤳</span>
+                      <span className="truncate">{s.name}</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
           <p className="pt-1 text-[10px] text-gray-600">Connect boxes by dragging dot-to-dot. Click an arrow to make it a branch or a loop.</p>
         </div>
 
