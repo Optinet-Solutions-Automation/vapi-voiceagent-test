@@ -133,6 +133,8 @@ export default function ScriptBuilder({ onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [palTab, setPalTab] = useState<"boxes" | "scenarios" | "collections" | "workflows">("boxes");
+  const [palSearch, setPalSearch] = useState("");
 
   const allTags = useMemo(
     () => Array.from(new Set(scenarios.flatMap((s) => s.tags ?? []).filter(Boolean))).sort(),
@@ -280,19 +282,22 @@ export default function ScriptBuilder({ onClose }: Props) {
     setSelNodeId(id);
     setSelEdgeId(null);
   }
-  function addSubworkflow(subId: string, position?: { x: number; y: number }) {
+  function dropNode(data: NodeData, position?: { x: number; y: number }) {
     const id = crypto.randomUUID();
-    const name = scriptName(subId);
-    const data: NodeData = {
-      kind: "step",
-      label: name ? `Run ${name}` : "Sub-workflow",
-      scenarioId: null,
-      config: { contentType: "subworkflow", subworkflowId: subId },
-    };
     data.subtitle = subtitleFor(data);
     setNodes((ns) => [...ns, { id, type: "lab", position: position ?? { x: 140 + ns.length * 30, y: 80 + ns.length * 30 }, data }]);
     setSelNodeId(id);
     setSelEdgeId(null);
+  }
+  function addSubworkflow(subId: string, position?: { x: number; y: number }) {
+    const name = scriptName(subId);
+    dropNode({ kind: "step", label: name ? `Run ${name}` : "Sub-workflow", scenarioId: null, config: { contentType: "subworkflow", subworkflowId: subId } }, position);
+  }
+  function addScenarioNode(scnId: string, position?: { x: number; y: number }) {
+    dropNode({ kind: "step", label: scenarioName(scnId) ?? "Scenario", scenarioId: scnId, config: { contentType: "scenario" } }, position);
+  }
+  function addCollectionNode(colId: string, position?: { x: number; y: number }) {
+    dropNode({ kind: "step", label: collectionName(colId) ?? "Collection", scenarioId: null, config: { contentType: "collection", collectionId: colId } }, position);
   }
   function onDragStartPalette(e: React.DragEvent, payload: string) {
     e.dataTransfer.setData("application/reactflow", payload);
@@ -307,11 +312,10 @@ export default function ScriptBuilder({ onClose }: Props) {
     const payload = e.dataTransfer.getData("application/reactflow");
     if (!payload || !rf) return;
     const position = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    if (payload.startsWith("sub:")) {
-      addSubworkflow(payload.slice(4), position);
-    } else if (payload === "start" || payload === "step") {
-      addNode(payload, position);
-    }
+    if (payload.startsWith("sub:")) addSubworkflow(payload.slice(4), position);
+    else if (payload.startsWith("scn:")) addScenarioNode(payload.slice(4), position);
+    else if (payload.startsWith("col:")) addCollectionNode(payload.slice(4), position);
+    else if (payload === "start" || payload === "step") addNode(payload, position);
   }
 
   function patchNodeData(id: string, patch: Partial<NodeData>) {
@@ -493,42 +497,116 @@ export default function ScriptBuilder({ onClose }: Props) {
 
       <div className="flex min-h-0 flex-1">
         {/* Palette */}
-        <div className="w-44 shrink-0 space-y-1.5 border-r border-gray-800 p-3">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">Add box</p>
-          <button
-            draggable={!!scriptId}
-            onDragStart={(e) => onDragStartPalette(e, "start")}
-            onClick={() => scriptId && addNode("start")}
-            disabled={!scriptId}
-            className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-emerald-500 bg-emerald-500/10 px-2.5 py-1.5 text-left text-xs font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
-          >
-            Start
-          </button>
-          <button
-            draggable={!!scriptId}
-            onDragStart={(e) => onDragStartPalette(e, "step")}
-            onClick={() => scriptId && addNode("step")}
-            disabled={!scriptId}
-            className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-indigo-500 bg-indigo-500/10 px-2.5 py-1.5 text-left text-xs font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
-          >
-            <svg className="h-3 w-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
-              <circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" />
-              <circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" />
-              <circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" />
-            </svg>
-            Step
-          </button>
-          <p className="pt-2 text-[10px] text-gray-600">
-            Drag a <strong>Step</strong> onto the canvas, then click it to choose what it does — a scenario,
-            a collection, a sub-workflow, an action, or no-op.
-          </p>
+        <div className="flex w-52 shrink-0 flex-col border-r border-gray-800">
+          {/* Tabs */}
+          <div className="flex shrink-0 border-b border-gray-800 text-[11px]">
+            {([
+              ["boxes", "Boxes"],
+              ["scenarios", "Scenarios"],
+              ["collections", "Coll."],
+              ["workflows", "Flows"],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setPalTab(key)}
+                className={`flex-1 px-2 py-2 font-medium transition ${
+                  palTab === key ? "bg-gray-800 text-white" : "text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
-          {scripts.filter((s) => s.id !== scriptId).length > 0 && (
-            <div className="border-t border-gray-800 pt-2">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">Sub-workflows</p>
-              <div className="space-y-1">
-                {scripts
-                  .filter((s) => s.id !== scriptId)
+          {(palTab === "scenarios" || palTab === "collections" || palTab === "workflows") && (
+            <div className="shrink-0 border-b border-gray-800 p-2">
+              <input
+                value={palSearch}
+                onChange={(e) => setPalSearch(e.target.value)}
+                placeholder="Filter…"
+                className="w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+          )}
+
+          <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
+            {palTab === "boxes" && (
+              <>
+                <button
+                  draggable={!!scriptId}
+                  onDragStart={(e) => onDragStartPalette(e, "start")}
+                  onClick={() => scriptId && addNode("start")}
+                  disabled={!scriptId}
+                  className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-emerald-500 bg-emerald-500/10 px-2.5 py-1.5 text-left text-xs font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
+                >
+                  Start
+                </button>
+                <button
+                  draggable={!!scriptId}
+                  onDragStart={(e) => onDragStartPalette(e, "step")}
+                  onClick={() => scriptId && addNode("step")}
+                  disabled={!scriptId}
+                  className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-indigo-500 bg-indigo-500/10 px-2.5 py-1.5 text-left text-xs font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
+                >
+                  <svg className="h-3 w-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" />
+                    <circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" />
+                    <circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" />
+                  </svg>
+                  Step
+                </button>
+                <p className="pt-1 text-[10px] text-gray-600">
+                  A generic <strong>Step</strong> you configure after dropping. Or grab a ready-made box from the
+                  Scenarios / Collections / Flows tabs.
+                </p>
+              </>
+            )}
+
+            {palTab === "scenarios" &&
+              scenarios
+                .filter((s) => !palSearch || `${s.name} ${(s.tags ?? []).join(" ")}`.toLowerCase().includes(palSearch.toLowerCase()))
+                .map((s) => (
+                  <button
+                    key={s.id}
+                    draggable={!!scriptId}
+                    onDragStart={(e) => onDragStartPalette(e, "scn:" + s.id)}
+                    onClick={() => scriptId && addScenarioNode(s.id)}
+                    disabled={!scriptId}
+                    title={`Drop a box that speaks "${s.name}"`}
+                    className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-indigo-500/70 bg-indigo-500/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
+                  >
+                    <span className="truncate">{s.name}</span>
+                  </button>
+                ))}
+
+            {palTab === "collections" &&
+              (collections.filter((c) => !palSearch || c.name.toLowerCase().includes(palSearch.toLowerCase())).length === 0 ? (
+                <p className="px-1 text-[10px] text-gray-600">No collections yet — create them in the Collections drawer.</p>
+              ) : (
+                collections
+                  .filter((c) => !palSearch || c.name.toLowerCase().includes(palSearch.toLowerCase()))
+                  .map((c) => (
+                    <button
+                      key={c.id}
+                      draggable={!!scriptId}
+                      onDragStart={(e) => onDragStartPalette(e, "col:" + c.id)}
+                      onClick={() => scriptId && addCollectionNode(c.id)}
+                      disabled={!scriptId}
+                      title={`Drop a box that uses the "${c.name}" collection`}
+                      className="flex w-full cursor-grab items-center gap-1.5 rounded-lg border-2 border-fuchsia-500/70 bg-fuchsia-500/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-gray-200 hover:brightness-125 active:cursor-grabbing disabled:opacity-40"
+                    >
+                      <span className="shrink-0 text-fuchsia-300">▣</span>
+                      <span className="truncate">{c.name}</span>
+                    </button>
+                  ))
+              ))}
+
+            {palTab === "workflows" &&
+              (scripts.filter((s) => s.id !== scriptId && (!palSearch || s.name.toLowerCase().includes(palSearch.toLowerCase()))).length === 0 ? (
+                <p className="px-1 text-[10px] text-gray-600">No other scripts to use as sub-workflows yet.</p>
+              ) : (
+                scripts
+                  .filter((s) => s.id !== scriptId && (!palSearch || s.name.toLowerCase().includes(palSearch.toLowerCase())))
                   .map((s) => (
                     <button
                       key={s.id}
@@ -542,12 +620,13 @@ export default function ScriptBuilder({ onClose }: Props) {
                       <span className="shrink-0 text-teal-300">⤳</span>
                       <span className="truncate">{s.name}</span>
                     </button>
-                  ))}
-              </div>
-            </div>
-          )}
+                  ))
+              ))}
+          </div>
 
-          <p className="pt-1 text-[10px] text-gray-600">Connect boxes by dragging dot-to-dot. Click an arrow to make it a branch or a loop.</p>
+          <p className="shrink-0 border-t border-gray-800 p-2 text-[10px] text-gray-600">
+            Connect boxes dot-to-dot. Click an arrow to make it a branch or loop.
+          </p>
         </div>
 
         {/* Canvas */}
