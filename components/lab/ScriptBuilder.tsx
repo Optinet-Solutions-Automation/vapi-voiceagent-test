@@ -159,9 +159,9 @@ function normalizeCondition(c: Record<string, unknown> | undefined): EdgeCond {
   return { kind: "plain" };
 }
 
-type Props = { onClose: () => void };
+type Props = { onClose: () => void; initialScriptId?: string | null };
 
-export default function ScriptBuilder({ onClose }: Props) {
+export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [scripts, setScripts] = useState<ListenerScript[]>([]);
   const [scriptId, setScriptId] = useState<string | null>(null);
   const [scenarios, setScenarios] = useState<ListenerHandler[]>([]);
@@ -228,7 +228,8 @@ export default function ScriptBuilder({ onClose }: Props) {
         setScenarios(hs);
         setCollections(cols);
         setActiveScriptId(settings?.active_script_id ?? null);
-        if (scs.length && !scriptId) loadScript(scs[0].id);
+        if (initialScriptId) loadScript(initialScriptId);
+        else if (scs.length && !scriptId) loadScript(scs[0].id);
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Failed to load — did you run the scripts migration?");
       }
