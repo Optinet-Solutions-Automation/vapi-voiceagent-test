@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import ScriptBuilder from "@/components/lab/ScriptBuilder";
 import { listScripts, createScript, deleteScript, getLabSettings } from "@/lib/lab-db";
 import type { ListenerScript } from "@/lib/database.types";
@@ -8,7 +9,20 @@ import type { ListenerScript } from "@/lib/database.types";
 const PAGE_SIZE = 10;
 
 export default function ScriptBuilderPage() {
-  const [editingId, setEditingId] = useState<string | null>(null);
+  return (
+    <Suspense fallback={<div className="px-4 py-10 text-sm text-gray-500 sm:px-6">Loading…</div>}>
+      <ScriptBuilderInner />
+    </Suspense>
+  );
+}
+
+function ScriptBuilderInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Selected script lives in the URL (?id=…) so a refresh reopens the same one.
+  const editingId = searchParams.get("id");
+  const openScript = (id: string) => router.push(`/script-builder?id=${id}`);
+  const backToList = () => router.push("/script-builder");
 
   const [scripts, setScripts] = useState<ListenerScript[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -56,7 +70,7 @@ export default function ScriptBuilderPage() {
     try {
       const s = await createScript(newName.trim());
       setNewName("");
-      setEditingId(s.id); // jump straight into the builder
+      openScript(s.id); // jump straight into the builder
     } catch (e: any) {
       setError(e?.message ?? "Failed to create");
     } finally {
@@ -77,7 +91,7 @@ export default function ScriptBuilderPage() {
 
   // ── Editor view ──
   if (editingId) {
-    return <ScriptBuilder initialScriptId={editingId} onClose={() => setEditingId(null)} />;
+    return <ScriptBuilder initialScriptId={editingId} onClose={backToList} />;
   }
 
   // ── List view ──
@@ -147,7 +161,7 @@ export default function ScriptBuilderPage() {
         {paginated.map((s) => (
           <div
             key={s.id}
-            onClick={() => setEditingId(s.id)}
+            onClick={() => openScript(s.id)}
             className="grid cursor-pointer grid-cols-[1fr_auto] sm:grid-cols-[1fr_180px_90px] items-center gap-4 border-b border-gray-700/50 px-5 py-3.5 transition last:border-b-0 hover:bg-gray-700/30"
           >
             <div className="min-w-0">
@@ -171,7 +185,7 @@ export default function ScriptBuilderPage() {
             </span>
             <div className="flex justify-end gap-1">
               <button
-                onClick={(e) => { e.stopPropagation(); setEditingId(s.id); }}
+                onClick={(e) => { e.stopPropagation(); openScript(s.id); }}
                 className="rounded-lg border border-gray-600 px-2.5 py-1 text-xs text-gray-300 transition hover:bg-gray-700"
               >
                 Open
