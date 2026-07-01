@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -10,6 +10,7 @@ import {
   Position,
   MarkerType,
   addEdge,
+  reconnectEdge,
   useNodesState,
   useEdgesState,
   type Node,
@@ -101,7 +102,13 @@ function FlowNode({ data, selected }: NodeProps) {
         selected ? "ring-2 ring-white/60" : ""
       }`}
     >
-      {!isStart && <Handle type="target" position={Position.Top} />}
+      {!isStart && (
+        <Handle
+          type="target"
+          position={Position.Top}
+          style={{ width: 14, height: 14, top: -7, background: "#94a3b8", border: "2px solid #0f172a" }}
+        />
+      )}
       <p className="text-[10px] font-bold uppercase tracking-wider text-gray-300">{meta.label}</p>
       <p className="truncate text-sm font-medium text-white">{d.label || meta.label}</p>
       {d.subtitle && <p className="mt-0.5 truncate text-[11px] text-gray-400">{d.subtitle}</p>}
@@ -109,10 +116,15 @@ function FlowNode({ data, selected }: NodeProps) {
         const left = handles.length === 2 ? (i === 0 ? "30%" : "70%") : "50%";
         return (
           <span key={h.id}>
-            <Handle id={h.id} type="source" position={Position.Bottom} style={{ left, background: h.color }} />
+            <Handle
+              id={h.id}
+              type="source"
+              position={Position.Bottom}
+              style={{ left, width: 14, height: 14, bottom: -7, background: h.color ?? "#818cf8", border: "2px solid #0f172a" }}
+            />
             {h.label && (
               <span
-                className="absolute bottom-0.5 -translate-x-1/2 text-[8px] font-semibold text-gray-300"
+                className="absolute -bottom-3.5 -translate-x-1/2 text-[8px] font-semibold text-gray-300"
                 style={{ left }}
               >
                 {h.label}
@@ -336,6 +348,30 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges]
   );
+
+  // Reconnecting an existing arrow's endpoint — if it's dropped on nothing, delete it.
+  const reconnectOk = useRef(true);
+  function onReconnectStart() {
+    reconnectOk.current = false;
+  }
+  function onReconnect(oldEdge: Edge, c: Connection) {
+    reconnectOk.current = true;
+    setEdges((els) =>
+      reconnectEdge(oldEdge, c, els).map((e) =>
+        e.id === oldEdge.id
+          ? {
+              ...e,
+              ...edgeVisualByHandle(c.sourceHandle ?? undefined),
+              data: { condition: { kind: "plain", handle: c.sourceHandle ?? "out" } },
+            }
+          : e
+      )
+    );
+  }
+  function onReconnectEnd(_: unknown, edge: Edge) {
+    if (!reconnectOk.current) setEdges((eds) => eds.filter((e) => e.id !== edge.id));
+    reconnectOk.current = true;
+  }
 
   // ── Add / drag nodes ──
   function dropNode(data: NodeData, position?: { x: number; y: number }) {
@@ -592,6 +628,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              onReconnect={onReconnect}
+              onReconnectStart={onReconnectStart}
+              onReconnectEnd={onReconnectEnd}
+              connectionRadius={45}
               onInit={setRf}
               onNodeClick={(_, n) => {
                 setSelNodeId(n.id);
