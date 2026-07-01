@@ -666,7 +666,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           <div className="w-72 shrink-0 space-y-3 overflow-y-auto border-l border-gray-800 p-3">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                {sd ? (sd.kind === "start" ? "Start box" : "Step box") : "Connection"}
+                {sd ? (sd.kind === "start" ? "Start call" : `${CONTENT_META[content]?.label ?? "Step"} box`) : "Connection"}
               </p>
               <button onClick={deleteSelected} className="text-[11px] text-rose-400 hover:text-rose-300">
                 Delete
@@ -697,27 +697,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
 
                 {sd.kind === "step" && (
                   <>
-                    <div>
-                      <label className="mb-1 block text-xs text-gray-400">This box does…</label>
-                      <select
-                        className={inputCls + " [color-scheme:dark]"}
-                        value={content}
-                        onChange={(e) => patchConfig(selNode.id, { contentType: e.target.value })}
-                      >
-                        <option value="scenario">Run a Scenario</option>
-                        <option value="collection">Use a Collection (agent picks)</option>
-                        <option value="subworkflow">Run a Sub-workflow</option>
-                        <option value="wait">Wait for the customer</option>
-                        <option value="ifelse">If / Else (branch)</option>
-                        <option value="loop">Loop</option>
-                        <option value="send_sms">Send SMS</option>
-                        <option value="transfer">Transfer to human</option>
-                        <option value="return">Return to parent (with result)</option>
-                        <option value="end">End call (hang up)</option>
-                        <option value="noop">No-op (do nothing)</option>
-                      </select>
-                    </div>
-
                     {content === "scenario" && (
                       <>
                         <div>
