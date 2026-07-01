@@ -22,7 +22,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   listScripts,
-  createScript,
+  updateScript,
   deleteScript,
   getScriptGraph,
   saveScriptGraph,
@@ -186,10 +186,26 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [selEdgeId, setSelEdgeId] = useState<string | null>(null);
   const [rf, setRf] = useState<ReactFlowInstance<Node, Edge> | null>(null);
 
-  const [newName, setNewName] = useState("");
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Keep the editable title in sync with the loaded script.
+  useEffect(() => {
+    setName(scripts.find((s) => s.id === scriptId)?.name ?? "");
+  }, [scriptId, scripts]);
+
+  async function handleRename() {
+    const trimmed = name.trim();
+    if (!scriptId || !trimmed || trimmed === scripts.find((s) => s.id === scriptId)?.name) return;
+    try {
+      await updateScript(scriptId, { name: trimmed });
+      setScripts((ss) => ss.map((s) => (s.id === scriptId ? { ...s, name: trimmed } : s)));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to rename");
+    }
+  }
 
   const allTags = useMemo(
     () => Array.from(new Set(scenarios.flatMap((s) => s.tags ?? []).filter(Boolean))).sort(),
@@ -488,51 +504,24 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     }
   }
 
-  async function handleCreate() {
-    if (!newName.trim()) return;
-    try {
-      const s = await createScript(newName.trim());
-      setNewName("");
-      setScripts(await listScripts());
-      setNodes([]);
-      setEdges([]);
-      setScriptId(s.id);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to create");
-    }
-  }
   async function handleDeleteScript() {
     if (!scriptId || !window.confirm("Delete this script and its flow?")) return;
     try {
       await deleteScript(scriptId);
-      const left = await listScripts();
-      setScripts(left);
-      if (left[0]) loadScript(left[0].id);
-      else {
-        setScriptId(null);
-        setNodes([]);
-        setEdges([]);
-      }
+      onClose();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to delete");
     }
   }
-  async function handleSetActive() {
+  async function toggleActive() {
     if (!scriptId) return;
+    const next = activeScriptId === scriptId ? null : scriptId;
     try {
-      await saveLabSettings({ active_script_id: scriptId });
-      setActiveScriptId(scriptId);
-      setNotice("This script is now active for test calls.");
+      await saveLabSettings({ active_script_id: next });
+      setActiveScriptId(next);
+      setNotice(next ? "Active for test calls." : null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed");
-    }
-  }
-  async function handleClearActive() {
-    try {
-      await saveLabSettings({ active_script_id: null });
-      setActiveScriptId(null);
-    } catch {
-      /* ignore */
     }
   }
 
@@ -544,52 +533,60 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-950">
       {/* Top bar */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-gray-800 px-4 py-2.5">
-        <h2 className="text-sm font-bold text-white">Script Builder</h2>
-        <select
-          value={scriptId ?? ""}
-          onChange={(e) => loadScript(e.target.value)}
-          className="rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 [color-scheme:dark]"
-        >
-          <option value="">— select a script —</option>
-          {scripts.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-              {s.id === activeScriptId ? " (active)" : ""}
-            </option>
-          ))}
-        </select>
+      <div className="flex flex-wrap items-center gap-3 border-b border-gray-800 px-4 py-2.5">
+        {/* Editable workflow name */}
         <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-          placeholder="New script name…"
-          className="w-44 rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 placeholder-gray-500"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={handleRename}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          placeholder="Untitled workflow"
+          title="Click to rename"
+          className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-sm font-bold text-white hover:border-gray-700 focus:border-indigo-500 focus:bg-gray-900 focus:outline-none"
         />
-        <button onClick={handleCreate} disabled={!newName.trim()} className="rounded-lg border border-gray-700 px-2.5 py-1.5 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-40">
-          + New
-        </button>
-        <div className="ml-auto flex items-center gap-2">
+
+        <div className="flex items-center gap-3">
           {notice && <span className="text-xs text-emerald-400">{notice}</span>}
           {error && <span className="text-xs text-red-400">{error}</span>}
-          {scriptId &&
-            (activeScriptId === scriptId ? (
-              <button onClick={handleClearActive} className="rounded-lg border border-emerald-600 bg-emerald-600/15 px-3 py-1.5 text-xs font-medium text-emerald-300">
-                Active ✓ (clear)
-              </button>
+
+          {/* Active toggle (off by default) */}
+          <label className="flex items-center gap-2 text-xs text-gray-400" title="Use this script for test calls">
+            <span>Active</span>
+            <button
+              type="button"
+              onClick={toggleActive}
+              disabled={!scriptId}
+              className={`relative h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40 ${
+                activeScriptId === scriptId ? "bg-emerald-600" : "bg-gray-600"
+              }`}
+            >
+              <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${activeScriptId === scriptId ? "left-[18px]" : "left-0.5"}`} />
+            </button>
+          </label>
+
+          {/* Save */}
+          <button onClick={handleSave} disabled={!scriptId || busy} title="Save" className="rounded-lg bg-indigo-600 p-2 text-white transition hover:bg-indigo-500 disabled:opacity-40">
+            {busy ? (
+              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" strokeDasharray="42" strokeLinecap="round" /></svg>
             ) : (
-              <button onClick={handleSetActive} className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">
-                Set active
-              </button>
-            ))}
-          <button onClick={handleDeleteScript} disabled={!scriptId} className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-40">
-            Delete
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            )}
           </button>
-          <button onClick={handleSave} disabled={!scriptId || busy} className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40">
-            {busy ? "Saving…" : "Save"}
+
+          {/* Delete */}
+          <button onClick={handleDeleteScript} disabled={!scriptId} title="Delete script" className="rounded-lg border border-gray-700 p-2 text-gray-300 transition hover:bg-gray-800 hover:text-rose-400 disabled:opacity-40">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
           </button>
-          <button onClick={onClose} className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">
-            Close
+
+          {/* Close */}
+          <button onClick={onClose} title="Close" className="rounded-lg border border-gray-700 p-2 text-gray-300 transition hover:bg-gray-800">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
       </div>
