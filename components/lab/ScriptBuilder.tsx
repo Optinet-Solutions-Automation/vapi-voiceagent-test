@@ -106,7 +106,7 @@ function FlowNode({ data, selected }: NodeProps) {
         <Handle
           type="target"
           position={Position.Top}
-          style={{ width: 14, height: 14, top: -7, background: "#94a3b8", border: "2px solid #0f172a" }}
+          style={{ width: 13, height: 13, top: 4, background: "#94a3b8", border: "2px solid #0f172a" }}
         />
       )}
       <p className="text-[10px] font-bold uppercase tracking-wider text-gray-300">{meta.label}</p>
@@ -120,11 +120,11 @@ function FlowNode({ data, selected }: NodeProps) {
               id={h.id}
               type="source"
               position={Position.Bottom}
-              style={{ left, width: 14, height: 14, bottom: -7, background: h.color ?? "#818cf8", border: "2px solid #0f172a" }}
+              style={{ left, width: 13, height: 13, bottom: 4, background: h.color ?? "#818cf8", border: "2px solid #0f172a" }}
             />
             {h.label && (
               <span
-                className="absolute -bottom-3.5 -translate-x-1/2 text-[8px] font-semibold text-gray-300"
+                className="absolute bottom-1 -translate-x-1/2 text-[8px] font-semibold text-gray-300"
                 style={{ left }}
               >
                 {h.label}
