@@ -112,6 +112,7 @@ export default function OrganizerTable() {
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [newTag, setNewTag] = useState("");
 
   async function reload() {
     try {
@@ -164,6 +165,18 @@ export default function OrganizerTable() {
     } finally {
       setSeeding(false);
     }
+  }
+
+  function addTag(tag: string) {
+    if (!draft) return;
+    const t = tag.trim();
+    if (!t || draft.tags.includes(t)) return;
+    setDraft({ ...draft, tags: [...draft.tags, t] });
+    setNewTag("");
+  }
+  function removeTag(tag: string) {
+    if (!draft) return;
+    setDraft({ ...draft, tags: draft.tags.filter((t) => t !== tag) });
   }
 
   // The intent key is an internal id — auto-generate it from the name (unique).
@@ -510,6 +523,68 @@ export default function OrganizerTable() {
                 onChange={(e) => setDraft({ ...draft, priority: Number(e.target.value) || 100 })}
               />
             </div>
+
+            {/* Tags — optional, only once the scenario exists */}
+            {draft.id && (
+              <div>
+                <label className="mb-1 block text-xs text-gray-400">
+                  Tags <span className="text-gray-600">(optional — for organizing &amp; filtering)</span>
+                </label>
+                {draft.tags.length > 0 && (
+                  <div className="mb-1.5 flex flex-wrap gap-1.5">
+                    {draft.tags.map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => removeTag(t)}
+                        className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-[11px] font-medium text-purple-300 hover:bg-purple-500/25"
+                        title="Remove tag"
+                      >
+                        {t}
+                        <span className="text-purple-400">×</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    className={inputCls}
+                    value={newTag}
+                    onChange={(e) => setNewTag(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTag(newTag);
+                      }
+                    }}
+                    placeholder="Add a tag and press Enter"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addTag(newTag)}
+                    disabled={!newTag.trim()}
+                    className="shrink-0 rounded-md border border-gray-700 px-3 py-1.5 text-xs text-gray-300 transition hover:bg-gray-800 disabled:opacity-40"
+                  >
+                    Add
+                  </button>
+                </div>
+                {allTags.filter((t) => !draft.tags.includes(t)).length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {allTags
+                      .filter((t) => !draft.tags.includes(t))
+                      .map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => addTag(t)}
+                          className="rounded-full border border-gray-700 px-2 py-0.5 text-[10px] text-gray-400 transition hover:bg-gray-800 hover:text-gray-200"
+                        >
+                          + {t}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex gap-2 pt-1">
               <button
