@@ -234,9 +234,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (c === "transfer") return (d.config.number as string) || "(phone number)";
     if (c === "return") return `↩ ${(d.config.resultName as string) || "result"}`;
     if (c === "ifelse") {
-      const by = (d.config.condBy as string) ?? "intent";
       const val = (d.config.condValue as string) ?? "";
-      return `if ${by}: ${val || "?"}`;
+      return `if result = ${val || "?"}`;
     }
     if (c === "loop") return `up to ${(d.config.maxLoops as number) ?? 3}×`;
     if (c === "wait") return "wait for caller";
@@ -405,7 +404,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     }
     const content = payload as Content;
     if (!CONTENT_META[content]) return;
-    dropNode({ kind: "step", label: CONTENT_META[content].label, scenarioId: null, config: { contentType: content } }, position);
+    const config: Record<string, unknown> = { contentType: content };
+    if (content === "ifelse") config.condBy = "result"; // branch on the previous sub-workflow's result
+    dropNode({ kind: "step", label: CONTENT_META[content].label, scenarioId: null, config }, position);
   }
   function onDragStartPalette(e: React.DragEvent, payload: string) {
     e.dataTransfer.setData("application/reactflow", payload);
@@ -798,36 +799,20 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                     {content === "ifelse" && (
                       <>
                         <div>
-                          <label className="mb-1 block text-xs text-gray-400">Check the customer&rsquo;s reply by</label>
-                          <select
-                            className={inputCls + " [color-scheme:dark]"}
-                            value={(sd.config.condBy as string) ?? "intent"}
-                            onChange={(e) => patchConfig(selNode.id, { condBy: e.target.value, condValue: "" })}
-                          >
-                            <option value="intent">Intent</option>
-                            <option value="tag">Tag</option>
-                            <option value="result">Sub-workflow result</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">Equals</label>
-                          {(sd.config.condBy as string) === "tag" ? (
-                            <select className={inputCls + " [color-scheme:dark]"} value={(sd.config.condValue as string) ?? ""} onChange={(e) => patchConfig(selNode.id, { condValue: e.target.value })}>
-                              <option value="">(pick a tag)</option>
-                              {allTags.map((t) => (<option key={t} value={t}>{t}</option>))}
-                            </select>
-                          ) : (sd.config.condBy as string) === "result" ? (
-                            <input className={inputCls} value={(sd.config.condValue as string) ?? ""} onChange={(e) => patchConfig(selNode.id, { condValue: e.target.value })} placeholder="e.g. qualified" />
-                          ) : (
-                            <select className={inputCls + " [color-scheme:dark]"} value={(sd.config.condValue as string) ?? ""} onChange={(e) => patchConfig(selNode.id, { condValue: e.target.value })}>
-                              <option value="">(pick an intent)</option>
-                              {scenarios.map((s) => (<option key={s.id} value={s.intent_key}>{s.intent_key}</option>))}
-                            </select>
-                          )}
+                          <label className="mb-1 block text-xs text-gray-400">
+                            If the previous result equals
+                          </label>
+                          <input
+                            className={inputCls}
+                            value={(sd.config.condValue as string) ?? ""}
+                            onChange={(e) => patchConfig(selNode.id, { condBy: "result", condValue: e.target.value })}
+                            placeholder="e.g. yes"
+                          />
                         </div>
                         <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
-                          Connect the green <strong>Then</strong> dot to the box used when this is true, and the red
-                          <strong> Else</strong> dot to the fallback.
+                          Checks the result returned by the last sub-workflow (e.g. a promo sub returning
+                          <strong> yes</strong>). Connect the green <strong>Then</strong> dot to the box for a match,
+                          the red <strong>Else</strong> dot to the fallback.
                         </p>
                       </>
                     )}

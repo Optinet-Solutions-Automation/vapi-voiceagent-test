@@ -112,7 +112,6 @@ export default function OrganizerTable() {
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [page, setPage] = useState(1);
-  const [newTag, setNewTag] = useState("");
 
   async function reload() {
     try {
@@ -167,13 +166,24 @@ export default function OrganizerTable() {
     }
   }
 
+  // The intent key is an internal id — auto-generate it from the name (unique).
+  function makeIntentKey(name: string, currentId?: string): string {
+    const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "scenario";
+    const taken = new Set(handlers.filter((h) => h.id !== currentId).map((h) => h.intent_key));
+    if (!taken.has(base)) return base;
+    let i = 2;
+    while (taken.has(`${base}_${i}`)) i++;
+    return `${base}_${i}`;
+  }
+
   async function handleSaveDraft() {
-    if (!draft || !draft.name.trim() || !draft.intent_key.trim()) return;
+    if (!draft || !draft.name.trim()) return;
     setSaving(true);
     try {
       const payload = {
         name: draft.name.trim(),
-        intent_key: draft.intent_key.trim().toLowerCase().replace(/\s+/g, "_"),
+        // Keep the existing key on edit; auto-generate for new scenarios.
+        intent_key: draft.id ? draft.intent_key : makeIntentKey(draft.name),
         description: draft.description,
         response_template: draft.response_template,
         action_type: draft.action_type,
@@ -218,17 +228,6 @@ export default function OrganizerTable() {
     }
   }
 
-  function addTag(tag: string) {
-    if (!draft) return;
-    const t = tag.trim();
-    if (!t || draft.tags.includes(t)) return;
-    setDraft({ ...draft, tags: [...draft.tags, t] });
-    setNewTag("");
-  }
-  function removeTag(tag: string) {
-    if (!draft) return;
-    setDraft({ ...draft, tags: draft.tags.filter((t) => t !== tag) });
-  }
 
   return (
     <div className="rounded-xl border border-gray-700 bg-gray-800/50 overflow-hidden">
@@ -260,10 +259,7 @@ export default function OrganizerTable() {
           </select>
         )}
         <button
-          onClick={() => {
-            setNewTag("");
-            setDraft({ ...EMPTY_DRAFT });
-          }}
+          onClick={() => setDraft({ ...EMPTY_DRAFT })}
           className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-500"
         >
           + Add Scenario
@@ -362,7 +358,6 @@ export default function OrganizerTable() {
           <div className="flex shrink-0 gap-1">
             <button
               onClick={() => {
-                setNewTag("");
                 setDraft({
                   id: h.id,
                   name: h.name,
@@ -437,96 +432,26 @@ export default function OrganizerTable() {
               {draft.id ? "Edit Scenario" : "New Scenario"}
             </h3>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="mb-1 block text-xs text-gray-400">Name</label>
-                <input
-                  className={inputCls}
-                  value={draft.name}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  placeholder="Pricing Question"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-gray-400">Intent Key</label>
-                <input
-                  className={inputCls}
-                  value={draft.intent_key}
-                  onChange={(e) => setDraft({ ...draft, intent_key: e.target.value })}
-                  placeholder="pricing_question"
-                />
-              </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-400">Name</label>
+              <input
+                className={inputCls}
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="Pricing Question"
+              />
             </div>
 
             <div>
               <label className="mb-1 block text-xs text-gray-400">
-                Tags <span className="text-gray-600">(categories for organizing &amp; filtering)</span>
-              </label>
-              {draft.tags.length > 0 && (
-                <div className="mb-1.5 flex flex-wrap gap-1.5">
-                  {draft.tags.map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => removeTag(t)}
-                      className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-[11px] font-medium text-purple-300 hover:bg-purple-500/25"
-                      title="Remove tag"
-                    >
-                      {t}
-                      <span className="text-purple-400">×</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="flex gap-2">
-                <input
-                  className={inputCls}
-                  value={newTag}
-                  onChange={(e) => setNewTag(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addTag(newTag);
-                    }
-                  }}
-                  placeholder="Add a tag (e.g. Promotions) and press Enter"
-                />
-                <button
-                  type="button"
-                  onClick={() => addTag(newTag)}
-                  disabled={!newTag.trim()}
-                  className="shrink-0 rounded-md border border-gray-700 px-3 py-1.5 text-xs text-gray-300 transition hover:bg-gray-800 disabled:opacity-40"
-                >
-                  Add
-                </button>
-              </div>
-              {allTags.filter((t) => !draft.tags.includes(t)).length > 0 && (
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {allTags
-                    .filter((t) => !draft.tags.includes(t))
-                    .map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => addTag(t)}
-                        className="rounded-full border border-gray-700 px-2 py-0.5 text-[10px] text-gray-400 transition hover:bg-gray-800 hover:text-gray-200"
-                      >
-                        + {t}
-                      </button>
-                    ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs text-gray-400">
-                Match Guidance <span className="text-gray-600">(fed to the router LLM — when should this fire?)</span>
+                When should the agent use this?
               </label>
               <textarea
                 className={inputCls + " resize-none"}
                 rows={2}
                 value={draft.description}
                 onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-                placeholder="Questions about price, cost, fees, how much something is."
+                placeholder="Describe the moment in plain words — e.g. “when the customer asks how much it costs”."
               />
             </div>
 
@@ -574,44 +499,16 @@ export default function OrganizerTable() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="mb-1 block text-xs text-gray-400">Action</label>
-                <select
-                  className={inputCls + " [color-scheme:dark]"}
-                  value={draft.action_type}
-                  onChange={(e) =>
-                    setDraft({ ...draft, action_type: e.target.value as Draft["action_type"] })
-                  }
-                >
-                  <option value="answer">answer</option>
-                  <option value="give_offer">give_offer</option>
-                  <option value="send_sms">send_sms</option>
-                  <option value="end_call">end_call</option>
-                  <option value="ignore">ignore</option>
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-gray-400">Mode</label>
-                <select
-                  className={inputCls + " [color-scheme:dark]"}
-                  value={draft.mode}
-                  onChange={(e) => setDraft({ ...draft, mode: e.target.value as Draft["mode"] })}
-                >
-                  <option value="both">both</option>
-                  <option value="tool">tool only</option>
-                  <option value="listener">listener only</option>
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-gray-400">Priority</label>
-                <input
-                  className={inputCls}
-                  type="number"
-                  value={draft.priority}
-                  onChange={(e) => setDraft({ ...draft, priority: Number(e.target.value) || 100 })}
-                />
-              </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-400">
+                Priority <span className="text-gray-600">(lower wins when two could apply)</span>
+              </label>
+              <input
+                className={inputCls}
+                type="number"
+                value={draft.priority}
+                onChange={(e) => setDraft({ ...draft, priority: Number(e.target.value) || 100 })}
+              />
             </div>
 
             <div className="flex gap-2 pt-1">
@@ -624,7 +521,7 @@ export default function OrganizerTable() {
               </button>
               <button
                 onClick={handleSaveDraft}
-                disabled={saving || !draft.name.trim() || !draft.intent_key.trim()}
+                disabled={saving || !draft.name.trim()}
                 className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-40"
               >
                 {saving ? "Saving..." : draft.id ? "Save Changes" : "Add Scenario"}
