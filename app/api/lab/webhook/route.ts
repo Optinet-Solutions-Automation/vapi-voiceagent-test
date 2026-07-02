@@ -356,6 +356,16 @@ async function handleTranscript(
     meta: { raw: cls.raw },
   });
 
+  // Can the Playbook answer this turn on its own? The flow uses this to let
+  // off-script questions fall through to the reactive layer instead of
+  // dragging them down an Else branch.
+  const reactiveHandler = handlers.find((h) => h.intent_key === cls.intent);
+  const reactiveCanHandle =
+    cls.intent !== "none" &&
+    cls.confidence >= settings.confidence_threshold &&
+    !!reactiveHandler &&
+    reactiveHandler.action_type !== "ignore";
+
   // ── Script runtime: if a script is active, try to advance the flow first.
   //    Reactive scenarios still handle anything the flow doesn't consume.
   if (settings.active_script_id) {
@@ -366,7 +376,8 @@ async function handleTranscript(
         settings.active_script_id,
         cls.intent,
         utteranceAt,
-        classifiedAt
+        classifiedAt,
+        reactiveCanHandle
       );
       if (advanced) return; // flow handled this turn
     } catch (e) {
@@ -478,10 +489,14 @@ async function handleTranscript(
   }
 }
 
-// ── Script runtime (graph-walker, v1/experimental) ────────────
-// Walks the active script for the call. Advances through non-speaking steps
-// (no-op, sub-workflow enter, sub-return) on a single turn, stopping when a box
-// speaks/acts or the call ends. Returns true if the flow handled this turn.
+// ── Script runtime (graph-walker) ─────────────────────────────
+// Walks the active script for the call, advancing through non-speaking steps
+// (no-op, if/else, loop, sub-workflow enter/return) until a box speaks/acts or
+// the call ends. The walk is speculative: flow state and logs commit only when
+// the flow consumes the turn. If the customer's reply is a Playbook intent the
+// walked path doesn't expect — no Then branch fired on it, and the landing box
+// has no scenario/candidate for it — the flow defers (returns false with no
+// state change) so the reactive layer answers and the call stays parked.
 type Frame = { scriptId: string; returnNodeId: string };
 
 async function runScriptFlow(
@@ -490,14 +505,17 @@ async function runScriptFlow(
   activeScriptId: string,
   intent: string,
   utteranceAt: Date,
-  classifiedAt: number
+  classifiedAt: number,
+  reactiveCanHandle: boolean
 ): Promise<boolean> {
   const allHandlers = await listHandlers();
-  const tagsOf = (it: string) => allHandlers.find((h) => h.intent_key === it)?.tags ?? [];
+  const handlerById = (id: string | null | undefined) =>
+    id ? allHandlers.find((h) => h.id === id) ?? null : null;
+  const intentTags = allHandlers.find((h) => h.intent_key === intent)?.tags ?? [];
 
   const state = await getFlowState(callId).catch(() => null);
   let currentScriptId = state?.script_id ?? activeScriptId;
-  let variables: Record<string, unknown> = { ...((state?.variables as Record<string, unknown>) ?? {}) };
+  const variables: Record<string, unknown> = { ...((state?.variables as Record<string, unknown>) ?? {}) };
   if (!Array.isArray(variables.__stack)) variables.__stack = [] as Frame[];
   let currentNodeId = state?.current_node_id ?? null;
 
@@ -508,26 +526,43 @@ async function runScriptFlow(
     const entry = findEntryNode(graph.nodes, graph.edges);
     if (!entry) return false;
     currentNodeId = entry.id;
-    await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
   }
 
-  const controlUrl = await getControlUrl(callId, controlUrlHint);
+  // Side effects are queued and flushed only when the flow consumes the turn.
+  type PendingLog = { content: string; targetId: string; targetLabel: string; ct: string; edgeCond: unknown; scenarioId: string | null };
+  const pending: PendingLog[] = [];
+  const note = (content: string, target: { id: string; label: string }, ct: string, edgeCond: unknown, scenarioId: string | null) =>
+    pending.push({ content, targetId: target.id, targetLabel: target.label, ct, edgeCond, scenarioId });
 
-  async function flowLog(content: string, target: { id: string; label: string }, ct: string, edgeCond: unknown, scenarioId: string | null) {
-    const ms = Date.now();
+  async function flush() {
+    await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
+    for (const p of pending) {
+      const ms = Date.now();
+      await log({
+        call_id: callId,
+        event_type: "injected",
+        content: p.content || `→ ${p.targetLabel || p.ct}`,
+        intent_key: intent,
+        handler_id: p.scenarioId,
+        action_type: `flow:${p.ct}`,
+        utterance_at: utteranceAt.toISOString(),
+        classified_at: new Date(classifiedAt).toISOString(),
+        injected_at: new Date(ms).toISOString(),
+        latency_ms: ms - utteranceAt.getTime(),
+        meta: { flow: true, toNode: p.targetId, nodeType: p.ct, edgeCondition: p.edgeCond },
+      });
+    }
+  }
+
+  async function defer(beforeLabel: string): Promise<boolean> {
     await log({
       call_id: callId,
-      event_type: "injected",
-      content: content || `→ ${target.label || ct}`,
+      event_type: "skipped",
+      content: `flow parked — Playbook answers "${intent}"`,
       intent_key: intent,
-      handler_id: scenarioId,
-      action_type: `flow:${ct}`,
-      utterance_at: utteranceAt.toISOString(),
-      classified_at: new Date(classifiedAt).toISOString(),
-      injected_at: new Date(ms).toISOString(),
-      latency_ms: ms - utteranceAt.getTime(),
-      meta: { flow: true, toNode: target.id, nodeType: ct, edgeCondition: edgeCond },
+      meta: { flow: true, reason: "deferred_to_playbook", before: beforeLabel },
     });
+    return false;
   }
 
   const bumpLoop = (nodeId: string) => {
@@ -537,13 +572,40 @@ async function runScriptFlow(
     return n;
   };
 
+  // Did a branch fire *because of* this utterance? (Then edge whose intent/tag
+  // condition matched, or a legacy intent/tag condition edge.)
+  function edgeRecognizedIntent(node: NonNullable<ReturnType<typeof nodeById>>, edge: NonNullable<ReturnType<typeof pickNextEdge>>): boolean {
+    const c = (edge.condition ?? {}) as Record<string, unknown>;
+    if (contentTypeOf(node) === "ifelse") {
+      if ((c.handle as string) !== "then") return false;
+      const cfg = (node.config ?? {}) as Record<string, unknown>;
+      const by = (cfg.condBy as string) ?? "intent";
+      if (by === "intent") return cfg.condValue === intent;
+      if (by === "tag") return !!cfg.condValue && intentTags.includes(cfg.condValue as string);
+      return false; // result-driven — unrelated to this utterance
+    }
+    const by = (c.by as string) ?? (c.kind as string);
+    if (by === "intent") return c.value === intent;
+    if (by === "tag") return !!c.value && intentTags.includes(c.value as string);
+    return false;
+  }
+
+  // Fetch the control URL lazily — a deferred walk never needs it.
+  let controlUrlCache: string | null | undefined;
+  async function ctl(): Promise<string | null> {
+    if (controlUrlCache === undefined) controlUrlCache = await getControlUrl(callId, controlUrlHint);
+    return controlUrlCache;
+  }
+
+  let pathExpected = false;
   let guard = 0;
   while (guard++ < 16) {
     const result = (variables.__lastResult as string) ?? null;
     const currentNode = nodeById(graph.nodes, currentNodeId!);
     if (!currentNode) return false;
-    const edge = pickNextEdge(currentNode, graph.edges, { intent, tags: tagsOf(intent), result, bumpLoop });
+    const edge = pickNextEdge(currentNode, graph.edges, { intent, tags: intentTags, result, bumpLoop });
     if (!edge) return false; // nowhere to go → reactive layer handles it
+    if (edgeRecognizedIntent(currentNode, edge)) pathExpected = true;
 
     const target = nodeById(graph.nodes, edge.target_node_id);
     if (!target) return false;
@@ -555,16 +617,16 @@ async function runScriptFlow(
     // ── Control / pass-through boxes: advance on the same turn ──
     if (ct === "noop" || ct === "ifelse" || ct === "loop") {
       currentNodeId = target.id;
-      await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
-      await flowLog("", target, ct, edge.condition, null);
+      note("", target, ct, edge.condition, null);
       continue;
     }
 
     // ── Wait box: pause here and wait for the next customer utterance ──
     if (ct === "wait") {
+      if (reactiveCanHandle && !pathExpected) return defer(target.label || ct);
       currentNodeId = target.id;
-      await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
-      await flowLog("", target, ct, edge.condition, null);
+      note("", target, ct, edge.condition, null);
+      await flush();
       return true;
     }
 
@@ -575,12 +637,10 @@ async function runScriptFlow(
         graph = await getScriptGraph(subId);
         currentScriptId = subId;
         currentNodeId = findEntryNode(graph.nodes, graph.edges)?.id ?? target.id;
-        await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
-        await flowLog(`↳ enter sub-workflow`, target, ct, edge.condition, null);
+        note(`↳ enter sub-workflow`, target, ct, edge.condition, null);
         continue;
       }
       currentNodeId = target.id;
-      await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
       continue;
     }
 
@@ -594,8 +654,7 @@ async function runScriptFlow(
         currentScriptId = frame.scriptId;
         graph = await getScriptGraph(currentScriptId);
         currentNodeId = frame.returnNodeId;
-        await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
-        await flowLog(`↩ return: ${variables.__lastResult}`, target, "return", edge.condition, null);
+        note(`↩ return: ${variables.__lastResult}`, target, "return", edge.condition, null);
         continue;
       }
       // Return at top level (no parent) → just end the call gracefully.
@@ -603,39 +662,43 @@ async function runScriptFlow(
 
     if (ct === "end" || ct === "return") {
       // End Call (or a top-level Return) → goodbye + hang up.
-      const scn = target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null;
+      const scn = handlerById(target.scenario_id);
+      if (reactiveCanHandle && !pathExpected && scn?.intent_key !== intent) return defer(target.label || ct);
       const text = scn?.response_template || "Thanks for your time today. Goodbye!";
+      const controlUrl = await ctl();
       if (controlUrl) {
         const r = await injectSay(controlUrl, text, true);
         if (!r.ok) setTimeout(() => endCall(controlUrl).catch(() => {}), 4000);
       }
       currentNodeId = target.id;
-      await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
-      await flowLog(text, target, ct, edge.condition, scn?.id ?? null);
+      note(text, target, ct, edge.condition, scn?.id ?? null);
+      await flush();
       return true;
     }
 
-    // ── Speaking / action steps: consume the turn ──
-    currentNodeId = target.id;
+    // ── Speaking / action steps: consume the turn (or defer if the reply
+    //    belongs to the Playbook and this box has no line for it) ──
     let scenario: ListenerHandler | null = null;
-    let injectedText = "";
 
     if (ct === "scenario") {
       const cands = [target.scenario_id, ...((cfg.candidateScenarioIds as string[]) ?? [])].filter(Boolean) as string[];
-      scenario =
-        allHandlers.find((h) => cands.includes(h.id) && h.intent_key === intent) ??
-        (target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null) ??
-        (cands[0] ? allHandlers.find((h) => h.id === cands[0]) ?? null : null);
+      const match = allHandlers.find((h) => cands.includes(h.id) && h.intent_key === intent) ?? null;
+      if (reactiveCanHandle && !pathExpected && !match) return defer(target.label || ct);
+      scenario = match ?? handlerById(target.scenario_id) ?? handlerById(cands[0]);
     } else if (ct === "collection") {
       const ids = cfg.collectionId ? await getCollectionHandlerIds(cfg.collectionId as string).catch(() => []) : [];
-      scenario =
-        allHandlers.find((h) => ids.includes(h.id) && h.intent_key === intent) ??
-        (ids[0] ? allHandlers.find((h) => h.id === ids[0]) ?? null : null);
-    } else if (ct === "send_sms") {
-      scenario = target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null;
-    } else if (ct === "transfer") {
-      scenario = target.scenario_id ? allHandlers.find((h) => h.id === target.scenario_id) ?? null : null;
+      const match = allHandlers.find((h) => ids.includes(h.id) && h.intent_key === intent) ?? null;
+      if (reactiveCanHandle && !pathExpected && !match) return defer(target.label || ct);
+      scenario = match ?? handlerById(ids[0]);
+    } else {
+      // send_sms / transfer
+      scenario = handlerById(target.scenario_id);
+      if (reactiveCanHandle && !pathExpected && scenario?.intent_key !== intent) return defer(target.label || ct);
     }
+
+    currentNodeId = target.id;
+    let injectedText = "";
+    const controlUrl = await ctl();
 
     if (ct === "send_sms") {
       injectedText = scenario?.response_template || "The SMS with the details is on its way. Confirm that to the customer.";
@@ -651,8 +714,8 @@ async function runScriptFlow(
           : await injectStaffNote(controlUrl, injectedText, true);
     }
 
-    await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
-    await flowLog(injectedText, target, ct, edge.condition, scenario?.id ?? null);
+    note(injectedText, target, ct, edge.condition, scenario?.id ?? null);
+    await flush();
     return true;
   }
   return false;

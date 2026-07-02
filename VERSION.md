@@ -9,7 +9,28 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 
 ---
 
-## v2.1 — current
+## v2.2 — current
+
+- **Flows defer off-script questions to the Playbook** — when the customer's
+  reply matches a Playbook scenario that the flow's next step doesn't expect
+  (no Then branch fired on it, no matching scenario/candidate at the landing
+  box), the flow stays parked, the reactive listener answers, and the next
+  reply resumes the script where it left off. Previously a wired flow consumed
+  every turn, so questions fell down Else branches. The graph walk is now
+  atomic: state and logs commit only when the flow consumes the turn.
+- **Type lines directly in the builder** — Scenario and End boxes now open
+  with a "What the agent says" editor (Exact words / Just the gist delivery,
+  plus an optional "when does this fit?" hint). Saving the script creates or
+  updates the Playbook scenario automatically; new lines are tagged with the
+  script's name. Reusing an existing scenario, candidates, and tag scope moved
+  under an Advanced disclosure. Canvas boxes show the line itself as their
+  subtitle.
+- **Example campaign agent** — `scripts/seed-promo-callback.mjs` seeds
+  "Welcome Promo — New Signups": call a client who registered this week and
+  offer a promo, with SMS follow-up, an objection nudge, and off-script Q&A
+  scenarios.
+
+## v2.1
 
 - **Multiple scenarios per box** — a Say/Branch box can list candidate scenarios
   (the router picks the best fit at that step), combined with per-step tag scope.

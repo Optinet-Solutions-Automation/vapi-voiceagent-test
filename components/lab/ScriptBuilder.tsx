@@ -27,6 +27,8 @@ import {
   getScriptGraph,
   saveScriptGraph,
   listHandlers,
+  createHandler,
+  updateHandler,
   listCollections,
   getLabSettings,
   saveLabSettings,
@@ -173,6 +175,10 @@ function normalizeCondition(c: Record<string, unknown> | undefined): EdgeCond {
 
 type Props = { onClose: () => void; initialScriptId?: string | null };
 
+// Inline-authored line for a Scenario/End box — the scenario is created or
+// updated in the Playbook automatically when the script is saved.
+type LineDraft = { text: string; delivery: ListenerHandler["delivery"]; hint: string };
+
 export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [scripts, setScripts] = useState<ListenerScript[]>([]);
   const [scriptId, setScriptId] = useState<string | null>(null);
@@ -190,6 +196,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lineDrafts, setLineDrafts] = useState<Record<string, LineDraft>>({});
 
   // Keep the editable title in sync with the loaded script.
   useEffect(() => {
@@ -216,6 +223,18 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     (id: string | null) => (id ? scenarios.find((s) => s.id === id)?.name ?? null : null),
     [scenarios]
   );
+  // Short preview of a scenario's line, for box subtitles on the canvas.
+  const scenarioLine = useCallback(
+    (id: string | null) => {
+      if (!id) return null;
+      const s = scenarios.find((x) => x.id === id);
+      if (!s) return null;
+      const t = (s.response_template || "").trim().replace(/\s+/g, " ");
+      if (!t) return s.name;
+      return t.length > 42 ? t.slice(0, 42) + "…" : t;
+    },
+    [scenarios]
+  );
   const collectionName = useCallback(
     (id: string | undefined) => (id ? collections.find((c) => c.id === id)?.name ?? null : null),
     [collections]
@@ -228,7 +247,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   function subtitleFor(d: NodeData): string | null {
     if (d.kind === "start") return (d.config.mode as string) === "wait_for_customer" ? "waits for caller" : "agent opens";
     const c = (d.config.contentType as Content) ?? "scenario";
-    if (c === "scenario") return scenarioName(d.scenarioId) ? `▶ ${scenarioName(d.scenarioId)}` : "(pick a scenario)";
+    if (c === "scenario") return scenarioLine(d.scenarioId) ? `“${scenarioLine(d.scenarioId)}”` : "(click to write the line)";
     if (c === "collection") return collectionName(d.config.collectionId as string) ? `▣ ${collectionName(d.config.collectionId as string)}` : "(pick a collection)";
     if (c === "subworkflow") return scriptName(d.config.subworkflowId as string) ? `⤳ ${scriptName(d.config.subworkflowId as string)}` : "(pick a workflow)";
     if (c === "transfer") return (d.config.number as string) || "(phone number)";
@@ -239,6 +258,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     }
     if (c === "loop") return `up to ${(d.config.maxLoops as number) ?? 3}×`;
     if (c === "wait") return "wait for caller";
+    if (c === "end") return scenarioLine(d.scenarioId) ? `“${scenarioLine(d.scenarioId)}”` : null;
     return null;
   }
 
@@ -300,6 +320,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setScriptId(id);
     setSelNodeId(null);
     setSelEdgeId(null);
+    setLineDrafts({});
     try {
       const { rfNodes, rfEdges } = graphToFlow(await getScriptGraph(id));
       setNodes(rfNodes);
@@ -459,11 +480,66 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (selNodeId) {
       setNodes((ns) => ns.filter((n) => n.id !== selNodeId));
       setEdges((es) => es.filter((e) => e.source !== selNodeId && e.target !== selNodeId));
+      setLineDrafts((m) => {
+        const next = { ...m };
+        delete next[selNodeId];
+        return next;
+      });
       setSelNodeId(null);
     } else if (selEdgeId) {
       setEdges((es) => es.filter((e) => e.id !== selEdgeId));
       setSelEdgeId(null);
     }
+  }
+
+  // Create/update the Playbook scenarios behind inline-authored lines, so a
+  // user can type what the agent says without a round-trip to the Playbook.
+  // Returns nodeId → newly created scenario id.
+  async function persistInlineLines(): Promise<Map<string, string>> {
+    const created = new Map<string, string>();
+    const scriptNm = (scripts.find((s) => s.id === scriptId)?.name ?? name).trim() || "Script";
+    const takenKeys = new Set(scenarios.map((s) => s.intent_key));
+    for (const n of nodes) {
+      const d = n.data as NodeData;
+      const ct = (d.config.contentType as Content) ?? "scenario";
+      if (d.kind !== "step" || (ct !== "scenario" && ct !== "end")) continue;
+      const draft = lineDrafts[n.id];
+      if (!draft) continue; // untouched box
+      const text = draft.text.trim();
+      if (!text) continue; // never wipe a line via an emptied box
+      if (d.scenarioId) {
+        const scn = scenarios.find((s) => s.id === d.scenarioId);
+        if (!scn) continue;
+        const hint = draft.hint.trim();
+        const delivery = ct === "end" ? "verbatim" : draft.delivery;
+        if (text === scn.response_template && delivery === scn.delivery && hint === (scn.description ?? "").trim()) continue;
+        await updateHandler(d.scenarioId, {
+          response_template: text,
+          delivery,
+          description: hint || scn.description,
+        });
+      } else {
+        const label = d.label.trim() || text.slice(0, 40);
+        const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "line";
+        let key = base;
+        for (let i = 2; takenKeys.has(key); i++) key = `${base}_${i}`;
+        takenKeys.add(key);
+        const h = await createHandler({
+          name: label,
+          intent_key: key,
+          description: draft.hint.trim() || `Step "${label}" of the "${scriptNm}" script.`,
+          response_template: text,
+          action_type: ct === "end" ? "end_call" : "answer",
+          delivery: ct === "end" ? "verbatim" : draft.delivery,
+          tags: [scriptNm],
+          mode: "both",
+          priority: 100,
+          enabled: true,
+        });
+        created.set(n.id, h.id);
+      }
+    }
+    return created;
   }
 
   async function handleSave() {
@@ -472,13 +548,15 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setNotice(null);
     setError(null);
     try {
+      const created = await persistInlineLines();
+      const scenarioIdFor = (n: Node) => created.get(n.id) ?? (n.data as NodeData).scenarioId;
       const nodeRows = nodes.map((n) => {
         const d = n.data as NodeData;
         const ct = (d.config.contentType ?? "scenario") as string;
         return {
           id: n.id,
           type: d.kind, // 'start' | 'step'
-          scenario_id: ct === "scenario" || ct === "end" ? d.scenarioId : null,
+          scenario_id: ct === "scenario" || ct === "end" ? scenarioIdFor(n) : null,
           label: d.label,
           config: d.config ?? {},
           pos_x: n.position.x,
@@ -497,6 +575,17 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         };
       });
       await saveScriptGraph(scriptId, nodeRows, edgeRows);
+      // Reflect newly created scenarios on their boxes, refresh the Playbook
+      // list, and drop drafts so they reseed from the saved scenarios.
+      if (created.size) {
+        setNodes((ns) =>
+          ns.map((n) =>
+            created.has(n.id) ? { ...n, data: { ...(n.data as NodeData), scenarioId: created.get(n.id)! } } : n
+          )
+        );
+      }
+      setScenarios(await listHandlers());
+      setLineDrafts({});
       setNotice("Script saved.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save");
@@ -530,6 +619,33 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const sd = selNode ? (selNode.data as NodeData) : null;
   const selEdge = edges.find((e) => e.id === selEdgeId) ?? null;
   const content = (sd?.config.contentType as Content) ?? "scenario";
+
+  // Inline line editing: drafts are seeded from the box's scenario and only
+  // written back to the Playbook on Save.
+  function seedDraft(d: NodeData): LineDraft {
+    const scn = d.scenarioId ? scenarios.find((s) => s.id === d.scenarioId) : undefined;
+    return {
+      text: scn?.response_template ?? "",
+      delivery: scn?.delivery ?? "verbatim",
+      hint: scn?.description ?? "",
+    };
+  }
+  const draft =
+    selNode && sd && sd.kind === "step" && (content === "scenario" || content === "end")
+      ? lineDrafts[selNode.id] ?? seedDraft(sd)
+      : null;
+  function patchDraft(nodeId: string, base: LineDraft, patch: Partial<LineDraft>) {
+    setLineDrafts((m) => ({ ...m, [nodeId]: { ...(m[nodeId] ?? base), ...patch } }));
+  }
+  // Switching the underlying scenario reseeds the draft from the new pick.
+  function pickScenario(nodeId: string, scenarioId: string | null) {
+    patchNodeData(nodeId, { scenarioId });
+    setLineDrafts((m) => {
+      const next = { ...m };
+      delete next[nodeId];
+      return next;
+    });
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-950">
@@ -698,55 +814,132 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
 
                 {sd.kind === "step" && (
                   <>
-                    {content === "scenario" && (
+                    {content === "scenario" && draft && (
                       <>
                         <div>
-                          <label className="mb-1 block text-xs text-gray-400">Scenario (line to speak)</label>
-                          <select
-                            className={inputCls + " [color-scheme:dark]"}
-                            value={sd.scenarioId ?? ""}
-                            onChange={(e) => patchNodeData(selNode.id, { scenarioId: e.target.value || null })}
-                          >
-                            <option value="">(none)</option>
-                            {scenarios.map((s) => (
-                              <option key={s.id} value={s.id}>
-                                {s.name}
-                              </option>
+                          <label className="mb-1 block text-xs text-gray-400">What the agent says</label>
+                          <textarea
+                            className={inputCls + " min-h-[110px] resize-y"}
+                            value={draft.text}
+                            onChange={(e) => patchDraft(selNode.id, draft, { text: e.target.value })}
+                            placeholder="Type the line for this step — it's saved to the Playbook automatically."
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">Delivery</label>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {(
+                              [
+                                ["verbatim", "Exact words"],
+                                ["reword", "Just the gist"],
+                              ] as const
+                            ).map(([val, lbl]) => (
+                              <button
+                                key={val}
+                                onClick={() => patchDraft(selNode.id, draft, { delivery: val })}
+                                className={`rounded-md border px-2 py-1.5 text-xs font-medium transition ${
+                                  draft.delivery === val
+                                    ? "border-indigo-500 bg-indigo-500/15 text-indigo-200"
+                                    : "border-gray-700 text-gray-400 hover:bg-gray-800"
+                                }`}
+                              >
+                                {lbl}
+                              </button>
                             ))}
-                          </select>
+                          </div>
+                          <p className="mt-1 text-[10px] text-gray-600">
+                            Exact words are spoken word-for-word; with the gist, the agent rephrases it naturally.
+                          </p>
                         </div>
                         <div>
                           <label className="mb-1 block text-xs text-gray-400">
-                            Also consider <span className="text-gray-600">(router picks best)</span>
+                            When does this fit? <span className="text-gray-600">(optional)</span>
                           </label>
-                          {((sd.config.candidateScenarioIds as string[]) ?? []).map((cid) => (
-                            <button
-                              key={cid}
-                              onClick={() =>
-                                patchConfig(selNode.id, {
-                                  candidateScenarioIds: ((sd.config.candidateScenarioIds as string[]) ?? []).filter((x) => x !== cid),
-                                })
-                              }
-                              className="mb-1 mr-1 inline-flex items-center gap-1 rounded-full bg-indigo-500/15 px-2 py-0.5 text-[11px] text-indigo-300 hover:bg-indigo-500/25"
-                            >
-                              {scenarioName(cid) ?? "scenario"} <span className="text-indigo-400">×</span>
-                            </button>
-                          ))}
-                          <select
-                            className={inputCls + " [color-scheme:dark]"}
-                            value=""
-                            onChange={(e) => {
-                              const id = e.target.value;
-                              const cur = (sd.config.candidateScenarioIds as string[]) ?? [];
-                              if (id && id !== sd.scenarioId && !cur.includes(id)) patchConfig(selNode.id, { candidateScenarioIds: [...cur, id] });
-                            }}
-                          >
-                            <option value="">+ add candidate…</option>
-                            {scenarios.filter((s) => s.id !== sd.scenarioId && !((sd.config.candidateScenarioIds as string[]) ?? []).includes(s.id)).map((s) => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                          </select>
+                          <input
+                            className={inputCls}
+                            value={draft.hint}
+                            onChange={(e) => patchDraft(selNode.id, draft, { hint: e.target.value })}
+                            placeholder="e.g. the customer asks about price"
+                          />
+                          <p className="mt-1 text-[10px] text-gray-600">
+                            Helps the agent pick this line when the customer goes off script.
+                          </p>
                         </div>
+
+                        <details className="rounded-lg border border-gray-800">
+                          <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-300">
+                            Advanced
+                          </summary>
+                          <div className="space-y-3 p-2.5">
+                            <div>
+                              <label className="mb-1 block text-xs text-gray-400">Reuse an existing line</label>
+                              <select
+                                className={inputCls + " [color-scheme:dark]"}
+                                value={sd.scenarioId ?? ""}
+                                onChange={(e) => pickScenario(selNode.id, e.target.value || null)}
+                              >
+                                <option value="">(new line for this box)</option>
+                                {scenarios.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-gray-400">
+                                Also consider <span className="text-gray-600">(router picks best)</span>
+                              </label>
+                              {((sd.config.candidateScenarioIds as string[]) ?? []).map((cid) => (
+                                <button
+                                  key={cid}
+                                  onClick={() =>
+                                    patchConfig(selNode.id, {
+                                      candidateScenarioIds: ((sd.config.candidateScenarioIds as string[]) ?? []).filter((x) => x !== cid),
+                                    })
+                                  }
+                                  className="mb-1 mr-1 inline-flex items-center gap-1 rounded-full bg-indigo-500/15 px-2 py-0.5 text-[11px] text-indigo-300 hover:bg-indigo-500/25"
+                                >
+                                  {scenarioName(cid) ?? "scenario"} <span className="text-indigo-400">×</span>
+                                </button>
+                              ))}
+                              <select
+                                className={inputCls + " [color-scheme:dark]"}
+                                value=""
+                                onChange={(e) => {
+                                  const id = e.target.value;
+                                  const cur = (sd.config.candidateScenarioIds as string[]) ?? [];
+                                  if (id && id !== sd.scenarioId && !cur.includes(id)) patchConfig(selNode.id, { candidateScenarioIds: [...cur, id] });
+                                }}
+                              >
+                                <option value="">+ add candidate…</option>
+                                {scenarios.filter((s) => s.id !== sd.scenarioId && !((sd.config.candidateScenarioIds as string[]) ?? []).includes(s.id)).map((s) => (
+                                  <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-gray-400">
+                                Active tags at this step <span className="text-gray-600">(blank = all)</span>
+                              </label>
+                              <div className="flex flex-wrap gap-1.5">
+                                {allTags.map((t) => {
+                                  const scope = (sd.config.scopeTags as string[]) ?? [];
+                                  const on = scope.includes(t);
+                                  return (
+                                    <button
+                                      key={t}
+                                      onClick={() => patchConfig(selNode.id, { scopeTags: on ? scope.filter((x) => x !== t) : [...scope, t] })}
+                                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition ${on ? "bg-purple-500/25 text-purple-200" : "border border-gray-700 text-gray-400"}`}
+                                    >
+                                      {t}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        </details>
                       </>
                     )}
 
@@ -843,24 +1036,45 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                       </div>
                     )}
 
-                    {content === "end" && (
-                      <div>
-                        <label className="mb-1 block text-xs text-gray-400">Goodbye scenario (optional)</label>
-                        <select
-                          className={inputCls + " [color-scheme:dark]"}
-                          value={sd.scenarioId ?? ""}
-                          onChange={(e) => patchNodeData(selNode.id, { scenarioId: e.target.value || null })}
-                        >
-                          <option value="">(none)</option>
-                          {scenarios.map((s) => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                          ))}
-                        </select>
-                      </div>
+                    {content === "end" && draft && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">
+                            Goodbye line <span className="text-gray-600">(optional)</span>
+                          </label>
+                          <textarea
+                            className={inputCls + " min-h-[80px] resize-y"}
+                            value={draft.text}
+                            onChange={(e) => patchDraft(selNode.id, draft, { text: e.target.value })}
+                            placeholder="e.g. Thanks for your time today — have a great day!"
+                          />
+                          <p className="mt-1 text-[10px] text-gray-600">
+                            Spoken word-for-word before hanging up. Leave blank for the default goodbye.
+                          </p>
+                        </div>
+                        <details className="rounded-lg border border-gray-800">
+                          <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-300">
+                            Advanced
+                          </summary>
+                          <div className="p-2.5">
+                            <label className="mb-1 block text-xs text-gray-400">Reuse an existing line</label>
+                            <select
+                              className={inputCls + " [color-scheme:dark]"}
+                              value={sd.scenarioId ?? ""}
+                              onChange={(e) => pickScenario(selNode.id, e.target.value || null)}
+                            >
+                              <option value="">(new line for this box)</option>
+                              {scenarios.map((s) => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </details>
+                      </>
                     )}
 
-                    {/* Tag scope for scenario/collection */}
-                    {(content === "scenario" || content === "collection") && (
+                    {/* Tag scope for collection (scenario boxes have it under Advanced) */}
+                    {content === "collection" && (
                       <div>
                         <label className="mb-1 block text-xs text-gray-400">Active tags at this step <span className="text-gray-600">(blank = all)</span></label>
                         <div className="flex flex-wrap gap-1.5">
