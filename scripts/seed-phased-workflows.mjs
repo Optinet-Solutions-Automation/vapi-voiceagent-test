@@ -258,15 +258,17 @@ const pitchId = await getOrCreateScript(
   await rebuild(
     pitchId,
     [pitch, saidYes, retYes, wantsHuman, transfer, redirect, tries, retNo],
+    // Consent (and the human check) come BEFORE the loop counts a round — a
+    // yes must never bump the counter past its cap and return "declined".
     [
       edge(pitch, saidYes),
       edge(saidYes, retYes, "then", "Then"),
       edge(saidYes, wantsHuman, "else", "Else"),
       edge(wantsHuman, transfer, "then", "Then"),
-      edge(wantsHuman, redirect, "else", "Else"),
-      edge(redirect, tries),
-      edge(tries, saidYes, "loop", "Repeat"),
+      edge(wantsHuman, tries, "else", "Else"),
+      edge(tries, redirect, "loop", "Repeat"),
       edge(tries, retNo, "exit", "Exit"),
+      edge(redirect, saidYes),
     ]
   );
 }
@@ -303,13 +305,14 @@ const remindId = await getOrCreateScript(
   await rebuild(
     remindId,
     [remind, saidYes, retYes, redirect, tries, retNo],
+    // Same rule as the pitch phase: consent before the loop counts a round.
     [
       edge(remind, saidYes),
       edge(saidYes, retYes, "then", "Then"),
-      edge(saidYes, redirect, "else", "Else"),
-      edge(redirect, tries),
-      edge(tries, saidYes, "loop", "Repeat"),
+      edge(saidYes, tries, "else", "Else"),
+      edge(tries, redirect, "loop", "Repeat"),
       edge(tries, retNo, "exit", "Exit"),
+      edge(redirect, saidYes),
     ]
   );
 }

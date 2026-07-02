@@ -73,6 +73,18 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Third live-call QA round** — a consent after the retry cap got the
+  DECLINED goodbye: the loop box sat before the consent check, so the yes
+  itself bumped the counter out the Exit. All three loops (stage script and
+  both phased subs) are rewired: consent is checked BEFORE a round is
+  counted. A stale-fragment re-check now runs right before speaking (flow and
+  reactive) — a newer customer fragment landing mid-walk supersedes the
+  reply, killing the overlapping double-responses. Interruptions are
+  analyzed, not knee-jerk: the customer must say 2+ words to stop the agent
+  (stopSpeakingPlan), and smart endpointing + 0.8s wait coalesce split
+  finals at the source (startSpeakingPlan). The persona now has a company
+  name (BrightPath — replace per campaign; the agent had invented one) and a
+  total ban on wait-phrases ("hold on a second" slipped past the old list).
 - **Second live-call QA round** — "one moment"/"hold on" are now explicitly
   banned in the persona (casual fillers only: mm-hmm, uh-huh, wait—, mmm).
   Split final transcripts: a stale fragment is superseded — only the newest

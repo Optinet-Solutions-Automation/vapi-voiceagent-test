@@ -83,6 +83,13 @@ export async function POST(req: Request) {
       idleTimeoutSeconds: 8,
       idleMessageMaxSpokenCount: 2,
     },
+    // Interruptions are analyzed, not knee-jerk: the customer must say at
+    // least two words before the agent stops talking (back-channel like
+    // "mm-hmm" no longer cuts it off mid-sentence).
+    stopSpeakingPlan: { numWords: 2, backoffSeconds: 1 },
+    // Wait for the customer to actually finish before replying — coalesces
+    // the split final transcripts that caused double answers.
+    startSpeakingPlan: { waitSeconds: 0.8, smartEndpointingPlan: { provider: "vapi" } },
   };
 
   const patchRes = await fetch(`${VAPI_BASE}/assistant/${assistantId}`, {

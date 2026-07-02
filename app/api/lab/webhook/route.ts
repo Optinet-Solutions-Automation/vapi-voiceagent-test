@@ -430,7 +430,8 @@ async function handleTranscript(
         utterance,
         utteranceAt,
         classifiedAt,
-        reactiveCanHandle
+        reactiveCanHandle,
+        utteranceEventId
       );
       if (advanced) return; // flow handled this turn
     } catch (e) {
@@ -502,6 +503,19 @@ async function handleTranscript(
       confidence: cls.confidence,
       handler_id: handler?.id ?? null,
       meta: { reason: flowOwnsAction ? "flow_owns_action" : handler ? "handler_ignore" : "handler_not_found" },
+    });
+    return;
+  }
+
+  // Never speak a stale reply: a newer customer fragment may have landed
+  // while we were classifying/deferring — it owns the response now.
+  if (utteranceEventId != null && (await hasNewerUtterance(callId, utteranceEventId).catch(() => false))) {
+    await log({
+      call_id: callId,
+      event_type: "skipped",
+      content: utterance,
+      intent_key: cls.intent,
+      meta: { reason: "superseded" },
     });
     return;
   }
@@ -600,7 +614,8 @@ async function runScriptFlow(
   utterance: string,
   utteranceAt: Date,
   classifiedAt: number,
-  reactiveCanHandle: boolean
+  reactiveCanHandle: boolean,
+  utteranceEventId: number | null
 ): Promise<boolean> {
   const [allHandlers, state] = await Promise.all([
     listHandlers(),
@@ -665,6 +680,23 @@ async function runScriptFlow(
       });
     }
     return true;
+  }
+
+  // Second staleness gate: the walk's DB roundtrips take seconds, and a newer
+  // customer fragment can land in that window. Never speak a stale reply.
+  async function staleNow(): Promise<boolean> {
+    if (utteranceEventId == null) return false;
+    const newer = await hasNewerUtterance(callId, utteranceEventId).catch(() => false);
+    if (newer) {
+      await log({
+        call_id: callId,
+        event_type: "skipped",
+        content: utterance,
+        intent_key: intent,
+        meta: { flow: true, reason: "superseded" },
+      });
+    }
+    return newer;
   }
 
   async function defer(beforeLabel: string): Promise<boolean> {
@@ -747,6 +779,7 @@ async function runScriptFlow(
     // ── Wait box: pause here and wait for the next customer utterance ──
     if (ct === "wait") {
       if (reactiveCanHandle && !pathExpected) return defer(target.label || ct);
+      if (await staleNow()) return true;
       currentNodeId = target.id;
       note("", target, ct, edgeCond, null);
       await flush();
@@ -792,6 +825,7 @@ async function runScriptFlow(
       // End Call (or a top-level Return) → goodbye + hang up.
       const scn = handlerById(target.scenario_id);
       if (reactiveCanHandle && !pathExpected && scn?.intent_key !== intent) return defer(target.label || ct);
+      if (await staleNow()) return true;
       const text = scn?.response_template || "Thanks for your time today. Goodbye!";
       currentNodeId = target.id;
       note(text, target, ct, edgeCond, scn?.id ?? null);
@@ -830,6 +864,7 @@ async function runScriptFlow(
       if (reactiveCanHandle && !pathExpected && scenario?.intent_key !== intent) return defer(target.label || ct);
     }
 
+    if (await staleNow()) return true;
     currentNodeId = target.id;
     // Ground briefings in the customer's actual words — the step should feel
     // like a reply to them, not a recital of the next script line.

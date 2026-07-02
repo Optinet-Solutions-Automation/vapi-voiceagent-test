@@ -176,16 +176,18 @@ const edge = (s, t, handle = "out", label = "") => ({
   condition: { kind: "plain", handle },
   label,
 });
+// Order matters: consent is checked BEFORE the loop counts a round — a yes
+// must never bump the counter past its cap and fall out as "declined".
 const edges = [
   edge(start, stage1),
   edge(stage1, pitch),
   edge(pitch, saidYes),
   edge(saidYes, sms, "then", "Then"),
-  edge(saidYes, stage2, "else", "Else"),
-  edge(sms, endOk),
-  edge(stage2, tries),
-  edge(tries, saidYes, "loop", "Repeat"),
+  edge(saidYes, tries, "else", "Else"),
+  edge(tries, stage2, "loop", "Repeat"),
   edge(tries, endNo, "exit", "Exit"),
+  edge(stage2, saidYes),
+  edge(sms, endOk),
 ];
 
 await sb.from("listener_script_edges").delete().eq("script_id", scriptId);
