@@ -42,6 +42,18 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
   capped Loop box; one-off questions fall through to the Playbook.
 - **Script picker on the Listener Lab page** — choose which script drives the
   next test call (or none — Playbook only) without opening the builder.
+- **If/Else speaks CRM** — the reply condition is described in plain words
+  ("they agree — yes, sure, text me"); Save creates a speak-nothing *Reply
+  detector* entry the router matches against. Matching an existing scenario
+  moved under Advanced, grouped by purpose.
+- **Real-world edge cases** — `scripts/seed-edge-cases.mjs` seeds the messy
+  replies actual calls get ("Who is this?", "Where did you get my number?",
+  "Is this a scam?", "Are you a robot?", "I never signed up", "Stop calling
+  me", "Call me later", "Already claimed it", "What's the catch?", "What?").
+  They're Playbook scenarios with steer-back-to-purpose wording, so they fire
+  from any point in any flow via defer; do-not-call ends the call from
+  anywhere. Also creates the "Welcome Promo — Full Playbook" collection to
+  scope the router to this campaign's lines.
 
 ## v2.1
 
