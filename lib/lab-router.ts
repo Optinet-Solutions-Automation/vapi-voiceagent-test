@@ -23,11 +23,15 @@ export async function classifyUtterance(
 
   const systemPrompt = `You route utterances from a live phone call to handlers. Handlers:
 ${handlerLines}
-- intent_key: none — small talk, acknowledgements, background noise, or anything the agent can handle alone.
+- intent_key: none — anything that doesn't clearly need a handler.
+
+Rules:
+- Back-channel and fillers ("okay", "k", "uh-huh", "right", "hmm", "I hear you", "whatever"), incomplete fragments, a mid-call "hello?", stutters, or background noise → none. These are acknowledgements, not requests.
+- Bare agreement ("yes", "sure", "okay") matches a consent/offer handler ONLY if the agent's last line in the recent turns asked exactly that question; otherwise → none.
+- Pick a handler only for a substantive reply or question that clearly needs that handler's knowledge or action. When unsure, pick none with low confidence.
 
 Given the last customer utterance (and brief context), return ONLY JSON:
-{"intent":"<intent_key or none>","confidence":<0..1>}
-Pick "none" unless the utterance clearly needs a handler's knowledge or action.`;
+{"intent":"<intent_key or none>","confidence":<0..1>}`;
 
   const contextBlock =
     recentTurns.length > 0 ? `Recent turns:\n${recentTurns.join("\n")}\n\n` : "";

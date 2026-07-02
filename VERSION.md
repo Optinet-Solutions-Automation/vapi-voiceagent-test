@@ -73,6 +73,21 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **A wiser listener** — the router now has explicit rules: back-channel and
+  fillers ("okay", "k", "uh-huh", "I hear you"), fragments, a mid-call
+  "hello?", and noise are acknowledgements → none; bare agreement only maps
+  to a consent handler if the agent's last line asked that question. The flow
+  treats below-threshold guesses as "none" (a 0.42-confidence "consent" once
+  marched a live question straight into the goodbye). Split final transcripts
+  ("Sure." + "Whatever." one second apart) no longer double-advance the flow —
+  an optimistic lock on flow state drops the losing turn, so a step is never
+  spoken twice. In script mode `lookup_answer` stands down (the listener
+  already pushes the same answer — the customer was hearing everything twice).
+- **Playbook gets its own page** — Scenarios and Collections moved from
+  drawers on the Listener Lab to `/playbook`. The Listener Lab is now the
+  campaign test console, with the workflow spelled out in order: 1. Playbook →
+  2. Script Builder → 3. Configuration (push persona) → 4. pick script & call
+  → 5. Logs.
 - **Engagement, not recital** — configuring an assistant now sets an idle
   plan (up to two natural "still with me?" re-engagements after 8s of
   silence — the listener loop is transcript-driven, so silence otherwise

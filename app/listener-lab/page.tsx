@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import LabConfigForm from "@/components/lab/LabConfigForm";
-import OrganizerTable from "@/components/lab/OrganizerTable";
-import CollectionsManager from "@/components/lab/CollectionsManager";
 import ScriptBuilder from "@/components/lab/ScriptBuilder";
 import LabCallPanel from "@/components/lab/LabCallPanel";
 import ListenerMonitor from "@/components/lab/ListenerMonitor";
 import RunTranscript from "@/components/lab/RunTranscript";
 import Drawer from "@/components/lab/Drawer";
-import { listRecentLabEvents, getLabSettings, listHandlers, listCollections, listScripts, saveLabSettings } from "@/lib/lab-db";
+import { listRecentLabEvents, getLabSettings, listCollections, listScripts, saveLabSettings } from "@/lib/lab-db";
 import type { LabCallEvent, ListenerScript } from "@/lib/database.types";
 
 type Run = {
@@ -20,7 +19,7 @@ type Run = {
   avgLatencyMs: number | null;
 };
 
-type DrawerName = "config" | "organizer" | "collections" | "logs" | null;
+type DrawerName = "config" | "logs" | null;
 
 export default function ListenerLabPage() {
   const [assistantId, setAssistantId] = useState("");
@@ -31,7 +30,6 @@ export default function ListenerLabPage() {
   const [viewedCallId, setViewedCallId] = useState<string | null>(null);
 
   const [recentEvents, setRecentEvents] = useState<LabCallEvent[]>([]);
-  const [handlerCount, setHandlerCount] = useState<number | null>(null);
   const [openDrawer, setOpenDrawer] = useState<DrawerName>(null);
   const [logsPage, setLogsPage] = useState(1);
   const [activeCollectionName, setActiveCollectionName] = useState<string | null>(null);
@@ -45,11 +43,6 @@ export default function ListenerLabPage() {
   function refreshRuns() {
     listRecentLabEvents(1000)
       .then(setRecentEvents)
-      .catch(() => {});
-  }
-  function refreshHandlerCount() {
-    listHandlers()
-      .then((h) => setHandlerCount(h.filter((x) => x.intent_key !== "first_message").length))
       .catch(() => {});
   }
 
@@ -74,7 +67,6 @@ export default function ListenerLabPage() {
       .then(setScripts)
       .catch(() => {});
     refreshRuns();
-    refreshHandlerCount();
   }, []);
 
   // Which script drives the next test call (lab_settings.active_script_id).
@@ -136,9 +128,8 @@ export default function ListenerLabPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Listener Lab</h1>
           <p className="mt-1 max-w-2xl text-sm text-gray-500">
-            Short behavior-only agent; knowledge and actions fed mid-call by the Playbook. Configure
-            below, then run a test call. The classic long-prompt flow on the Call Dashboard stays
-            untouched for comparison.
+            The campaign test console: pick the script that drives the call, talk to the agent, and
+            watch the listener work in real time.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -148,23 +139,6 @@ export default function ListenerLabPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             Configuration
-          </button>
-          <button onClick={() => setOpenDrawer("organizer")} className={tabBtn}>
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
-            </svg>
-            Playbook
-            {handlerCount != null && (
-              <span className="rounded-full bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-300">
-                {handlerCount}
-              </span>
-            )}
-          </button>
-          <button onClick={() => setOpenDrawer("collections")} className={tabBtn}>
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-            </svg>
-            Collections
           </button>
           <button onClick={() => setShowScriptBuilder(true)} className={tabBtn}>
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -187,6 +161,34 @@ export default function ListenerLabPage() {
           </button>
         </div>
       </header>
+
+      {/* The campaign workflow, in order — so nobody has to guess the flow. */}
+      <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2 text-[11px]">
+        {[
+          { n: 1, label: "Write scenarios & bundle a collection", href: "/playbook" },
+          { n: 2, label: "Build the call flow", href: "/script-builder" },
+          { n: 3, label: "Push persona & webhook (Configuration → Save)", onClick: () => setOpenDrawer("config") },
+          { n: 4, label: "Pick the script below & start a call", onClick: undefined },
+          { n: 5, label: "Review the run in Logs", onClick: () => setOpenDrawer("logs") },
+        ].map((s, i) => (
+          <li key={s.n} className="flex items-center gap-1.5">
+            {i > 0 && <span className="text-gray-700">→</span>}
+            {s.href ? (
+              <Link href={s.href} className="rounded-full border border-gray-700 px-2.5 py-1 text-gray-400 transition hover:border-gray-500 hover:text-gray-200">
+                <span className="font-bold text-indigo-400">{s.n}.</span> {s.label}
+              </Link>
+            ) : s.onClick ? (
+              <button onClick={s.onClick} className="rounded-full border border-gray-700 px-2.5 py-1 text-gray-400 transition hover:border-gray-500 hover:text-gray-200">
+                <span className="font-bold text-indigo-400">{s.n}.</span> {s.label}
+              </button>
+            ) : (
+              <span className="rounded-full border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-gray-300">
+                <span className="font-bold text-indigo-400">{s.n}.</span> {s.label}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
 
       {/* Reviewing a past run: show its transcript + listener timeline side by side */}
       {reviewing ? (
@@ -254,13 +256,13 @@ export default function ListenerLabPage() {
         </div>
         <div className="flex items-center gap-2">
           <span className="uppercase tracking-wider">Collection:</span>
-          <button
-            onClick={() => setOpenDrawer("collections")}
+          <Link
+            href="/playbook"
             className="rounded-full border border-gray-700 px-2.5 py-0.5 font-medium text-gray-300 transition hover:bg-gray-800"
           >
             {activeCollectionName ?? "All scenarios"}
-          </button>
-          <span className="text-gray-600">— scopes the listener&rsquo;s scenarios</span>
+          </Link>
+          <span className="text-gray-600">— scopes the listener&rsquo;s scenarios (manage in the Playbook)</span>
         </div>
       </div>
 
@@ -278,29 +280,6 @@ export default function ListenerLabPage() {
             setAssistantName(name);
           }}
         />
-      </Drawer>
-
-      <Drawer
-        open={openDrawer === "organizer"}
-        onClose={() => {
-          setOpenDrawer(null);
-          refreshHandlerCount();
-        }}
-        title="Playbook"
-        subtitle="Your scenarios — each is a situation the agent may face, its matched line, and how it's delivered"
-        width="max-w-4xl"
-      >
-        <OrganizerTable />
-      </Drawer>
-
-      <Drawer
-        open={openDrawer === "collections"}
-        onClose={() => setOpenDrawer(null)}
-        title="Collections"
-        subtitle="Campaign bundles — pick the scenarios a campaign uses, then set one active to scope the test call"
-        width="max-w-2xl"
-      >
-        <CollectionsManager onActiveChange={(_id, name) => setActiveCollectionName(name)} />
       </Drawer>
 
       {showScriptBuilder && (

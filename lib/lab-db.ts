@@ -269,6 +269,41 @@ export async function upsertFlowState(
   if (error) throw new Error(error.message);
 }
 
+/** Persist flow state only if nobody advanced it since we read it (optimistic
+ *  lock on updated_at). Split final transcripts arrive as concurrent webhook
+ *  invocations — without this, both walk the flow from the same position and
+ *  the customer hears the same step twice. Returns false on a lost race. */
+export async function persistFlowStateGuarded(
+  callId: string,
+  scriptId: string | null,
+  currentNodeId: string | null,
+  variables: Record<string, unknown>,
+  expectedUpdatedAt: string | null
+): Promise<boolean> {
+  const row = {
+    script_id: scriptId,
+    current_node_id: currentNodeId,
+    variables,
+    updated_at: new Date().toISOString(),
+  };
+  if (expectedUpdatedAt) {
+    const { data, error } = await supabase
+      .from("lab_call_flow_state")
+      .update(row)
+      .eq("call_id", callId)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("call_id");
+    if (error) throw new Error(error.message);
+    return (data ?? []).length > 0;
+  }
+  const { error } = await supabase.from("lab_call_flow_state").insert({ call_id: callId, ...row });
+  if (error) {
+    if (error.code === "23505") return false; // concurrent first turn won
+    throw new Error(error.message);
+  }
+  return true;
+}
+
 // ── Call events ───────────────────────────────────────────────
 
 export async function insertLabEvent(event: EventInsert): Promise<void> {

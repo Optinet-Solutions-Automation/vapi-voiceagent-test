@@ -11,7 +11,7 @@ import {
   getCollectionHandlerIds,
   getScriptGraph,
   getFlowState,
-  upsertFlowState,
+  persistFlowStateGuarded,
 } from "@/lib/lab-db";
 import { findEntryNode, nodeById, pickNextEdge, contentTypeOf } from "@/lib/lab-flow";
 import { classifyUtterance } from "@/lib/lab-router";
@@ -186,16 +186,24 @@ async function handleToolCalls(
 
     try {
       if (name === "lookup_answer") {
-        const question = String(args.question ?? "");
-        if (question && handlers.length > 0) {
-          const cls = await classifyUtterance(question, [], handlers, routerModel);
-          const match = handlers.find((h) => h.intent_key === cls.intent);
-          if (match) {
-            result = match.response_template || "No details configured for this topic yet.";
-            handlerId = match.id;
-            actionType = match.action_type;
-          } else {
-            result = "I don't have that information. Offer to follow up with details later.";
+        if (activeScriptId) {
+          // The listener answers questions automatically in script mode; a
+          // parallel tool answer means the customer hears the same thing
+          // twice, phrased twice.
+          result =
+            "The answer is on its way to you automatically — do not answer from this tool. If nothing arrives in a moment, say you'll double-check and continue naturally.";
+        } else {
+          const question = String(args.question ?? "");
+          if (question && handlers.length > 0) {
+            const cls = await classifyUtterance(question, [], handlers, routerModel);
+            const match = handlers.find((h) => h.intent_key === cls.intent);
+            if (match) {
+              result = match.response_template || "No details configured for this topic yet.";
+              handlerId = match.id;
+              actionType = match.action_type;
+            } else {
+              result = "I don't have that information. Offer to follow up with details later.";
+            }
           }
         }
       } else if (name === "get_offer") {
@@ -374,6 +382,11 @@ async function handleTranscript(
     reactiveHandler.action_type !== "ignore" &&
     !flowOwnsAction;
 
+  // Below-threshold guesses must never drive branching (a 0.4-confidence
+  // "consent" once marched a live question straight into the goodbye) — the
+  // flow sees such turns as "none" and just follows plain arrows.
+  const flowIntent = cls.confidence >= settings.confidence_threshold ? cls.intent : "none";
+
   // ── Script runtime: if a script is active, try to advance the flow first.
   //    Reactive scenarios still handle anything the flow doesn't consume.
   if (settings.active_script_id) {
@@ -382,7 +395,7 @@ async function handleTranscript(
         callId,
         controlUrlHint,
         settings.active_script_id,
-        cls.intent,
+        flowIntent,
         utterance,
         utteranceAt,
         classifiedAt,
@@ -566,6 +579,7 @@ async function runScriptFlow(
     id ? allHandlers.find((h) => h.id === id) ?? null : null;
   const intentTags = allHandlers.find((h) => h.intent_key === intent)?.tags ?? [];
   let currentScriptId = state?.script_id ?? activeScriptId;
+  const stateUpdatedAt: string | null = state?.updated_at ?? null;
   const variables: Record<string, unknown> = { ...((state?.variables as Record<string, unknown>) ?? {}) };
   if (!Array.isArray(variables.__stack)) variables.__stack = [] as Frame[];
   let currentNodeId = state?.current_node_id ?? null;
@@ -585,11 +599,24 @@ async function runScriptFlow(
   const note = (content: string, target: { id: string; label: string }, ct: string, edgeCond: unknown, scenarioId: string | null) =>
     pending.push({ content, targetId: target.id, targetLabel: target.label, ct, edgeCond, scenarioId });
 
-  async function flush() {
+  // Commit the walk. False = another concurrent turn (split final transcripts)
+  // already advanced this call — drop everything; the customer must not hear
+  // the same step twice.
+  async function flush(): Promise<boolean> {
     // A sub-workflow result only drives branching in the same-turn continuation
     // after the Return — clear it once the turn is consumed.
     variables.__lastResult = null;
-    await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
+    const won = await persistFlowStateGuarded(callId, currentScriptId, currentNodeId, variables, stateUpdatedAt);
+    if (!won) {
+      await log({
+        call_id: callId,
+        event_type: "skipped",
+        content: `flow turn dropped — a concurrent turn already advanced the call`,
+        intent_key: intent,
+        meta: { flow: true, reason: "concurrent_turn" },
+      });
+      return false;
+    }
     for (const p of pending) {
       const ms = Date.now();
       await log({
@@ -606,6 +633,7 @@ async function runScriptFlow(
         meta: { flow: true, toNode: p.targetId, nodeType: p.ct, edgeCondition: p.edgeCond },
       });
     }
+    return true;
   }
 
   async function defer(beforeLabel: string): Promise<boolean> {
@@ -734,14 +762,14 @@ async function runScriptFlow(
       const scn = handlerById(target.scenario_id);
       if (reactiveCanHandle && !pathExpected && scn?.intent_key !== intent) return defer(target.label || ct);
       const text = scn?.response_template || "Thanks for your time today. Goodbye!";
+      currentNodeId = target.id;
+      note(text, target, ct, edgeCond, scn?.id ?? null);
+      if (!(await flush())) return true; // lost the race — say nothing
       const controlUrl = await ctl();
       if (controlUrl) {
         const r = await injectSay(controlUrl, text, true);
         if (!r.ok) setTimeout(() => endCall(controlUrl).catch(() => {}), 4000);
       }
-      currentNodeId = target.id;
-      note(text, target, ct, edgeCond, scn?.id ?? null);
-      await flush();
       return true;
     }
 
@@ -766,29 +794,33 @@ async function runScriptFlow(
     }
 
     currentNodeId = target.id;
-    let injectedText = "";
-    const controlUrl = await ctl();
     // Ground briefings in the customer's actual words — the step should feel
     // like a reply to them, not a recital of the next script line.
     const brief = (t: string) =>
       `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
-
+    let injectedText = "";
     if (ct === "send_sms") {
       injectedText = scenario?.response_template || "The SMS with the details is on its way. Confirm that to the customer.";
-      if (controlUrl) await injectStaffNote(controlUrl, brief(injectedText), true);
     } else if (ct === "transfer") {
       injectedText = scenario?.response_template || "Thanks — let me connect you to one of our team now.";
-      if (controlUrl) await injectSay(controlUrl, injectedText, false);
     } else if (scenario) {
       injectedText = scenario.response_template ?? "";
-      if (controlUrl)
-        scenario.delivery === "verbatim"
-          ? await injectSay(controlUrl, injectedText, false)
-          : await injectStaffNote(controlUrl, brief(injectedText), true);
     }
 
     note(injectedText, target, ct, edgeCond, scenario?.id ?? null);
-    await flush();
+    if (!(await flush())) return true; // lost the race — say nothing
+    const controlUrl = await ctl();
+    if (controlUrl) {
+      if (ct === "send_sms") {
+        await injectStaffNote(controlUrl, brief(injectedText), true);
+      } else if (ct === "transfer") {
+        await injectSay(controlUrl, injectedText, false);
+      } else if (scenario) {
+        scenario.delivery === "verbatim"
+          ? await injectSay(controlUrl, injectedText, false)
+          : await injectStaffNote(controlUrl, brief(injectedText), true);
+      }
+    }
     return true;
   }
   return false;
