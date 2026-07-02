@@ -48,8 +48,21 @@ export async function POST(req: Request) {
   }
   const assistant = await getRes.json();
 
+  // Push the persona prompt from lab settings too — a stale assistant prompt
+  // ("still the old brand") kept haunting test calls when only the settings
+  // row had been updated.
+  const model = assistant.model ?? {};
+  let messages: Array<{ role: string; content: string }> = model.messages ?? [];
+  const prompt = settings?.short_prompt?.trim();
+  if (prompt) {
+    const hasSystem = messages.some((m) => m.role === "system");
+    messages = hasSystem
+      ? messages.map((m) => (m.role === "system" ? { ...m, content: prompt } : m))
+      : [{ role: "system", content: prompt }, ...messages];
+  }
+
   const patchBody = {
-    model: { ...(assistant.model ?? {}), tools: LAB_TOOLS },
+    model: { ...model, messages, tools: LAB_TOOLS },
     server: { url: webhookUrl, timeoutSeconds: 20 },
     serverMessages: [
       "tool-calls",

@@ -24,8 +24,10 @@ const scenarios = [
     name: "Welcome Promo — the offer",
     intent_key: "promo_hook",
     tags: ["Welcome Promo", "Promotions"],
+    // SPEAK-ONLY: reply-shaped wording here once let the router hijack a
+    // simple "sure, I have time" and pitch outside the flow.
     description:
-      "Customer responds to the opening — confirms it's them, asks what the call is about, or sounds neutral/curious.",
+      "SPEAK-ONLY pitch line — the script presents this at its own step. Not a customer reply; do not match replies to it.",
     response_template:
       "Great — I'll keep it quick. Since you registered with us this week, there's a welcome promo on your account: twenty-five percent off your first month, already applied. Want me to text you the link so you can claim it whenever suits you?",
     action_type: "give_offer",
@@ -113,11 +115,22 @@ const scenarios = [
   },
 ];
 
+// Descriptions tuned after first seeding — refresh them on existing rows.
+const RETUNED = ["promo_hook"];
+
 const { data: existing } = await sb.from("listener_handlers").select("id, intent_key");
 const byIntent = Object.fromEntries((existing ?? []).map((r) => [r.intent_key, r.id]));
 let added = 0;
 for (const s of scenarios) {
-  if (byIntent[s.intent_key]) continue;
+  if (byIntent[s.intent_key]) {
+    if (RETUNED.includes(s.intent_key)) {
+      await sb
+        .from("listener_handlers")
+        .update({ description: s.description, updated_at: new Date().toISOString() })
+        .eq("intent_key", s.intent_key);
+    }
+    continue;
+  }
   const { data, error } = await sb.from("listener_handlers").insert(s).select("id").single();
   if (error) {
     console.log("FAILED scenario", s.intent_key, error.message);

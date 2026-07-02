@@ -82,6 +82,18 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
       if (!vapi) return;
       localStorage.setItem("lab_client_name", clientName);
 
+      // Self-configuring calls: push persona/tools/webhook/idle-plan onto the
+      // assistant before dialing, so a stale config can never haunt the test.
+      try {
+        await fetch("/api/lab/configure-assistant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assistantId }),
+        });
+      } catch {
+        /* non-fatal — the call runs on the assistant's existing config */
+      }
+
       // Opening line: the active script's Start box wins (per-campaign
       // opening); otherwise the global "first_message" scenario. {{name}} is
       // personalized here.

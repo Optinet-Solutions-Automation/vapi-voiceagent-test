@@ -73,6 +73,16 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **The flow owns the pitch too** (QA of a live stage-script call): a
+  misrouted "sure, I have time" let the reactive layer deliver the pitch,
+  desyncing the flow for the whole call — the agent later claimed to send a
+  text that never existed. give_offer now joins send_sms as flow-owned; the
+  gated tools explicitly forbid "checking" filler and false "sent" claims;
+  promo_hook's description is speak-only so agreements can't match it.
+  **Start Call now auto-pushes the configuration** (persona, tools, webhook,
+  idle plan) onto the assistant — Save Configuration is no longer a landmine.
+  The persona also varies its fillers ("mm-hmm", "uh-huh", "right", "one
+  sec") instead of repeating "just a sec".
 - **Stage collections — replies pick from a set, not nested If/Else** — a
   Collection box is now a full conversation stage: the customer's reply picks
   the member scenario to speak, a configurable **Default line** covers

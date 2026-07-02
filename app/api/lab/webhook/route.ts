@@ -191,7 +191,7 @@ async function handleToolCalls(
           // parallel tool answer means the customer hears the same thing
           // twice, phrased twice.
           result =
-            "The answer is on its way to you automatically — do not answer from this tool. If nothing arrives in a moment, say you'll double-check and continue naturally.";
+            "The answer is being provided to you automatically — do not answer from this tool and do not say you're checking anything. Respond naturally to what they said; if nothing arrives in a moment, offer to follow up.";
         } else {
           const question = String(args.question ?? "");
           if (question && handlers.length > 0) {
@@ -211,7 +211,7 @@ async function handleToolCalls(
           // A script drives this call — the offer is a flow step, and letting
           // the agent pull an arbitrary offer here means two competing pitches.
           result =
-            "The offer is delivered to you automatically at the right step of this call. Do not present an offer on your own — briefly acknowledge and let the conversation continue.";
+            "The offer is presented automatically at the right step of this call. Do not present an offer yourself and do not say you're checking anything — respond naturally to what they said and keep the conversation moving.";
         } else {
           const offer = handlers
             .filter((h) => h.action_type === "give_offer")
@@ -227,7 +227,7 @@ async function handleToolCalls(
       } else if (name === "send_sms") {
         if (activeScriptId) {
           result =
-            "The text message is handled automatically at the right step of this call. Do not announce an SMS on your own — your confirmation line will be supplied.";
+            "NOTHING has been sent — do not claim a text was sent. The text step happens automatically later in the call, and your confirmation line will be supplied when it actually does. For now, respond naturally to what they said.";
         } else {
           const smsHandler = handlers
             .filter((h) => h.action_type === "send_sms")
@@ -369,12 +369,14 @@ async function handleTranscript(
   // off-script questions fall through to the reactive layer instead of
   // dragging them down an Else branch.
   const reactiveHandler = handlers.find((h) => h.intent_key === cls.intent);
-  // SMS confirmations are flow steps: when a script is active the reactive
-  // layer must never speak one out of order ("I'm sending it right now" for a
-  // text the flow never reached). Such intents don't defer — the flow keeps
-  // walking and speaks its own step instead.
+  // Conversion actions are flow steps: when a script is active the reactive
+  // layer must never pitch the offer or confirm an SMS out of order — that
+  // desyncs the conversation from the flow position for the rest of the call.
+  // Such intents don't defer; the flow keeps walking and speaks its own step.
   const flowOwnsAction =
-    !!settings.active_script_id && !!reactiveHandler && reactiveHandler.action_type === "send_sms";
+    !!settings.active_script_id &&
+    !!reactiveHandler &&
+    (reactiveHandler.action_type === "send_sms" || reactiveHandler.action_type === "give_offer");
   const reactiveCanHandle =
     cls.intent !== "none" &&
     cls.confidence >= settings.confidence_threshold &&
