@@ -147,7 +147,8 @@ const scenarios = [
     tags: ["Edge Cases", "Q&A"],
     description:
       "Customer didn't hear or didn't understand — asks you to repeat, say that again, or what did you say.",
-    response_template: "Repeat your last point once more, slower and in fewer words. Don't add new information.",
+    response_template:
+      "They didn't catch it or it didn't land. Rephrase your last point in different, simpler words — never repeat the same sentence twice. If they seem confused about what you're even talking about, step back and re-explain in one short sentence why you called.",
     action_type: "answer",
     delivery: "reword",
     priority: 26,
@@ -155,11 +156,22 @@ const scenarios = [
   },
 ];
 
+// Templates tuned after the first seeding — refresh them on existing rows.
+const RETUNED = ["edge_repeat_that"];
+
 const { data: existing } = await sb.from("listener_handlers").select("id, intent_key");
 const have = new Set((existing ?? []).map((r) => r.intent_key));
 let added = 0;
 for (const s of scenarios) {
-  if (have.has(s.intent_key)) continue;
+  if (have.has(s.intent_key)) {
+    if (RETUNED.includes(s.intent_key)) {
+      await sb
+        .from("listener_handlers")
+        .update({ response_template: s.response_template, updated_at: new Date().toISOString() })
+        .eq("intent_key", s.intent_key);
+    }
+    continue;
+  }
   const { error } = await sb.from("listener_handlers").insert(s);
   if (error) {
     console.log("FAILED", s.intent_key, error.message);

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getVapi, vapiErrorText as errText, isBenignCallEnd } from "@/lib/vapi";
 import { AgentState, TranscriptMessage } from "@/lib/types";
-import { listHandlers, getLabSettings, getScriptGraph } from "@/lib/lab-db";
+import { listHandlers, getLabSettings, getScriptGraph, insertLabEvent } from "@/lib/lab-db";
 import StatusIndicator from "@/components/StatusIndicator";
 import TranscriptPanel from "@/components/TranscriptPanel";
 
@@ -111,7 +111,23 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
       }
 
       const call = await vapi.start(assistantId, overrides);
-      if (call?.id) onCallStarted(call.id);
+      if (call?.id) {
+        onCallStarted(call.id);
+        // Log the opening as an agent turn (no injected_at → doesn't trip the
+        // cooldown) so the router classifies the first reply in context —
+        // "yes, sure" after "got a moment?" is agreement, not SMS consent.
+        const opening = overrides?.firstMessage as string | undefined;
+        if (opening) {
+          insertLabEvent({
+            call_id: call.id,
+            event_type: "injected",
+            role: "assistant",
+            content: opening,
+            action_type: "opening",
+            meta: { opening: true },
+          }).catch(() => {});
+        }
+      }
     } catch (err: any) {
       const raw = errText(err, "Failed to start call");
       const msg =

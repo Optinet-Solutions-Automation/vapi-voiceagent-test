@@ -73,6 +73,15 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Reactive/script collision fixes** (from a live test call): SMS
+  confirmations are flow steps — when a script is active the reactive layer
+  never speaks one out of order (a misclassified "yes, sure" used to trigger
+  "I'm sending it right now" before any offer was pitched; the flow now speaks
+  its own step instead). The cooldown only throttles reactive whispers, never
+  flow advancement. Re-injecting the same briefing within 45s is suppressed
+  (no more "I've sent the details to this number" ×5). Test calls log the
+  opening line as an agent turn so the router classifies the first reply in
+  context, and the repeat-that briefing now says rephrase, never repeat.
 - **Real-world edge cases** — `scripts/seed-edge-cases.mjs` seeds the messy
   replies actual calls get ("Who is this?", "Where did you get my number?",
   "Is this a scam?", "Are you a robot?", "I never signed up", "Stop calling

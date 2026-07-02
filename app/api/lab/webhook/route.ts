@@ -331,25 +331,6 @@ async function handleTranscript(
     return;
   }
 
-  // Cooldown: don't whisper twice in rapid succession
-  try {
-    const last = await lastInjectedP;
-    if (last?.injected_at) {
-      const elapsed = receivedAt - new Date(last.injected_at).getTime();
-      if (elapsed < settings.injection_cooldown_ms) {
-        await log({
-          call_id: callId,
-          event_type: "skipped",
-          content: utterance,
-          meta: { reason: "cooldown", elapsed_ms: elapsed },
-        });
-        return;
-      }
-    }
-  } catch {
-    /* non-fatal */
-  }
-
   // Classify
   let cls;
   try {
@@ -380,11 +361,18 @@ async function handleTranscript(
   // off-script questions fall through to the reactive layer instead of
   // dragging them down an Else branch.
   const reactiveHandler = handlers.find((h) => h.intent_key === cls.intent);
+  // SMS confirmations are flow steps: when a script is active the reactive
+  // layer must never speak one out of order ("I'm sending it right now" for a
+  // text the flow never reached). Such intents don't defer — the flow keeps
+  // walking and speaks its own step instead.
+  const flowOwnsAction =
+    !!settings.active_script_id && !!reactiveHandler && reactiveHandler.action_type === "send_sms";
   const reactiveCanHandle =
     cls.intent !== "none" &&
     cls.confidence >= settings.confidence_threshold &&
     !!reactiveHandler &&
-    reactiveHandler.action_type !== "ignore";
+    reactiveHandler.action_type !== "ignore" &&
+    !flowOwnsAction;
 
   // ── Script runtime: if a script is active, try to advance the flow first.
   //    Reactive scenarios still handle anything the flow doesn't consume.
@@ -410,6 +398,42 @@ async function handleTranscript(
     }
   }
 
+  // ── Reactive-only guards (the flow above is never blocked by these) ──
+  const lastInjected = await lastInjectedP;
+
+  // Cooldown: don't whisper twice in rapid succession.
+  if (lastInjected?.injected_at) {
+    const elapsed = receivedAt - new Date(lastInjected.injected_at).getTime();
+    if (elapsed < settings.injection_cooldown_ms) {
+      await log({
+        call_id: callId,
+        event_type: "skipped",
+        content: utterance,
+        intent_key: cls.intent,
+        meta: { reason: "cooldown", elapsed_ms: elapsed },
+      });
+      return;
+    }
+  }
+
+  // Repeat suppression: re-injecting the same briefing ("repeat your last
+  // point") turns the agent into a parrot — once is enough; after that the
+  // agent answers from its own context.
+  if (
+    lastInjected?.injected_at &&
+    lastInjected.intent_key === cls.intent &&
+    receivedAt - new Date(lastInjected.injected_at).getTime() < 45000
+  ) {
+    await log({
+      call_id: callId,
+      event_type: "skipped",
+      content: utterance,
+      intent_key: cls.intent,
+      meta: { reason: "repeat_suppressed" },
+    });
+    return;
+  }
+
   // Decision gate — the conflict protocol
   if (cls.intent === "none" || cls.confidence < settings.confidence_threshold) {
     await log({
@@ -424,7 +448,7 @@ async function handleTranscript(
   }
 
   const handler = handlers.find((h) => h.intent_key === cls.intent);
-  if (!handler || handler.action_type === "ignore") {
+  if (!handler || handler.action_type === "ignore" || flowOwnsAction) {
     await log({
       call_id: callId,
       event_type: "skipped",
@@ -432,7 +456,7 @@ async function handleTranscript(
       intent_key: cls.intent,
       confidence: cls.confidence,
       handler_id: handler?.id ?? null,
-      meta: { reason: handler ? "handler_ignore" : "handler_not_found" },
+      meta: { reason: flowOwnsAction ? "flow_owns_action" : handler ? "handler_ignore" : "handler_not_found" },
     });
     return;
   }
