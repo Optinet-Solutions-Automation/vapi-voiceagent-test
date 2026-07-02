@@ -864,6 +864,21 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-950">
       {/* Top bar */}
       <div className="flex flex-wrap items-center gap-3 border-b border-gray-800 px-4 py-2.5">
+        {/* Script switcher — open any script without leaving the builder */}
+        <select
+          value={scriptId ?? ""}
+          onChange={(e) => e.target.value && loadScript(e.target.value)}
+          title="Open another script"
+          className="w-56 shrink-0 rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]"
+        >
+          {!scriptId && <option value="">(open a script…)</option>}
+          {scripts.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+
         {/* Editable workflow name */}
         <input
           value={name}
