@@ -9,8 +9,8 @@ import LabCallPanel from "@/components/lab/LabCallPanel";
 import ListenerMonitor from "@/components/lab/ListenerMonitor";
 import RunTranscript from "@/components/lab/RunTranscript";
 import Drawer from "@/components/lab/Drawer";
-import { listRecentLabEvents, getLabSettings, listHandlers, listCollections } from "@/lib/lab-db";
-import type { LabCallEvent } from "@/lib/database.types";
+import { listRecentLabEvents, getLabSettings, listHandlers, listCollections, listScripts, saveLabSettings } from "@/lib/lab-db";
+import type { LabCallEvent, ListenerScript } from "@/lib/database.types";
 
 type Run = {
   callId: string;
@@ -36,6 +36,9 @@ export default function ListenerLabPage() {
   const [logsPage, setLogsPage] = useState(1);
   const [activeCollectionName, setActiveCollectionName] = useState<string | null>(null);
   const [showScriptBuilder, setShowScriptBuilder] = useState(false);
+  const [scripts, setScripts] = useState<ListenerScript[]>([]);
+  const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
+  const [scriptError, setScriptError] = useState<string | null>(null);
 
   const LOGS_PAGE_SIZE = 8;
 
@@ -56,6 +59,7 @@ export default function ListenerLabPage() {
     getLabSettings()
       .then(async (s) => {
         if (s?.lab_assistant_id) setAssistantId(s.lab_assistant_id);
+        setActiveScriptId(s?.active_script_id ?? null);
         if (s?.active_collection_id) {
           try {
             const cols = await listCollections();
@@ -66,9 +70,26 @@ export default function ListenerLabPage() {
         }
       })
       .catch(() => {});
+    listScripts()
+      .then(setScripts)
+      .catch(() => {});
     refreshRuns();
     refreshHandlerCount();
   }, []);
+
+  // Which script drives the next test call (lab_settings.active_script_id).
+  async function handleScriptChange(id: string) {
+    const next = id || null;
+    const prev = activeScriptId;
+    setActiveScriptId(next);
+    setScriptError(null);
+    try {
+      await saveLabSettings({ active_script_id: next });
+    } catch (e: unknown) {
+      setActiveScriptId(prev);
+      setScriptError(e instanceof Error ? e.message : "Failed to set the script");
+    }
+  }
 
   const runs: Run[] = useMemo(() => {
     const byCall = new Map<string, LabCallEvent[]>();
@@ -212,15 +233,35 @@ export default function ListenerLabPage() {
         </div>
       )}
 
-      <div className="flex items-center gap-2 text-xs text-gray-500">
-        <span className="uppercase tracking-wider">Active collection:</span>
-        <button
-          onClick={() => setOpenDrawer("collections")}
-          className="rounded-full border border-gray-700 px-2.5 py-0.5 font-medium text-gray-300 transition hover:bg-gray-800"
-        >
-          {activeCollectionName ?? "All scenarios"}
-        </button>
-        <span className="text-gray-600">— the listener only uses this collection&rsquo;s scenarios</span>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-gray-500">
+        <div className="flex items-center gap-2">
+          <span className="uppercase tracking-wider">Script:</span>
+          <select
+            value={activeScriptId ?? ""}
+            onChange={(e) => handleScriptChange(e.target.value)}
+            className="max-w-[280px] rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]"
+            title="Which script drives the next test call"
+          >
+            <option value="">(none — Playbook only)</option>
+            {scripts.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <span className="text-gray-600">— drives the next test call</span>
+          {scriptError && <span className="text-red-400">{scriptError}</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="uppercase tracking-wider">Collection:</span>
+          <button
+            onClick={() => setOpenDrawer("collections")}
+            className="rounded-full border border-gray-700 px-2.5 py-0.5 font-medium text-gray-300 transition hover:bg-gray-800"
+          >
+            {activeCollectionName ?? "All scenarios"}
+          </button>
+          <span className="text-gray-600">— scopes the listener&rsquo;s scenarios</span>
+        </div>
       </div>
 
       {/* ── Config drawers (hidden by default) ── */}
@@ -262,7 +303,18 @@ export default function ListenerLabPage() {
         <CollectionsManager onActiveChange={(_id, name) => setActiveCollectionName(name)} />
       </Drawer>
 
-      {showScriptBuilder && <ScriptBuilder onClose={() => setShowScriptBuilder(false)} />}
+      {showScriptBuilder && (
+        <ScriptBuilder
+          onClose={() => {
+            setShowScriptBuilder(false);
+            // The builder can create scripts and flip the Active toggle — resync.
+            listScripts().then(setScripts).catch(() => {});
+            getLabSettings()
+              .then((s) => setActiveScriptId(s?.active_script_id ?? null))
+              .catch(() => {});
+          }}
+        />
+      )}
 
       <Drawer
         open={openDrawer === "logs"}

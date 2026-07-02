@@ -535,6 +535,9 @@ async function runScriptFlow(
     pending.push({ content, targetId: target.id, targetLabel: target.label, ct, edgeCond, scenarioId });
 
   async function flush() {
+    // A sub-workflow result only drives branching in the same-turn continuation
+    // after the Return — clear it once the turn is consumed.
+    variables.__lastResult = null;
     await upsertFlowState(callId, currentScriptId, currentNodeId, variables);
     for (const p of pending) {
       const ms = Date.now();
@@ -598,18 +601,28 @@ async function runScriptFlow(
   }
 
   let pathExpected = false;
+  // Set when entering a sub-workflow whose entry box is a real step: that box
+  // must run this iteration (it wasn't reached over an edge).
+  let jumpTo: ReturnType<typeof nodeById> = null;
   let guard = 0;
   while (guard++ < 16) {
     const result = (variables.__lastResult as string) ?? null;
-    const currentNode = nodeById(graph.nodes, currentNodeId!);
-    if (!currentNode) return false;
-    const edge = pickNextEdge(currentNode, graph.edges, { intent, tags: intentTags, result, bumpLoop });
-    if (!edge) return false; // nowhere to go → reactive layer handles it
-    if (edgeRecognizedIntent(currentNode, edge)) pathExpected = true;
-
-    const target = nodeById(graph.nodes, edge.target_node_id);
+    let target: ReturnType<typeof nodeById>;
+    let edgeCond: unknown;
+    if (jumpTo) {
+      target = jumpTo;
+      jumpTo = null;
+      edgeCond = { entered: "subworkflow" };
+    } else {
+      const currentNode = nodeById(graph.nodes, currentNodeId!);
+      if (!currentNode) return false;
+      const edge = pickNextEdge(currentNode, graph.edges, { intent, tags: intentTags, result, bumpLoop });
+      if (!edge) return false; // nowhere to go → reactive layer handles it
+      if (edgeRecognizedIntent(currentNode, edge)) pathExpected = true;
+      target = nodeById(graph.nodes, edge.target_node_id);
+      edgeCond = edge.condition;
+    }
     if (!target) return false;
-    if (result) variables.__lastResult = null; // consume result after a branch used it
 
     const ct = contentTypeOf(target);
     const cfg = target.config as Record<string, unknown>;
@@ -617,7 +630,7 @@ async function runScriptFlow(
     // ── Control / pass-through boxes: advance on the same turn ──
     if (ct === "noop" || ct === "ifelse" || ct === "loop") {
       currentNodeId = target.id;
-      note("", target, ct, edge.condition, null);
+      note("", target, ct, edgeCond, null);
       continue;
     }
 
@@ -625,7 +638,7 @@ async function runScriptFlow(
     if (ct === "wait") {
       if (reactiveCanHandle && !pathExpected) return defer(target.label || ct);
       currentNodeId = target.id;
-      note("", target, ct, edge.condition, null);
+      note("", target, ct, edgeCond, null);
       await flush();
       return true;
     }
@@ -636,8 +649,13 @@ async function runScriptFlow(
         (variables.__stack as Frame[]).push({ scriptId: currentScriptId, returnNodeId: target.id });
         graph = await getScriptGraph(subId);
         currentScriptId = subId;
-        currentNodeId = findEntryNode(graph.nodes, graph.edges)?.id ?? target.id;
-        note(`↳ enter sub-workflow`, target, ct, edge.condition, null);
+        note(`↳ enter sub-workflow`, target, ct, edgeCond, null);
+        const entry = findEntryNode(graph.nodes, graph.edges);
+        if (!entry) return false;
+        currentNodeId = entry.id;
+        // A Start box is a pure position (the walk advances from it); any
+        // other entry box is the phase's first step and must actually run.
+        if (entry.type !== "start") jumpTo = entry;
         continue;
       }
       currentNodeId = target.id;
@@ -654,7 +672,7 @@ async function runScriptFlow(
         currentScriptId = frame.scriptId;
         graph = await getScriptGraph(currentScriptId);
         currentNodeId = frame.returnNodeId;
-        note(`↩ return: ${variables.__lastResult}`, target, "return", edge.condition, null);
+        note(`↩ return: ${variables.__lastResult}`, target, "return", edgeCond, null);
         continue;
       }
       // Return at top level (no parent) → just end the call gracefully.
@@ -671,7 +689,7 @@ async function runScriptFlow(
         if (!r.ok) setTimeout(() => endCall(controlUrl).catch(() => {}), 4000);
       }
       currentNodeId = target.id;
-      note(text, target, ct, edge.condition, scn?.id ?? null);
+      note(text, target, ct, edgeCond, scn?.id ?? null);
       await flush();
       return true;
     }
@@ -714,7 +732,7 @@ async function runScriptFlow(
           : await injectStaffNote(controlUrl, injectedText, true);
     }
 
-    note(injectedText, target, ct, edge.condition, scenario?.id ?? null);
+    note(injectedText, target, ct, edgeCond, scenario?.id ?? null);
     await flush();
     return true;
   }

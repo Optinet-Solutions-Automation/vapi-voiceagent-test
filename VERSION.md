@@ -29,6 +29,19 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
   "Welcome Promo — New Signups": call a client who registered this week and
   offer a promo, with SMS follow-up, an objection nudge, and off-script Q&A
   scenarios.
+- **Sub-workflow phases actually work** — two runtime fixes: a sub-workflow's
+  result was consumed one step early, so an If/Else-on-result box always took
+  Else; and a sub-workflow's entry box was only used as a position, so a
+  phase's first line was skipped on entry. Results now live until the turn is
+  consumed, and a non-Start entry box runs when its phase is entered.
+- **Phased samples** — `scripts/seed-phased-workflows.mjs` seeds reusable
+  phase sub-workflows (Opening & Identity, Pitch & Redirect, Close & Send
+  Link, Claim Reminder) and two masters composed from them: "Sales Call —
+  Phased (example)" and "Follow-up — Claim Reminder (example)". Off-topic
+  replies are redirected back to the call purpose via a redirect scenario +
+  capped Loop box; one-off questions fall through to the Playbook.
+- **Script picker on the Listener Lab page** — choose which script drives the
+  next test call (or none — Playbook only) without opening the builder.
 
 ## v2.1
 
