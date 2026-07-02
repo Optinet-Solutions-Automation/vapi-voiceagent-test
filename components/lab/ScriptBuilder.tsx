@@ -260,8 +260,12 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (c === "transfer") return (d.config.number as string) || "(phone number)";
     if (c === "return") return `↩ ${(d.config.resultName as string) || "result"}`;
     if (c === "ifelse") {
+      const by = (d.config.condBy as string) ?? "intent";
       const val = (d.config.condValue as string) ?? "";
-      return `if result = ${val || "?"}`;
+      if (by === "result") return `if result = ${val || "?"}`;
+      if (by === "tag") return `if reply tagged ${val || "?"}`;
+      const scn = scenarios.find((s) => s.intent_key === val);
+      return `if reply ≈ ${scn ? snip(scn.name, 30) : val || "?"}`;
     }
     if (c === "loop") return `up to ${(d.config.maxLoops as number) ?? 3}×`;
     if (c === "wait") return "wait for caller";
@@ -269,10 +273,15 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     return null;
   }
 
-  // Scenario description shown on the box — says WHEN this line fires.
+  // Scenario description shown on the box — says WHEN this line/branch fires.
   function noteFor(d: NodeData): string | null {
     if (d.kind !== "step") return null;
     const c = (d.config.contentType as Content) ?? "scenario";
+    if (c === "ifelse") {
+      if (((d.config.condBy as string) ?? "intent") !== "intent") return null;
+      const scn = scenarios.find((s) => s.intent_key === ((d.config.condValue as string) ?? ""));
+      return scn?.description ? snip(`Then when: ${scn.description}`, 72) : null;
+    }
     if (c !== "scenario" && c !== "end") return null;
     const s = d.scenarioId ? scenarios.find((x) => x.id === d.scenarioId) : undefined;
     const t = (s?.description ?? "").trim();
@@ -448,7 +457,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     const content = payload as Content;
     if (!CONTENT_META[content]) return;
     const config: Record<string, unknown> = { contentType: content };
-    if (content === "ifelse") config.condBy = "result"; // branch on the previous sub-workflow's result
+    if (content === "ifelse") config.condBy = "intent"; // default: branch on the customer's reply
     dropNode({ kind: "step", label: CONTENT_META[content].label, scenarioId: null, config }, position);
   }
   function onDragStartPalette(e: React.DragEvent, payload: string) {
@@ -1023,21 +1032,67 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                     {content === "ifelse" && (
                       <>
                         <div>
-                          <label className="mb-1 block text-xs text-gray-400">
-                            If the previous result equals
-                          </label>
-                          <input
-                            className={inputCls}
-                            value={(sd.config.condValue as string) ?? ""}
-                            onChange={(e) => patchConfig(selNode.id, { condBy: "result", condValue: e.target.value })}
-                            placeholder="e.g. yes"
-                          />
+                          <label className="mb-1 block text-xs text-gray-400">Branch on</label>
+                          <select
+                            className={inputCls + " [color-scheme:dark]"}
+                            value={((sd.config.condBy as string) ?? "intent") === "result" ? "result" : "intent"}
+                            onChange={(e) => patchConfig(selNode.id, { condBy: e.target.value, condValue: "" })}
+                          >
+                            <option value="intent">The customer&rsquo;s reply</option>
+                            <option value="result">The last sub-workflow&rsquo;s result</option>
+                          </select>
                         </div>
-                        <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
-                          Checks the result returned by the last sub-workflow (e.g. a promo sub returning
-                          <strong> yes</strong>). Connect the green <strong>Then</strong> dot to the box for a match,
-                          the red <strong>Else</strong> dot to the fallback.
-                        </p>
+
+                        {((sd.config.condBy as string) ?? "intent") !== "result" ? (
+                          <>
+                            <div>
+                              <label className="mb-1 block text-xs text-gray-400">Reply matches scenario</label>
+                              <select
+                                className={inputCls + " [color-scheme:dark]"}
+                                value={(sd.config.condValue as string) ?? ""}
+                                onChange={(e) => patchConfig(selNode.id, { condBy: "intent", condValue: e.target.value })}
+                              >
+                                <option value="">(pick a scenario)</option>
+                                {scenarios.map((s) => (
+                                  <option key={s.id} value={s.intent_key}>
+                                    {s.name}
+                                  </option>
+                                ))}
+                              </select>
+                              {(() => {
+                                const scn = scenarios.find((s) => s.intent_key === ((sd.config.condValue as string) ?? ""));
+                                return scn?.description ? (
+                                  <p className="mt-1 rounded-md bg-gray-900/60 p-1.5 text-[10px] italic text-gray-500">
+                                    Counts as a match when: {scn.description}
+                                  </p>
+                                ) : null;
+                              })()}
+                            </div>
+                            <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
+                              Every reply is matched against your scenarios&rsquo; descriptions. If the reply fits the
+                              scenario picked here, the call follows the green <strong>Then</strong> dot; anything else
+                              follows the red <strong>Else</strong> dot. One-off questions with a Playbook answer are
+                              answered in place and re-checked on the next reply.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <div>
+                              <label className="mb-1 block text-xs text-gray-400">If the result equals</label>
+                              <input
+                                className={inputCls}
+                                value={(sd.config.condValue as string) ?? ""}
+                                onChange={(e) => patchConfig(selNode.id, { condBy: "result", condValue: e.target.value })}
+                                placeholder="e.g. interested"
+                              />
+                            </div>
+                            <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
+                              Checks the result returned by the last sub-workflow&rsquo;s <strong>Return</strong> box
+                              (e.g. a pitch phase returning <strong>interested</strong>). Green <strong>Then</strong> dot
+                              for a match, red <strong>Else</strong> dot for everything else.
+                            </p>
+                          </>
+                        )}
                       </>
                     )}
 
