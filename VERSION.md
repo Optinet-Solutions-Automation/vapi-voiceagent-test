@@ -46,6 +46,21 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
   ("they agree — yes, sure, text me"); Save creates a speak-nothing *Reply
   detector* entry the router matches against. Matching an existing scenario
   moved under Advanced, grouped by purpose.
+- **Complete palette** — Send SMS, Transfer to human, and Return result are
+  now draggable boxes (they existed in the runtime but not the palette, so
+  phases weren't buildable by hand). SMS and Transfer boxes get inline line
+  editors like Scenario boxes.
+- **Result dropdown** — an If/Else on a sub-workflow result now offers the
+  results actually declared by the connected phase's Return boxes, instead of
+  free text on both ends (where one typo silently meant "always Else").
+- **Save-time checks** — saving a script lists non-blocking warnings: boxes
+  with no line, If/Else with a missing Then/Else arrow or no condition, Loop
+  without Repeat/Exit, unpicked workflows/collections, unconnected boxes.
+- **Presentation demos** — `scripts/seed-demo-basic.mjs` seeds "Demo — Basic
+  Welcome Call" (one screen, seven boxes: offer → yes? → text link → goodbye
+  with one nudge) for a first demo; "Sales Call — Phased (example)" is the
+  complete showcase, now with a real Send SMS box in the Close phase and a
+  "wants a human?" branch to a Transfer box in the Pitch phase.
 - **Real-world edge cases** — `scripts/seed-edge-cases.mjs` seeds the messy
   replies actual calls get ("Who is this?", "Where did you get my number?",
   "Is this a scam?", "Are you a robot?", "I never signed up", "Stop calling

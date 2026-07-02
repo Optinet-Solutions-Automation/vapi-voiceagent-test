@@ -119,6 +119,32 @@ const scenarios = [
     priority: 17,
     mode: "both",
   },
+  // Matcher-only "expected reply" (never spoken): the pitch phase branches to
+  // a human transfer when this fires.
+  {
+    name: "Expected reply — wants a human",
+    intent_key: "edge_want_human",
+    tags: ["Phased Samples", "Reply detector"],
+    description:
+      "Customer asks to speak to a real person, a human agent, a representative, or a manager.",
+    response_template: "",
+    action_type: "ignore",
+    delivery: "verbatim",
+    priority: 27,
+    mode: "listener",
+  },
+  {
+    name: "Pitch — transfer to colleague",
+    intent_key: "pitch_transfer_line",
+    tags: ["Phased Samples"],
+    description: "Line spoken while transferring the customer to a human colleague.",
+    response_template:
+      "Of course — let me connect you with one of my colleagues right now. One moment please.",
+    action_type: "answer",
+    delivery: "verbatim",
+    priority: 28,
+    mode: "both",
+  },
 ];
 
 const { data: existing } = await sb.from("listener_handlers").select("id, intent_key");
@@ -207,32 +233,37 @@ const openingId = await getOrCreateScript(
 }
 
 // ── 4. Phase — Pitch & Redirect ───────────────────────────────
-// Pitch → said yes? → return interested; otherwise answer & redirect back to
-// the purpose, loop up to 2 more tries, then return declined.
+// Pitch → said yes? → return interested; wants a human? → transfer; otherwise
+// answer & redirect back to the purpose, loop up to 2 more tries, then
+// return declined.
 const pitchId = await getOrCreateScript(
   "Phase — Pitch & Redirect",
-  "Reusable pitch phase with redirect-to-purpose loop. Returns interested | declined."
+  "Reusable pitch phase with redirect-to-purpose loop and human escalation. Returns interested | declined."
 );
 {
   const pitch = step("Give the pitch", { contentType: "scenario", candidateScenarioIds: [scn("promo_busy")] }, scn("pitch_offer"), 272, 32);
   const saidYes = step("Said yes to the text?", { contentType: "ifelse", condBy: "intent", condValue: "promo_sms_yes" }, null, 272, 192);
-  const retYes = step("Return: interested", { contentType: "return", resultName: "interested" }, null, 80, 352);
+  const retYes = step("Return: interested", { contentType: "return", resultName: "interested" }, null, 48, 352);
+  const wantsHuman = step("Wants a human?", { contentType: "ifelse", condBy: "intent", condValue: "edge_want_human" }, null, 464, 352);
+  const transfer = step("Hand off to colleague", { contentType: "transfer", number: "+15550100000" }, scn("pitch_transfer_line"), 688, 496);
   const redirect = step(
     "Answer & redirect to purpose",
     { contentType: "scenario", candidateScenarioIds: [scn("promo_not_interested"), scn("promo_busy"), scn("promo_price_question"), scn("promo_how_claim")] },
     scn("pitch_redirect"),
-    464,
-    352
+    336,
+    496
   );
-  const tries = step("Up to 2 more tries", { contentType: "loop", maxLoops: 2 }, null, 464, 512);
-  const retNo = step("Return: declined", { contentType: "return", resultName: "declined" }, null, 272, 656);
+  const tries = step("Up to 2 more tries", { contentType: "loop", maxLoops: 2 }, null, 336, 640);
+  const retNo = step("Return: declined", { contentType: "return", resultName: "declined" }, null, 128, 768);
   await rebuild(
     pitchId,
-    [pitch, saidYes, retYes, redirect, tries, retNo],
+    [pitch, saidYes, retYes, wantsHuman, transfer, redirect, tries, retNo],
     [
       edge(pitch, saidYes),
       edge(saidYes, retYes, "then", "Then"),
-      edge(saidYes, redirect, "else", "Else"),
+      edge(saidYes, wantsHuman, "else", "Else"),
+      edge(wantsHuman, transfer, "then", "Then"),
+      edge(wantsHuman, redirect, "else", "Else"),
       edge(redirect, tries),
       edge(tries, saidYes, "loop", "Repeat"),
       edge(tries, retNo, "exit", "Exit"),
@@ -243,10 +274,10 @@ const pitchId = await getOrCreateScript(
 // ── 5. Phase — Close & Send Link ──────────────────────────────
 const closeId = await getOrCreateScript(
   "Phase — Close & Send Link",
-  "Reusable close phase: confirms the SMS is on its way. Returns done."
+  "Reusable close phase: sends the SMS and confirms. Returns done."
 );
 {
-  const send = step("Send the link", { contentType: "scenario" }, scn("promo_sms_yes"), 272, 32);
+  const send = step("Send the link", { contentType: "send_sms" }, scn("promo_sms_yes"), 272, 32);
   const retDone = step("Return: done", { contentType: "return", resultName: "done" }, null, 272, 192);
   await rebuild(closeId, [send, retDone], [edge(send, retDone)]);
 }

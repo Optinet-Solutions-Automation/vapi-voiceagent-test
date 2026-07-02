@@ -182,9 +182,12 @@ function normalizeCondition(c: Record<string, unknown> | undefined): EdgeCond {
 
 type Props = { onClose: () => void; initialScriptId?: string | null };
 
-// Inline-authored line for a Scenario/End box — the scenario is created or
-// updated in the Playbook automatically when the script is saved.
+// Inline-authored line for a box — the scenario is created or updated in the
+// Playbook automatically when the script is saved.
 type LineDraft = { text: string; delivery: ListenerHandler["delivery"]; hint: string };
+
+// Box types whose spoken line is authored inline.
+const LINE_CONTENT: Content[] = ["scenario", "end", "send_sms", "transfer"];
 
 export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [scripts, setScripts] = useState<ListenerScript[]>([]);
@@ -206,6 +209,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [lineDrafts, setLineDrafts] = useState<Record<string, LineDraft>>({});
   // Plain-language "expected reply" drafts for If/Else boxes, keyed by node id.
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  // Non-blocking issues found at save time.
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   // Keep the editable title in sync with the loaded script.
   useEffect(() => {
@@ -259,6 +264,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (c === "scenario") return scenarioLine(d.scenarioId) ? `“${scenarioLine(d.scenarioId)}”` : "(click to write the line)";
     if (c === "collection") return collectionName(d.config.collectionId as string) ? `▣ ${collectionName(d.config.collectionId as string)}` : "(pick a collection)";
     if (c === "subworkflow") return scriptName(d.config.subworkflowId as string) ? `⤳ ${scriptName(d.config.subworkflowId as string)}` : "(pick a workflow)";
+    if (c === "send_sms") return scenarioLine(d.scenarioId) ? `“${scenarioLine(d.scenarioId)}”` : "(click to write the confirmation)";
     if (c === "transfer") return (d.config.number as string) || "(phone number)";
     if (c === "return") return `↩ ${(d.config.resultName as string) || "result"}`;
     if (c === "ifelse") {
@@ -284,9 +290,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       const scn = scenarios.find((s) => s.intent_key === ((d.config.condValue as string) ?? ""));
       return scn?.description ? snip(`Then when: ${scn.description}`, 72) : null;
     }
-    if (c !== "scenario" && c !== "end") return null;
+    if (!LINE_CONTENT.includes(c)) return null;
     const s = d.scenarioId ? scenarios.find((x) => x.id === d.scenarioId) : undefined;
-    const t = (s?.description ?? "").trim();
+    const t = c === "transfer" ? (s?.response_template ?? "").trim() : (s?.description ?? "").trim();
     return t ? snip(t, 64) : null;
   }
   function annotate(d: NodeData): NodeData {
@@ -355,6 +361,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setSelEdgeId(null);
     setLineDrafts({});
     setReplyDrafts({});
+    setWarnings([]);
     try {
       const { rfNodes, rfEdges } = graphToFlow(await getScriptGraph(id));
       setNodes(rfNodes);
@@ -486,6 +493,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     { payload: "wait", label: "Wait", cls: "border-sky-500 bg-sky-500/10" },
     { payload: "ifelse", label: "If / Else", cls: "border-yellow-500 bg-yellow-500/10" },
     { payload: "loop", label: "Loop", cls: "border-amber-500 bg-amber-500/10" },
+    { payload: "send_sms", label: "Send SMS", cls: "border-amber-500 bg-amber-500/10" },
+    { payload: "transfer", label: "Transfer to human", cls: "border-orange-500 bg-orange-500/10" },
+    { payload: "return", label: "Return result", cls: "border-lime-500 bg-lime-500/10" },
     { payload: "end", label: "End call", cls: "border-rose-500 bg-rose-500/10" },
   ];
 
@@ -583,16 +593,16 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         continue;
       }
 
-      if (ct !== "scenario" && ct !== "end") continue;
+      if (!LINE_CONTENT.includes(ct)) continue;
       const draft = lineDrafts[n.id];
       if (!draft) continue; // untouched box
       const text = draft.text.trim();
       if (!text) continue; // never wipe a line via an emptied box
+      const delivery = ct === "scenario" ? draft.delivery : "verbatim";
       if (d.scenarioId) {
         const scn = scenarios.find((s) => s.id === d.scenarioId);
         if (!scn) continue;
         const hint = draft.hint.trim();
-        const delivery = ct === "end" ? "verbatim" : draft.delivery;
         if (text === scn.response_template && delivery === scn.delivery && hint === (scn.description ?? "").trim()) continue;
         await updateHandler(d.scenarioId, {
           response_template: text,
@@ -606,8 +616,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           intent_key: makeKey(label),
           description: draft.hint.trim() || `Step "${label}" of the "${scriptNm}" script.`,
           response_template: text,
-          action_type: ct === "end" ? "end_call" : "answer",
-          delivery: ct === "end" ? "verbatim" : draft.delivery,
+          action_type: ct === "end" ? "end_call" : ct === "send_sms" ? "send_sms" : "answer",
+          delivery,
           tags: [scriptNm],
           mode: "both",
           priority: 100,
@@ -617,6 +627,47 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       }
     }
     return { created, replies };
+  }
+
+  // Non-blocking sanity checks a CRM user would otherwise discover mid-call.
+  function validateGraph(): string[] {
+    const w: string[] = [];
+    const outsOf = (id: string) => edges.filter((e) => e.source === id);
+    const handleOf = (e: Edge) =>
+      ((e.data as { condition?: { handle?: string } })?.condition?.handle ?? e.sourceHandle ?? "out") as string;
+    const targeted = new Set(edges.map((e) => e.target));
+    for (const n of nodes) {
+      const d = n.data as NodeData;
+      if (d.kind === "start") continue;
+      const label = d.label || "Box";
+      const ct = (d.config.contentType as Content) ?? "scenario";
+      if (ct === "scenario" && !d.scenarioId && !(lineDrafts[n.id]?.text ?? "").trim())
+        w.push(`“${label}” has no line to speak.`);
+      if (ct === "subworkflow" && !d.config.subworkflowId) w.push(`“${label}” has no workflow picked.`);
+      if (ct === "transfer" && !((d.config.number as string) ?? "").trim()) w.push(`“${label}” has no phone number.`);
+      if (ct === "collection" && !d.config.collectionId) w.push(`“${label}” has no collection picked.`);
+      if (ct === "ifelse") {
+        const outs = outsOf(n.id);
+        if (!outs.some((e) => handleOf(e) === "then")) w.push(`“${label}” has no Then arrow.`);
+        if (!outs.some((e) => handleOf(e) === "else")) w.push(`“${label}” has no Else arrow — unmatched replies would stall there.`);
+        const by = (d.config.condBy as string) ?? "intent";
+        const val = ((d.config.condValue as string) ?? "").trim();
+        if (by === "result" && !val) w.push(`“${label}” has no result value set.`);
+        if (by !== "result" && !val && !(replyDrafts[n.id] ?? "").trim()) w.push(`“${label}” has no expected reply set.`);
+      }
+      if (ct === "loop") {
+        const outs = outsOf(n.id);
+        if (!outs.some((e) => handleOf(e) === "loop")) w.push(`“${label}” has no Repeat arrow.`);
+        if (!outs.some((e) => handleOf(e) === "exit")) w.push(`“${label}” has no Exit arrow.`);
+      }
+    }
+    // Exactly one entry point is expected: the Start box, or (in a phase
+    // sub-workflow without one) a single unconnected first box.
+    const hasStart = nodes.some((n) => (n.data as NodeData).kind === "start");
+    const loose = nodes.filter((n) => (n.data as NodeData).kind !== "start" && !targeted.has(n.id)).length;
+    const allowed = hasStart ? 0 : 1;
+    if (loose > allowed) w.push(`${loose - allowed} box(es) are not connected to the flow and will never run.`);
+    return w;
   }
 
   async function handleSave() {
@@ -633,11 +684,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       };
       const nodeRows = nodes.map((n) => {
         const d = n.data as NodeData;
-        const ct = (d.config.contentType ?? "scenario") as string;
+        const ct = (d.config.contentType ?? "scenario") as Content;
         return {
           id: n.id,
           type: d.kind, // 'start' | 'step'
-          scenario_id: ct === "scenario" || ct === "end" ? scenarioIdFor(n) : null,
+          scenario_id: LINE_CONTENT.includes(ct) ? scenarioIdFor(n) : null,
           label: d.label,
           config: configFor(n),
           pos_x: n.position.x,
@@ -669,10 +720,12 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           })
         );
       }
+      const found = validateGraph();
+      setWarnings(found);
       setScenarios(await listHandlers());
       setLineDrafts({});
       setReplyDrafts({});
-      setNotice("Script saved.");
+      setNotice(found.length ? `Saved — ${found.length} thing${found.length > 1 ? "s" : ""} to check.` : "Script saved.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save");
     } finally {
@@ -717,7 +770,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     };
   }
   const draft =
-    selNode && sd && sd.kind === "step" && (content === "scenario" || content === "end")
+    selNode && sd && sd.kind === "step" && LINE_CONTENT.includes(content)
       ? lineDrafts[selNode.id] ?? seedDraft(sd)
       : null;
   function patchDraft(nodeId: string, base: LineDraft, patch: Partial<LineDraft>) {
@@ -743,6 +796,43 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       return next;
     });
   }
+
+  // If/Else on result: offer the results actually declared by the Return
+  // boxes of whichever sub-workflow(s) feed this box, instead of free text.
+  const [subResults, setSubResults] = useState<Record<string, string[]>>({});
+  const feedingSubIds = useMemo(() => {
+    if (!selNode || content !== "ifelse") return [] as string[];
+    const ids = edges
+      .filter((e) => e.target === selNode.id)
+      .map((e) => nodes.find((n) => n.id === e.source))
+      .map((n) => (n ? (n.data as NodeData) : null))
+      .filter((d): d is NodeData => !!d && (d.config.contentType as Content) === "subworkflow")
+      .map((d) => d.config.subworkflowId as string | undefined)
+      .filter((x): x is string => !!x);
+    return Array.from(new Set(ids));
+  }, [selNode, content, edges, nodes]);
+  useEffect(() => {
+    feedingSubIds
+      .filter((id) => !(id in subResults))
+      .forEach(async (id) => {
+        try {
+          const g = await getScriptGraph(id);
+          const results = Array.from(
+            new Set(
+              g.nodes
+                .filter((n) => ((n.config as Record<string, unknown>)?.contentType as string) === "return")
+                .map((n) => ((((n.config as Record<string, unknown>)?.resultName as string) || n.label || "done") + "").trim())
+                .filter(Boolean)
+            )
+          );
+          setSubResults((m) => ({ ...m, [id]: results }));
+        } catch {
+          setSubResults((m) => ({ ...m, [id]: [] }));
+        }
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedingSubIds]);
+  const resultOptions = Array.from(new Set(feedingSubIds.flatMap((id) => subResults[id] ?? [])));
 
   // If/Else "expected reply": the scenario the condition currently points at,
   // and the plain-language draft describing what counts as a match.
@@ -827,6 +917,22 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Save-time warnings (non-blocking) */}
+      {warnings.length > 0 && (
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-300">
+          <div className="flex items-start justify-between gap-3">
+            <ul className="list-disc space-y-0.5 pl-5">
+              {warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+            <button onClick={() => setWarnings([])} className="shrink-0 text-amber-400/70 hover:text-amber-200">
+              dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         {/* Palette */}
@@ -1094,11 +1200,60 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                       </div>
                     )}
 
-                    {content === "transfer" && (
-                      <div>
-                        <label className="mb-1 block text-xs text-gray-400">Transfer to (phone number)</label>
-                        <input className={inputCls} value={(sd.config.number as string) ?? ""} onChange={(e) => patchConfig(selNode.id, { number: e.target.value })} placeholder="+1..." />
-                      </div>
+                    {content === "send_sms" && draft && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">Confirmation line <span className="text-gray-600">(spoken as the text is sent)</span></label>
+                          <textarea
+                            className={inputCls + " min-h-[80px] resize-y"}
+                            value={draft.text}
+                            onChange={(e) => patchDraft(selNode.id, draft, { text: e.target.value })}
+                            placeholder="e.g. Perfect — I'm texting you the link right now."
+                          />
+                          <p className="mt-1 text-[10px] text-gray-600">
+                            In the lab the SMS is logged, not actually sent.
+                          </p>
+                        </div>
+                        <details className="rounded-lg border border-gray-800">
+                          <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-300">
+                            Advanced
+                          </summary>
+                          <div className="p-2.5">
+                            <label className="mb-1 block text-xs text-gray-400">Reuse an existing line</label>
+                            <select
+                              className={inputCls + " [color-scheme:dark]"}
+                              value={sd.scenarioId ?? ""}
+                              onChange={(e) => pickScenario(selNode.id, e.target.value || null)}
+                            >
+                              <option value="">(new line for this box)</option>
+                              {scenarios.filter((s) => s.action_type !== "ignore").map((s) => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </details>
+                      </>
+                    )}
+
+                    {content === "transfer" && draft && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">Transfer to (phone number)</label>
+                          <input className={inputCls} value={(sd.config.number as string) ?? ""} onChange={(e) => patchConfig(selNode.id, { number: e.target.value })} placeholder="+1..." />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">Line to say while transferring</label>
+                          <textarea
+                            className={inputCls + " min-h-[70px] resize-y"}
+                            value={draft.text}
+                            onChange={(e) => patchDraft(selNode.id, draft, { text: e.target.value })}
+                            placeholder="e.g. Of course — connecting you with a colleague now, one moment."
+                          />
+                          <p className="mt-1 text-[10px] text-gray-600">
+                            Lab note: the line is spoken, but the actual call transfer isn&rsquo;t wired up yet.
+                          </p>
+                        </div>
+                      </>
                     )}
 
                     {content === "wait" && (
@@ -1192,12 +1347,33 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                           <>
                             <div>
                               <label className="mb-1 block text-xs text-gray-400">If the result equals</label>
-                              <input
-                                className={inputCls}
-                                value={(sd.config.condValue as string) ?? ""}
-                                onChange={(e) => patchConfig(selNode.id, { condBy: "result", condValue: e.target.value })}
-                                placeholder="e.g. interested"
-                              />
+                              {resultOptions.length > 0 ? (
+                                <select
+                                  className={inputCls + " [color-scheme:dark]"}
+                                  value={(sd.config.condValue as string) ?? ""}
+                                  onChange={(e) => patchConfig(selNode.id, { condBy: "result", condValue: e.target.value })}
+                                >
+                                  <option value="">(pick a result)</option>
+                                  {resultOptions.map((r) => (
+                                    <option key={r} value={r}>{r}</option>
+                                  ))}
+                                  {!!(sd.config.condValue as string) && !resultOptions.includes(sd.config.condValue as string) && (
+                                    <option value={sd.config.condValue as string}>{sd.config.condValue as string} (custom)</option>
+                                  )}
+                                </select>
+                              ) : (
+                                <>
+                                  <input
+                                    className={inputCls}
+                                    value={(sd.config.condValue as string) ?? ""}
+                                    onChange={(e) => patchConfig(selNode.id, { condBy: "result", condValue: e.target.value })}
+                                    placeholder="e.g. interested"
+                                  />
+                                  <p className="mt-1 text-[10px] text-gray-600">
+                                    Connect this box after a Sub-workflow to pick from its declared results.
+                                  </p>
+                                </>
+                              )}
                             </div>
                             <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
                               Checks the result returned by the last sub-workflow&rsquo;s <strong>Return</strong> box
