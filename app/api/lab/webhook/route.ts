@@ -383,6 +383,7 @@ async function handleTranscript(
         controlUrlHint,
         settings.active_script_id,
         cls.intent,
+        utterance,
         utteranceAt,
         classifiedAt,
         reactiveCanHandle
@@ -480,6 +481,10 @@ async function handleTranscript(
     // verbatim → the agent speaks the line word-for-word (say);
     // reword → the line is a [STAFF] briefing the agent rephrases (add-message).
     const verbatim = handler.delivery === "verbatim";
+    // Ground the briefing in the customer's actual words so the reply connects
+    // to the conversation instead of reading like a recital.
+    const brief = (t: string) =>
+      `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
 
     if (handler.action_type === "end_call") {
       // Goodbyes are always spoken verbatim, then the call ends.
@@ -498,12 +503,12 @@ async function handleTranscript(
         "The SMS with the details is on its way. Confirm that to the customer.";
       injectResult = verbatim
         ? await injectSay(controlUrl, injectedText, false)
-        : await injectStaffNote(controlUrl, injectedText, settings.trigger_response);
+        : await injectStaffNote(controlUrl, brief(injectedText), settings.trigger_response);
     } else {
       // answer / give_offer
       injectResult = verbatim
         ? await injectSay(controlUrl, injectedText, false)
-        : await injectStaffNote(controlUrl, injectedText, settings.trigger_response);
+        : await injectStaffNote(controlUrl, brief(injectedText), settings.trigger_response);
     }
 
     const injectedAtMs = Date.now();
@@ -548,6 +553,7 @@ async function runScriptFlow(
   controlUrlHint: string | null,
   activeScriptId: string,
   intent: string,
+  utterance: string,
   utteranceAt: Date,
   classifiedAt: number,
   reactiveCanHandle: boolean
@@ -762,10 +768,14 @@ async function runScriptFlow(
     currentNodeId = target.id;
     let injectedText = "";
     const controlUrl = await ctl();
+    // Ground briefings in the customer's actual words — the step should feel
+    // like a reply to them, not a recital of the next script line.
+    const brief = (t: string) =>
+      `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
 
     if (ct === "send_sms") {
       injectedText = scenario?.response_template || "The SMS with the details is on its way. Confirm that to the customer.";
-      if (controlUrl) await injectStaffNote(controlUrl, injectedText, true);
+      if (controlUrl) await injectStaffNote(controlUrl, brief(injectedText), true);
     } else if (ct === "transfer") {
       injectedText = scenario?.response_template || "Thanks — let me connect you to one of our team now.";
       if (controlUrl) await injectSay(controlUrl, injectedText, false);
@@ -774,7 +784,7 @@ async function runScriptFlow(
       if (controlUrl)
         scenario.delivery === "verbatim"
           ? await injectSay(controlUrl, injectedText, false)
-          : await injectStaffNote(controlUrl, injectedText, true);
+          : await injectStaffNote(controlUrl, brief(injectedText), true);
     }
 
     note(injectedText, target, ct, edgeCond, scenario?.id ?? null);

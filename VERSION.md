@@ -73,6 +73,13 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Engagement, not recital** — configuring an assistant now sets an idle
+  plan (up to two natural "still with me?" re-engagements after 8s of
+  silence — the listener loop is transcript-driven, so silence otherwise
+  meant nothing ever happened). Every "gist" briefing is grounded in the
+  customer's actual words ("The customer just said … react to that first"),
+  and the demo persona gained an [Engagement] section: mirror their words,
+  never repeat a sentence, bridge to supplied lines instead of reciting them.
 - **Reactive/script collision fixes** (from a live test call): SMS
   confirmations are flow steps — when a script is active the reactive layer
   never speaks one out of order (a misclassified "yes, sure" used to trigger

@@ -58,6 +58,18 @@ export async function POST(req: Request) {
       "end-of-call-report",
     ],
     monitorPlan: { listenEnabled: true, controlEnabled: true },
+    // Dead-air plan: the whole listener loop is transcript-driven, so customer
+    // silence otherwise means nothing ever happens. These re-engage naturally,
+    // at most twice, without sounding like a stuck record.
+    messagePlan: {
+      idleMessages: [
+        "Take your time — I'm still here.",
+        "Are you still with me?",
+        "No pressure — want me to go over that again?",
+      ],
+      idleTimeoutSeconds: 8,
+      idleMessageMaxSpokenCount: 2,
+    },
   };
 
   const patchRes = await fetch(`${VAPI_BASE}/assistant/${assistantId}`, {
