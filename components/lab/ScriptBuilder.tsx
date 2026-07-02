@@ -259,7 +259,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   );
 
   function subtitleFor(d: NodeData): string | null {
-    if (d.kind === "start") return (d.config.mode as string) === "wait_for_customer" ? "waits for caller" : "agent opens";
+    if (d.kind === "start") {
+      if ((d.config.mode as string) === "wait_for_customer") return "waits for caller";
+      const op = ((d.config.opening as string) ?? "").trim();
+      return op ? `“${snip(op, 42)}”` : "agent opens";
+    }
     const c = (d.config.contentType as Content) ?? "scenario";
     if (c === "scenario") return scenarioLine(d.scenarioId) ? `“${scenarioLine(d.scenarioId)}”` : "(click to write the line)";
     if (c === "collection") return collectionName(d.config.collectionId as string) ? `▣ ${collectionName(d.config.collectionId as string)}` : "(pick a collection)";
@@ -1023,17 +1027,36 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 </div>
 
                 {sd.kind === "start" && (
-                  <div>
-                    <label className="mb-1 block text-xs text-gray-400">Opening mode</label>
-                    <select
-                      className={inputCls + " [color-scheme:dark]"}
-                      value={(sd.config.mode as string) ?? "agent_first"}
-                      onChange={(e) => patchConfig(selNode.id, { mode: e.target.value })}
-                    >
-                      <option value="agent_first">Agent speaks first</option>
-                      <option value="wait_for_customer">Wait for the customer to speak</option>
-                    </select>
-                  </div>
+                  <>
+                    <div>
+                      <label className="mb-1 block text-xs text-gray-400">Opening mode</label>
+                      <select
+                        className={inputCls + " [color-scheme:dark]"}
+                        value={(sd.config.mode as string) ?? "agent_first"}
+                        onChange={(e) => patchConfig(selNode.id, { mode: e.target.value })}
+                      >
+                        <option value="agent_first">Agent speaks first</option>
+                        <option value="wait_for_customer">Wait for the customer to speak</option>
+                      </select>
+                    </div>
+                    {((sd.config.mode as string) ?? "agent_first") === "agent_first" && (
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-400">
+                          Opening line <span className="text-gray-600">(this script&rsquo;s own)</span>
+                        </label>
+                        <textarea
+                          className={inputCls + " min-h-[80px] resize-y"}
+                          value={(sd.config.opening as string) ?? ""}
+                          onChange={(e) => patchConfig(selNode.id, { opening: e.target.value })}
+                          placeholder="e.g. Hi {{name}}! This is Alex from the customer team — quick welcome call. Got a moment?"
+                        />
+                        <p className="mt-1 text-[10px] text-gray-600">
+                          Spoken as the very first thing on the call — overrides the global &ldquo;First
+                          Message&rdquo; scenario. Use {"{{name}}"} for the client&rsquo;s name.
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {sd.kind === "step" && (

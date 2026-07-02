@@ -317,7 +317,19 @@ const remindId = await getOrCreateScript(
 // ── 7. Masters: compose the phases ────────────────────────────
 async function buildMaster(name, description, middlePhaseId, middleLabel) {
   const id = await getOrCreateScript(name, description);
-  const start = { id: randomUUID(), type: "start", scenario_id: null, label: "Start call", config: { mode: "agent_first" }, pos_x: 272, pos_y: 16 };
+  const start = {
+    id: randomUUID(),
+    type: "start",
+    scenario_id: null,
+    label: "Start call",
+    config: {
+      mode: "agent_first",
+      opening:
+        "Hi {{name}}, this is Alex from the customer team. You created an account with us this week and there's a small welcome gift waiting on it — do you have thirty seconds?",
+    },
+    pos_x: 272,
+    pos_y: 16,
+  };
   const opening = step("Phase 1 — Opening & Identity", { contentType: "subworkflow", subworkflowId: openingId }, null, 272, 128);
   const confirmed = step("Confirmed it's them?", { contentType: "ifelse", condBy: "result", condValue: "confirmed" }, null, 272, 256);
   const wrongEnd = step("Wrap up — wrong person", { contentType: "end" }, scn("open_wrong_goodbye"), 64, 400);

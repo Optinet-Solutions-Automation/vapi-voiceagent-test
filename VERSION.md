@@ -61,6 +61,18 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
   with one nudge) for a first demo; "Sales Call — Phased (example)" is the
   complete showcase, now with a real Send SMS box in the Close phase and a
   "wants a human?" branch to a Transfer box in the Pitch phase.
+- **The script owns the call** — while a script is active, the assistant's
+  `get_offer` / `send_sms` tools no longer free-lance (previously the agent
+  could pull another campaign's offer and speak it right before the script's
+  own pitch — two competing offers in one call).
+- **Per-script opening line** — the Start box has an "Opening line" editor;
+  test calls use it as the first message (falling back to the global
+  first_message scenario). Demo scripts ship with their own openings, and
+  `scripts/seed-demo-campaign-setup.mjs` switches the lab persona/collection/
+  script to the welcome campaign in one command (then Save Configuration once).
+- **Injection latency** — the webhook's transcript hot path now runs its
+  independent reads in parallel (recent turns, settings, handlers, cooldown,
+  flow state) instead of sequentially.
 - **Real-world edge cases** — `scripts/seed-edge-cases.mjs` seeds the messy
   replies actual calls get ("Who is this?", "Where did you get my number?",
   "Is this a scam?", "Are you a robot?", "I never signed up", "Stop calling

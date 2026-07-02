@@ -154,6 +154,7 @@ async function handleToolCalls(
 
   let handlers: ListenerHandler[] = [];
   let routerModel = "gpt-5.4-mini";
+  let activeScriptId: string | null = null;
   try {
     const [hs, settings] = await Promise.all([listHandlers(), getLabSettings()]);
     handlers = hs.filter(
@@ -164,6 +165,7 @@ async function handleToolCalls(
     );
     handlers = await scopeToActiveCollection(handlers, settings?.active_collection_id);
     if (settings?.router_model) routerModel = settings.router_model;
+    activeScriptId = settings?.active_script_id ?? null;
   } catch (e) {
     console.error("[lab webhook] failed to load handlers/settings:", e);
   }
@@ -197,24 +199,36 @@ async function handleToolCalls(
           }
         }
       } else if (name === "get_offer") {
-        const offer = handlers
-          .filter((h) => h.action_type === "give_offer")
-          .sort((a, b) => a.priority - b.priority)[0];
-        if (offer) {
-          result = offer.response_template || "No offer configured.";
-          handlerId = offer.id;
-          actionType = offer.action_type;
+        if (activeScriptId) {
+          // A script drives this call — the offer is a flow step, and letting
+          // the agent pull an arbitrary offer here means two competing pitches.
+          result =
+            "The offer is delivered to you automatically at the right step of this call. Do not present an offer on your own — briefly acknowledge and let the conversation continue.";
         } else {
-          result = "No current offer configured. Steer the conversation politely.";
+          const offer = handlers
+            .filter((h) => h.action_type === "give_offer")
+            .sort((a, b) => a.priority - b.priority)[0];
+          if (offer) {
+            result = offer.response_template || "No offer configured.";
+            handlerId = offer.id;
+            actionType = offer.action_type;
+          } else {
+            result = "No current offer configured. Steer the conversation politely.";
+          }
         }
       } else if (name === "send_sms") {
-        const smsHandler = handlers
-          .filter((h) => h.action_type === "send_sms")
-          .sort((a, b) => a.priority - b.priority)[0];
-        handlerId = smsHandler?.id ?? null;
-        actionType = "send_sms";
-        // Lab only logs the SMS — no real send.
-        result = "SMS queued successfully. Tell the customer it has been sent.";
+        if (activeScriptId) {
+          result =
+            "The text message is handled automatically at the right step of this call. Do not announce an SMS on your own — your confirmation line will be supplied.";
+        } else {
+          const smsHandler = handlers
+            .filter((h) => h.action_type === "send_sms")
+            .sort((a, b) => a.priority - b.priority)[0];
+          handlerId = smsHandler?.id ?? null;
+          actionType = "send_sms";
+          // Lab only logs the SMS — no real send.
+          result = "SMS queued successfully. Tell the customer it has been sent.";
+        }
       } else if (name === "end_call_goodbye") {
         actionType = "end_call";
         result = "Say a brief, warm goodbye now.";
@@ -267,9 +281,16 @@ async function handleTranscript(
   const utteranceAt =
     typeof message.timestamp === "number" ? new Date(message.timestamp) : new Date(receivedAt);
 
-  // Grab prior turns BEFORE logging this one, so the router classifies the
+  // Kick off every independent read at once — injection latency is customer-
+  // audible dead air, so the hot path can't afford sequential roundtrips.
+  const recentTurnsP = getRecentTurns(callId, 6).catch(() => []);
+  const settingsP = getLabSettings();
+  const handlersP = listHandlers();
+  const lastInjectedP = getLastInjectedEvent(callId).catch(() => null);
+
+  // Prior turns are read BEFORE logging this one, so the router classifies the
   // utterance in conversational context (prevents keyword-only mismatches).
-  const recentTurns = await getRecentTurns(callId, 6).catch(() => []);
+  const recentTurns = await recentTurnsP;
 
   await log({
     call_id: callId,
@@ -282,9 +303,8 @@ async function handleTranscript(
   let settings;
   let handlers: ListenerHandler[] = [];
   try {
-    const [s, hs] = await Promise.all([getLabSettings(), listHandlers()]);
-    settings = s;
-    handlers = hs.filter(
+    settings = await settingsP;
+    handlers = (await handlersP).filter(
       (h) =>
         h.enabled &&
         h.intent_key !== "first_message" && // special: opening line, never routed
@@ -313,7 +333,7 @@ async function handleTranscript(
 
   // Cooldown: don't whisper twice in rapid succession
   try {
-    const last = await getLastInjectedEvent(callId);
+    const last = await lastInjectedP;
     if (last?.injected_at) {
       const elapsed = receivedAt - new Date(last.injected_at).getTime();
       if (elapsed < settings.injection_cooldown_ms) {
@@ -508,12 +528,13 @@ async function runScriptFlow(
   classifiedAt: number,
   reactiveCanHandle: boolean
 ): Promise<boolean> {
-  const allHandlers = await listHandlers();
+  const [allHandlers, state] = await Promise.all([
+    listHandlers(),
+    getFlowState(callId).catch(() => null),
+  ]);
   const handlerById = (id: string | null | undefined) =>
     id ? allHandlers.find((h) => h.id === id) ?? null : null;
   const intentTags = allHandlers.find((h) => h.intent_key === intent)?.tags ?? [];
-
-  const state = await getFlowState(callId).catch(() => null);
   let currentScriptId = state?.script_id ?? activeScriptId;
   const variables: Record<string, unknown> = { ...((state?.variables as Record<string, unknown>) ?? {}) };
   if (!Array.isArray(variables.__stack)) variables.__stack = [] as Frame[];

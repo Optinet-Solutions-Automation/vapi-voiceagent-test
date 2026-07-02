@@ -59,7 +59,18 @@ const node = (label, type, config, scenario_id, pos_x, pos_y) => ({
   pos_x,
   pos_y,
 });
-const start = node("Start call", "start", { mode: "agent_first" }, null, 272, 16);
+const start = node(
+  "Start call",
+  "start",
+  {
+    mode: "agent_first",
+    opening:
+      "Hi {{name}}! This is Alex from the customer team. You signed up with us earlier this week, so I'm just giving you a quick welcome call — have I caught you at an okay moment?",
+  },
+  null,
+  272,
+  16
+);
 const offer = node(
   "Offer the welcome promo",
   "step",

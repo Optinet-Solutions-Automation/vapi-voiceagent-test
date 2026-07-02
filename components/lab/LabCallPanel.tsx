@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getVapi, vapiErrorText as errText, isBenignCallEnd } from "@/lib/vapi";
 import { AgentState, TranscriptMessage } from "@/lib/types";
-import { listHandlers } from "@/lib/lab-db";
+import { listHandlers, getLabSettings, getScriptGraph } from "@/lib/lab-db";
 import StatusIndicator from "@/components/StatusIndicator";
 import TranscriptPanel from "@/components/TranscriptPanel";
 
@@ -82,14 +82,26 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
       if (!vapi) return;
       localStorage.setItem("lab_client_name", clientName);
 
-      // The opening line lives in the Organizer (intent_key "first_message")
-      // so it's editable like any other handler; {{name}} is personalized here.
+      // Opening line: the active script's Start box wins (per-campaign
+      // opening); otherwise the global "first_message" scenario. {{name}} is
+      // personalized here.
       let overrides: Record<string, unknown> | undefined;
       try {
-        const handlers = await listHandlers();
-        const fm = handlers.find((h) => h.intent_key === "first_message" && h.enabled);
-        if (fm?.response_template) {
-          const rendered = fm.response_template
+        let opening: string | null = null;
+        const settings = await getLabSettings().catch(() => null);
+        if (settings?.active_script_id) {
+          const g = await getScriptGraph(settings.active_script_id).catch(() => ({ nodes: [], edges: [] }));
+          const start = g.nodes.find((n) => n.type === "start");
+          const op = ((start?.config as Record<string, unknown>)?.opening as string | undefined)?.trim();
+          if (op) opening = op;
+        }
+        if (!opening) {
+          const handlers = await listHandlers();
+          const fm = handlers.find((h) => h.intent_key === "first_message" && h.enabled);
+          if (fm?.response_template) opening = fm.response_template;
+        }
+        if (opening) {
+          const rendered = opening
             .replace(/\{\{\s*name\s*\}\}/gi, clientName.trim() || "there")
             .replace(/\s{2,}/g, " ");
           overrides = { firstMessage: rendered, firstMessageMode: "assistant-speaks-first" };
