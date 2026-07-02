@@ -72,6 +72,12 @@ type NodeData = {
   config: Record<string, unknown>;
   // display helpers (not persisted directly)
   subtitle?: string | null;
+  note?: string | null;
+};
+
+const snip = (t: string, n: number) => {
+  const s = t.trim().replace(/\s+/g, " ");
+  return s.length > n ? s.slice(0, n) + "…" : s;
 };
 
 // Source handles a box exposes (id used as edge.sourceHandle for routing).
@@ -114,6 +120,7 @@ function FlowNode({ data, selected }: NodeProps) {
       <p className="text-[10px] font-bold uppercase tracking-wider text-gray-300">{meta.label}</p>
       <p className="truncate text-sm font-medium text-white">{d.label || meta.label}</p>
       {d.subtitle && <p className="mt-0.5 truncate text-[11px] text-gray-400">{d.subtitle}</p>}
+      {d.note && <p className="mt-0.5 line-clamp-2 text-[10px] italic text-gray-500">{d.note}</p>}
       {handles.map((h, i) => {
         const left = handles.length === 2 ? (i === 0 ? "30%" : "70%") : "50%";
         return (
@@ -262,6 +269,21 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     return null;
   }
 
+  // Scenario description shown on the box — says WHEN this line fires.
+  function noteFor(d: NodeData): string | null {
+    if (d.kind !== "step") return null;
+    const c = (d.config.contentType as Content) ?? "scenario";
+    if (c !== "scenario" && c !== "end") return null;
+    const s = d.scenarioId ? scenarios.find((x) => x.id === d.scenarioId) : undefined;
+    const t = (s?.description ?? "").trim();
+    return t ? snip(t, 64) : null;
+  }
+  function annotate(d: NodeData): NodeData {
+    d.subtitle = subtitleFor(d);
+    d.note = noteFor(d);
+    return d;
+  }
+
   useEffect(() => {
     (async () => {
       try {
@@ -284,9 +306,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Refresh node subtitles when reference data loads.
+  // Refresh node subtitles/notes when reference data loads.
   useEffect(() => {
-    setNodes((ns) => ns.map((n) => ({ ...n, data: { ...(n.data as NodeData), subtitle: subtitleFor(n.data as NodeData) } })));
+    setNodes((ns) => ns.map((n) => ({ ...n, data: annotate({ ...(n.data as NodeData) }) })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenarios, collections, scripts]);
 
@@ -296,7 +318,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       const cfg = (n.config ?? {}) as Record<string, unknown>;
       if (!isStart && !cfg.contentType) cfg.contentType = legacyToContent(n.type) ?? "scenario";
       const data: NodeData = { kind: isStart ? "start" : "step", label: n.label, scenarioId: n.scenario_id, config: cfg };
-      data.subtitle = subtitleFor(data);
+      annotate(data);
       return { id: n.id, type: "lab", position: { x: n.pos_x, y: n.pos_y }, data };
     });
     const rfEdges: Edge[] = g.edges.map((e) => {
@@ -412,7 +434,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   // ── Add / drag nodes ──
   function dropNode(data: NodeData, position?: { x: number; y: number }) {
     const id = crypto.randomUUID();
-    data.subtitle = subtitleFor(data);
+    annotate(data);
     setNodes((ns) => [...ns, { id, type: "lab", position: position ?? { x: 140 + ns.length * 30, y: 80 + ns.length * 30 }, data }]);
     setSelNodeId(id);
     setSelEdgeId(null);
@@ -459,8 +481,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setNodes((ns) =>
       ns.map((n) => {
         if (n.id !== id) return n;
-        const merged = { ...(n.data as NodeData), ...patch };
-        merged.subtitle = subtitleFor(merged);
+        const merged = annotate({ ...(n.data as NodeData), ...patch });
         return { ...n, data: merged };
       })
     );
@@ -470,8 +491,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       ns.map((n) => {
         if (n.id !== id) return n;
         const d = n.data as NodeData;
-        const merged = { ...d, config: { ...d.config, ...patch } };
-        merged.subtitle = subtitleFor(merged);
+        const merged = annotate({ ...d, config: { ...d.config, ...patch } });
         return { ...n, data: merged };
       })
     );
@@ -636,6 +656,17 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       : null;
   function patchDraft(nodeId: string, base: LineDraft, patch: Partial<LineDraft>) {
     setLineDrafts((m) => ({ ...m, [nodeId]: { ...(m[nodeId] ?? base), ...patch } }));
+    // Live-preview the line and description on the canvas box while typing.
+    const next = { ...base, ...patch };
+    setNodes((ns) =>
+      ns.map((n) => {
+        if (n.id !== nodeId) return n;
+        const d = { ...(n.data as NodeData) };
+        d.subtitle = next.text.trim() ? `“${snip(next.text, 42)}”` : subtitleFor(d);
+        d.note = next.hint.trim() ? snip(next.hint, 64) : null;
+        return { ...n, data: d };
+      })
+    );
   }
   // Switching the underlying scenario reseeds the draft from the new pick.
   function pickScenario(nodeId: string, scenarioId: string | null) {
@@ -853,7 +884,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                         </div>
                         <div>
                           <label className="mb-1 block text-xs text-gray-400">
-                            When does this fit? <span className="text-gray-600">(optional)</span>
+                            Description <span className="text-gray-600">(when does this fit?)</span>
                           </label>
                           <input
                             className={inputCls}
@@ -862,7 +893,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             placeholder="e.g. the customer asks about price"
                           />
                           <p className="mt-1 text-[10px] text-gray-600">
-                            Helps the agent pick this line when the customer goes off script.
+                            Shown on the box, and helps the agent pick this line when the customer goes off script.
                           </p>
                         </div>
 
