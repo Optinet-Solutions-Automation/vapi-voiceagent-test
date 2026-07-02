@@ -12,6 +12,7 @@ type Props = {
 
 const TYPE_STYLES: Record<string, { chip: string; label: string }> = {
   utterance: { chip: "bg-sky-500/15 text-sky-300", label: "heard" },
+  agent_said: { chip: "bg-teal-500/15 text-teal-300", label: "agent said" },
   classified: { chip: "bg-violet-500/15 text-violet-300", label: "classified" },
   injected: { chip: "bg-emerald-500/15 text-emerald-300", label: "injected" },
   skipped: { chip: "bg-gray-700 text-gray-400", label: "skipped" },

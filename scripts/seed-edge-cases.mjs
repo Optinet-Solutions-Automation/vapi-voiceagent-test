@@ -142,6 +142,19 @@ const scenarios = [
     mode: "both",
   },
   {
+    name: "Edge — email me instead",
+    intent_key: "edge_want_email",
+    tags: ["Edge Cases", "Objections"],
+    description:
+      "Customer asks to receive the details by email instead of a text or a call.",
+    response_template:
+      "We send the link by text to the number they're on — offer that. If they'd rather not get texts, let them know the promo is already visible in their account when they log in. Don't promise an email.",
+    action_type: "answer",
+    delivery: "reword",
+    priority: 27,
+    mode: "both",
+  },
+  {
     name: "Edge — repeat that?",
     intent_key: "edge_repeat_that",
     tags: ["Edge Cases", "Q&A"],

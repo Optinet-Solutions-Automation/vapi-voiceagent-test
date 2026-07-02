@@ -73,6 +73,15 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Second live-call QA round** — "one moment"/"hold on" are now explicitly
+  banned in the persona (casual fillers only: mm-hmm, uh-huh, wait—, mmm).
+  Split final transcripts: a stale fragment is superseded — only the newest
+  customer fragment gets a response, so the agent no longer answers twice
+  back-to-back. The agent's actual spoken words are logged (agent_said,
+  visible in the monitor) and fed to the router's context, so "okay, sure"
+  right after "want me to text it?" reads as consent instead of noise. New
+  edge scenario: "email me instead" (offers text, never promises email),
+  also a Stage 2 member.
 - **The flow owns the pitch too** (QA of a live stage-script call): a
   misrouted "sure, I have time" let the reactive layer deliver the pitch,
   desyncing the flow for the whole call — the agent later claimed to send a

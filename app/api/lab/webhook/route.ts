@@ -6,6 +6,8 @@ import {
   listHandlers,
   getLabSettings,
   insertLabEvent,
+  insertLabEventReturningId,
+  hasNewerUtterance,
   getLastInjectedEvent,
   getRecentTurns,
   getCollectionHandlerIds,
@@ -280,8 +282,17 @@ async function handleTranscript(
   callId: string,
   controlUrlHint: string | null
 ) {
-  // Only final customer utterances
-  if (message.role !== "user" || message.transcriptType !== "final") return;
+  if (message.transcriptType !== "final") return;
+
+  // The agent's own spoken words: logged so the router classifies replies in
+  // real context ("okay, sure" right after "want me to text it?" = consent).
+  if (message.role === "assistant") {
+    const said = (message.transcript ?? "").trim();
+    if (said) await log({ call_id: callId, event_type: "agent_said", role: "assistant", content: said });
+    return;
+  }
+
+  if (message.role !== "user") return;
   const utterance = (message.transcript ?? "").trim();
   if (!utterance) return;
 
@@ -300,13 +311,18 @@ async function handleTranscript(
   // utterance in conversational context (prevents keyword-only mismatches).
   const recentTurns = await recentTurnsP;
 
-  await log({
-    call_id: callId,
-    event_type: "utterance",
-    role: "user",
-    content: utterance,
-    utterance_at: utteranceAt.toISOString(),
-  });
+  let utteranceEventId: number | null = null;
+  try {
+    utteranceEventId = await insertLabEventReturningId({
+      call_id: callId,
+      event_type: "utterance",
+      role: "user",
+      content: utterance,
+      utterance_at: utteranceAt.toISOString(),
+    });
+  } catch (e) {
+    console.error("[lab webhook] failed to log utterance:", e);
+  }
 
   let settings;
   let handlers: ListenerHandler[] = [];
@@ -383,6 +399,19 @@ async function handleTranscript(
     !!reactiveHandler &&
     reactiveHandler.action_type !== "ignore" &&
     !flowOwnsAction;
+
+  // Split finals: if a newer customer fragment arrived while we were busy
+  // classifying, this one is stale — the newest fragment gets the response.
+  if (utteranceEventId != null && (await hasNewerUtterance(callId, utteranceEventId).catch(() => false))) {
+    await log({
+      call_id: callId,
+      event_type: "skipped",
+      content: utterance,
+      intent_key: cls.intent,
+      meta: { reason: "superseded" },
+    });
+    return;
+  }
 
   // Below-threshold guesses must never drive branching (a 0.4-confidence
   // "consent" once marched a live question straight into the goodbye) — the

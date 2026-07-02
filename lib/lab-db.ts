@@ -311,6 +311,27 @@ export async function insertLabEvent(event: EventInsert): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+export async function insertLabEventReturningId(event: EventInsert): Promise<number | null> {
+  const { data, error } = await supabase.from("lab_call_events").insert(event).select("id").single();
+  if (error) throw new Error(error.message);
+  return (data?.id as number) ?? null;
+}
+
+/** Did a newer customer utterance arrive after this one? Split final
+ *  transcripts land as separate turns ~1s apart — only the newest deserves a
+ *  response; earlier fragments are stale. */
+export async function hasNewerUtterance(callId: string, afterId: number): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("id")
+    .eq("call_id", callId)
+    .eq("event_type", "utterance")
+    .gt("id", afterId)
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
 export async function listLabCallEvents(callId: string, afterId = 0): Promise<LabCallEvent[]> {
   const { data, error } = await supabase
     .from("lab_call_events")
@@ -323,13 +344,16 @@ export async function listLabCallEvents(callId: string, afterId = 0): Promise<La
 }
 
 /** Recent conversation turns for a call, oldest-first, as "Customer:/Agent:" lines.
- *  Gives the router LLM context so a keyword can't hijack the intent. */
+ *  Gives the router LLM context so a keyword can't hijack the intent.
+ *  agent_said events are the agent's ACTUAL spoken words (from assistant
+ *  transcripts) — crucial so "okay, sure" right after "want me to text it?"
+ *  reads as consent, not noise. */
 export async function getRecentTurns(callId: string, limit = 6): Promise<string[]> {
   const { data, error } = await supabase
     .from("lab_call_events")
     .select("event_type, content")
     .eq("call_id", callId)
-    .in("event_type", ["utterance", "injected"])
+    .in("event_type", ["utterance", "injected", "agent_said"])
     .order("id", { ascending: false })
     .limit(limit);
   if (error) throw new Error(error.message);

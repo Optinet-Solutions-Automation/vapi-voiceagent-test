@@ -97,6 +97,7 @@ const stage2Id = await buildCollection(
     "edge_repeat_that",
     "edge_is_this_scam",
     "edge_how_got_number",
+    "edge_want_email",
   ]
 );
 
@@ -202,6 +203,6 @@ if (ei.error) {
 
 console.log(`Seeded "${SCRIPT_NAME}" — ${nodes.length} boxes, ${edges.length} arrows.`);
 console.log("Stage collections rebuilt:");
-console.log("  • Stage — Opening replies (Welcome): 7 members, default = right-person bridge");
-console.log("  • Stage — Handle & steer back (Welcome): 11 members, default = redirect to purpose");
+console.log("  • Stage — Opening replies (Welcome) — default: right-person bridge");
+console.log("  • Stage — Handle & steer back (Welcome) — default: redirect to purpose");
 console.log("One If/Else in the whole script. Wrong number / do-not-call / goodbye end reactively.");
