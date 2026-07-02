@@ -57,7 +57,9 @@ function ScriptBuilderInner() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return q ? scripts.filter((s) => `${s.name} ${s.description}`.toLowerCase().includes(q)) : scripts;
+    const base = q ? scripts.filter((s) => `${s.name} ${s.description}`.toLowerCase().includes(q)) : scripts;
+    // Most recently updated first — new scripts must not hide on page 2.
+    return [...base].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
   }, [scripts, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
