@@ -241,13 +241,20 @@ async function handleToolCalls(
         }
       } else if (name === "end_call_goodbye") {
         actionType = "end_call";
-        result = "Say a brief, warm goodbye now.";
-        // End the call shortly after the goodbye; fire-and-forget.
-        const controlUrl = await getControlUrl(callId, controlUrlHint);
-        if (controlUrl) {
-          setTimeout(() => {
-            endCall(controlUrl).catch(() => {});
-          }, 4000);
+        if (activeScriptId) {
+          // The flow's End box (or a reactive end_call scenario) owns the
+          // wrap-up — a tool goodbye on top means two goodbyes back to back.
+          result =
+            "Do not say goodbye — your closing line is delivered automatically and the call ends on its own. Stay quiet or give a brief acknowledgement at most.";
+        } else {
+          result = "Say a brief, warm goodbye now.";
+          // End the call shortly after the goodbye; fire-and-forget.
+          const controlUrl = await getControlUrl(callId, controlUrlHint);
+          if (controlUrl) {
+            setTimeout(() => {
+              endCall(controlUrl).catch(() => {});
+            }, 4000);
+          }
         }
       }
     } catch (e: unknown) {

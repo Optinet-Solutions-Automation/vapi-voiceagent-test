@@ -80,7 +80,7 @@ export async function POST(req: Request) {
         "Are you still with me?",
         "No pressure — want me to go over that again?",
       ],
-      idleTimeoutSeconds: 8,
+      idleTimeoutSeconds: 10,
       idleMessageMaxSpokenCount: 2,
     },
     // Interruptions are analyzed, not knee-jerk: the customer must say at

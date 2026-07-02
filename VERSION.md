@@ -73,6 +73,13 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Fourth live-call QA round** — the double goodbye is gone: in script mode
+  the agent's end_call_goodbye tool stands down (the flow's End box or a
+  reactive end_call scenario owns the wrap-up and the hang-up). The persona
+  gained a [Hard rules] tail section — forbidden wait-phrases, one reply per
+  turn (never two variants back to back), never invent names/facts, max one
+  filler per turn — placed last where models comply best. Idle re-engagement
+  waits 10s instead of 8.
 - **Third live-call QA round** — a consent after the retry cap got the
   DECLINED goodbye: the loop box sat before the consent check, so the yes
   itself bumped the counter out the Exit. All three loops (stage script and
