@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import LabConfigForm from "@/components/lab/LabConfigForm";
+import WorkflowGuide from "@/components/lab/WorkflowGuide";
 import ScriptBuilder from "@/components/lab/ScriptBuilder";
 import LabCallPanel from "@/components/lab/LabCallPanel";
 import ListenerMonitor from "@/components/lab/ListenerMonitor";
@@ -162,33 +163,15 @@ export default function ListenerLabPage() {
         </div>
       </header>
 
-      {/* The campaign workflow, in order — so nobody has to guess the flow. */}
-      <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2 text-[11px]">
-        {[
-          { n: 1, label: "Write scenarios & bundle a collection", href: "/playbook" },
-          { n: 2, label: "Build the call flow", href: "/script-builder" },
-          { n: 3, label: "Push persona & webhook (Configuration → Save)", onClick: () => setOpenDrawer("config") },
-          { n: 4, label: "Pick the script below & start a call", onClick: undefined },
-          { n: 5, label: "Review the run in Logs", onClick: () => setOpenDrawer("logs") },
-        ].map((s, i) => (
-          <li key={s.n} className="flex items-center gap-1.5">
-            {i > 0 && <span className="text-gray-700">→</span>}
-            {s.href ? (
-              <Link href={s.href} className="rounded-full border border-gray-700 px-2.5 py-1 text-gray-400 transition hover:border-gray-500 hover:text-gray-200">
-                <span className="font-bold text-indigo-400">{s.n}.</span> {s.label}
-              </Link>
-            ) : s.onClick ? (
-              <button onClick={s.onClick} className="rounded-full border border-gray-700 px-2.5 py-1 text-gray-400 transition hover:border-gray-500 hover:text-gray-200">
-                <span className="font-bold text-indigo-400">{s.n}.</span> {s.label}
-              </button>
-            ) : (
-              <span className="rounded-full border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-gray-300">
-                <span className="font-bold text-indigo-400">{s.n}.</span> {s.label}
-              </span>
-            )}
-          </li>
-        ))}
-      </ol>
+      {/* The campaign workflow, in order — click a step for the how-to. */}
+      <WorkflowGuide
+        onOpenConfig={() => setOpenDrawer("config")}
+        onOpenLogs={() => {
+          refreshRuns();
+          setLogsPage(1);
+          setOpenDrawer("logs");
+        }}
+      />
 
       {/* Reviewing a past run: show its transcript + listener timeline side by side */}
       {reviewing ? (
