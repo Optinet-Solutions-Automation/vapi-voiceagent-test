@@ -204,6 +204,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lineDrafts, setLineDrafts] = useState<Record<string, LineDraft>>({});
+  // Plain-language "expected reply" drafts for If/Else boxes, keyed by node id.
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
 
   // Keep the editable title in sync with the loaded script.
   useEffect(() => {
@@ -352,6 +354,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setSelNodeId(null);
     setSelEdgeId(null);
     setLineDrafts({});
+    setReplyDrafts({});
     try {
       const { rfNodes, rfEdges } = graphToFlow(await getScriptGraph(id));
       setNodes(rfNodes);
@@ -514,6 +517,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         delete next[selNodeId];
         return next;
       });
+      setReplyDrafts((m) => {
+        const next = { ...m };
+        delete next[selNodeId];
+        return next;
+      });
       setSelNodeId(null);
     } else if (selEdgeId) {
       setEdges((es) => es.filter((e) => e.id !== selEdgeId));
@@ -521,17 +529,61 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     }
   }
 
-  // Create/update the Playbook scenarios behind inline-authored lines, so a
-  // user can type what the agent says without a round-trip to the Playbook.
-  // Returns nodeId → newly created scenario id.
-  async function persistInlineLines(): Promise<Map<string, string>> {
+  // Create/update the Playbook entries behind inline-authored content:
+  // spoken lines on Scenario/End boxes, and "expected reply" matchers on
+  // If/Else boxes (speak-nothing scenarios the router classifies against).
+  // Returns nodeId → new scenario id (lines) and nodeId → intent key (replies).
+  async function persistInlineLines(): Promise<{ created: Map<string, string>; replies: Map<string, string> }> {
     const created = new Map<string, string>();
+    const replies = new Map<string, string>();
     const scriptNm = (scripts.find((s) => s.id === scriptId)?.name ?? name).trim() || "Script";
     const takenKeys = new Set(scenarios.map((s) => s.intent_key));
+    const makeKey = (label: string) => {
+      const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "line";
+      let key = base;
+      for (let i = 2; takenKeys.has(key); i++) key = `${base}_${i}`;
+      takenKeys.add(key);
+      return key;
+    };
     for (const n of nodes) {
       const d = n.data as NodeData;
       const ct = (d.config.contentType as Content) ?? "scenario";
-      if (d.kind !== "step" || (ct !== "scenario" && ct !== "end")) continue;
+      if (d.kind !== "step") continue;
+
+      if (ct === "ifelse") {
+        if (((d.config.condBy as string) ?? "intent") === "result") continue;
+        const draft = replyDrafts[n.id];
+        if (draft === undefined) continue; // untouched box
+        const desc = draft.trim();
+        if (!desc) continue;
+        const cur = scenarios.find((s) => s.intent_key === ((d.config.condValue as string) ?? ""));
+        if (cur) {
+          // Only expected-reply entries are editable from here; real scenarios
+          // keep their description (edit it in the Playbook or its own box).
+          if (cur.action_type === "ignore" && desc !== (cur.description ?? "").trim()) {
+            await updateHandler(cur.id, { description: desc });
+          }
+        } else {
+          const label = d.label.trim() || snip(desc, 40);
+          const key = makeKey(label);
+          await createHandler({
+            name: label,
+            intent_key: key,
+            description: desc,
+            response_template: "", // matcher only — never spoken
+            action_type: "ignore",
+            delivery: "verbatim",
+            tags: [scriptNm, "Reply detector"],
+            mode: "listener",
+            priority: 100,
+            enabled: true,
+          });
+          replies.set(n.id, key);
+        }
+        continue;
+      }
+
+      if (ct !== "scenario" && ct !== "end") continue;
       const draft = lineDrafts[n.id];
       if (!draft) continue; // untouched box
       const text = draft.text.trim();
@@ -549,13 +601,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         });
       } else {
         const label = d.label.trim() || text.slice(0, 40);
-        const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "line";
-        let key = base;
-        for (let i = 2; takenKeys.has(key); i++) key = `${base}_${i}`;
-        takenKeys.add(key);
         const h = await createHandler({
           name: label,
-          intent_key: key,
+          intent_key: makeKey(label),
           description: draft.hint.trim() || `Step "${label}" of the "${scriptNm}" script.`,
           response_template: text,
           action_type: ct === "end" ? "end_call" : "answer",
@@ -568,7 +616,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         created.set(n.id, h.id);
       }
     }
-    return created;
+    return { created, replies };
   }
 
   async function handleSave() {
@@ -577,8 +625,12 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setNotice(null);
     setError(null);
     try {
-      const created = await persistInlineLines();
+      const { created, replies } = await persistInlineLines();
       const scenarioIdFor = (n: Node) => created.get(n.id) ?? (n.data as NodeData).scenarioId;
+      const configFor = (n: Node) => {
+        const d = n.data as NodeData;
+        return replies.has(n.id) ? { ...d.config, condBy: "intent", condValue: replies.get(n.id) } : d.config ?? {};
+      };
       const nodeRows = nodes.map((n) => {
         const d = n.data as NodeData;
         const ct = (d.config.contentType ?? "scenario") as string;
@@ -587,7 +639,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           type: d.kind, // 'start' | 'step'
           scenario_id: ct === "scenario" || ct === "end" ? scenarioIdFor(n) : null,
           label: d.label,
-          config: d.config ?? {},
+          config: configFor(n),
           pos_x: n.position.x,
           pos_y: n.position.y,
         };
@@ -604,17 +656,22 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         };
       });
       await saveScriptGraph(scriptId, nodeRows, edgeRows);
-      // Reflect newly created scenarios on their boxes, refresh the Playbook
-      // list, and drop drafts so they reseed from the saved scenarios.
-      if (created.size) {
+      // Reflect newly created scenarios/reply matchers on their boxes, refresh
+      // the Playbook list, and drop drafts so they reseed from saved data.
+      if (created.size || replies.size) {
         setNodes((ns) =>
-          ns.map((n) =>
-            created.has(n.id) ? { ...n, data: { ...(n.data as NodeData), scenarioId: created.get(n.id)! } } : n
-          )
+          ns.map((n) => {
+            if (!created.has(n.id) && !replies.has(n.id)) return n;
+            const d = { ...(n.data as NodeData) };
+            if (created.has(n.id)) d.scenarioId = created.get(n.id)!;
+            if (replies.has(n.id)) d.config = { ...d.config, condBy: "intent", condValue: replies.get(n.id) };
+            return { ...n, data: d };
+          })
         );
       }
       setScenarios(await listHandlers());
       setLineDrafts({});
+      setReplyDrafts({});
       setNotice("Script saved.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save");
@@ -685,6 +742,27 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       delete next[nodeId];
       return next;
     });
+  }
+
+  // If/Else "expected reply": the scenario the condition currently points at,
+  // and the plain-language draft describing what counts as a match.
+  const condScn =
+    sd && content === "ifelse"
+      ? scenarios.find((s) => s.intent_key === ((sd.config.condValue as string) ?? "")) ?? null
+      : null;
+  const replyEditable = !condScn || condScn.action_type === "ignore";
+  const replyDraft = selNode && sd && content === "ifelse" ? replyDrafts[selNode.id] ?? condScn?.description ?? "" : "";
+  function patchReplyDraft(nodeId: string, value: string) {
+    setReplyDrafts((m) => ({ ...m, [nodeId]: value }));
+    // Live-preview the matching rule on the canvas box.
+    setNodes((ns) =>
+      ns.map((n) => {
+        if (n.id !== nodeId) return n;
+        const d = { ...(n.data as NodeData) };
+        d.note = value.trim() ? snip(`Then when: ${value}`, 72) : null;
+        return { ...n, data: d };
+      })
+    );
   }
 
   return (
@@ -919,7 +997,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                                 onChange={(e) => pickScenario(selNode.id, e.target.value || null)}
                               >
                                 <option value="">(new line for this box)</option>
-                                {scenarios.map((s) => (
+                                {scenarios.filter((s) => s.action_type !== "ignore").map((s) => (
                                   <option key={s.id} value={s.id}>
                                     {s.name}
                                   </option>
@@ -953,7 +1031,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                                 }}
                               >
                                 <option value="">+ add candidate…</option>
-                                {scenarios.filter((s) => s.id !== sd.scenarioId && !((sd.config.candidateScenarioIds as string[]) ?? []).includes(s.id)).map((s) => (
+                                {scenarios.filter((s) => s.action_type !== "ignore" && s.id !== sd.scenarioId && !((sd.config.candidateScenarioIds as string[]) ?? []).includes(s.id)).map((s) => (
                                   <option key={s.id} value={s.id}>{s.name}</option>
                                 ))}
                               </select>
@@ -1045,32 +1123,67 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
 
                         {((sd.config.condBy as string) ?? "intent") !== "result" ? (
                           <>
-                            <div>
-                              <label className="mb-1 block text-xs text-gray-400">Reply matches scenario</label>
-                              <select
-                                className={inputCls + " [color-scheme:dark]"}
-                                value={(sd.config.condValue as string) ?? ""}
-                                onChange={(e) => patchConfig(selNode.id, { condBy: "intent", condValue: e.target.value })}
-                              >
-                                <option value="">(pick a scenario)</option>
-                                {scenarios.map((s) => (
-                                  <option key={s.id} value={s.intent_key}>
-                                    {s.name}
-                                  </option>
-                                ))}
-                              </select>
-                              {(() => {
-                                const scn = scenarios.find((s) => s.intent_key === ((sd.config.condValue as string) ?? ""));
-                                return scn?.description ? (
-                                  <p className="mt-1 rounded-md bg-gray-900/60 p-1.5 text-[10px] italic text-gray-500">
-                                    Counts as a match when: {scn.description}
-                                  </p>
-                                ) : null;
-                              })()}
-                            </div>
+                            {replyEditable ? (
+                              <div>
+                                <label className="mb-1 block text-xs text-gray-400">When the customer&rsquo;s reply is…</label>
+                                <textarea
+                                  className={inputCls + " min-h-[70px] resize-y"}
+                                  value={replyDraft}
+                                  onChange={(e) => patchReplyDraft(selNode.id, e.target.value)}
+                                  placeholder={'e.g. they agree — "yes", "sure", "text me", "sounds good"'}
+                                />
+                                <p className="mt-1 text-[10px] text-gray-600">
+                                  Describe the reply in plain words — replies that fit go down <strong>Then</strong>.
+                                </p>
+                              </div>
+                            ) : (
+                              <div>
+                                <label className="mb-1 block text-xs text-gray-400">When the customer&rsquo;s reply is…</label>
+                                <p className="rounded-md bg-gray-900/60 p-1.5 text-[10px] italic text-gray-500">
+                                  {condScn?.description || condScn?.name}
+                                </p>
+                                <p className="mt-1 text-[10px] text-gray-600">
+                                  Matching comes from &ldquo;{condScn?.name}&rdquo; — edit that scenario&rsquo;s description
+                                  to change what counts.
+                                </p>
+                              </div>
+                            )}
+
+                            <details className="rounded-lg border border-gray-800">
+                              <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-300">
+                                Advanced
+                              </summary>
+                              <div className="p-2.5">
+                                <label className="mb-1 block text-xs text-gray-400">Match an existing scenario instead</label>
+                                <select
+                                  className={inputCls + " [color-scheme:dark]"}
+                                  value={(sd.config.condValue as string) ?? ""}
+                                  onChange={(e) => {
+                                    patchConfig(selNode.id, { condBy: "intent", condValue: e.target.value });
+                                    setReplyDrafts((m) => {
+                                      const next = { ...m };
+                                      delete next[selNode.id];
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  <option value="">(new expected reply for this box)</option>
+                                  <optgroup label="Expected replies">
+                                    {scenarios.filter((s) => s.action_type === "ignore").map((s) => (
+                                      <option key={s.id} value={s.intent_key}>{s.name}</option>
+                                    ))}
+                                  </optgroup>
+                                  <optgroup label="All scenarios (matched by their description)">
+                                    {scenarios.filter((s) => s.action_type !== "ignore" && s.intent_key !== "first_message").map((s) => (
+                                      <option key={s.id} value={s.intent_key}>{s.name}</option>
+                                    ))}
+                                  </optgroup>
+                                </select>
+                              </div>
+                            </details>
+
                             <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
-                              Every reply is matched against your scenarios&rsquo; descriptions. If the reply fits the
-                              scenario picked here, the call follows the green <strong>Then</strong> dot; anything else
+                              Replies that fit the description follow the green <strong>Then</strong> dot; anything else
                               follows the red <strong>Else</strong> dot. One-off questions with a Playbook answer are
                               answered in place and re-checked on the next reply.
                             </p>
@@ -1150,7 +1263,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                               onChange={(e) => pickScenario(selNode.id, e.target.value || null)}
                             >
                               <option value="">(new line for this box)</option>
-                              {scenarios.map((s) => (
+                              {scenarios.filter((s) => s.action_type !== "ignore").map((s) => (
                                 <option key={s.id} value={s.id}>{s.name}</option>
                               ))}
                             </select>
