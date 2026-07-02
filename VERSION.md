@@ -73,6 +73,16 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Stage collections — replies pick from a set, not nested If/Else** — a
+  Collection box is now a full conversation stage: the customer's reply picks
+  the member scenario to speak, a configurable **Default line** covers
+  everything else (previously the fallback member was an arbitrary row), and a
+  loop keeps the stage alive until the one If/Else exit (consent) fires.
+  `scripts/seed-stage-collections.mjs` seeds two stage collections (Opening
+  replies; Handle & steer back) and "Welcome Call — Stage Collections
+  (example)" — a full call with exactly one If/Else. Rule of thumb: stage
+  members keep the conversation going, the If/Else advances it, and reactive
+  end_call scenarios (wrong number, do-not-call, goodbye) exit from anywhere.
 - **A wiser listener** — the router now has explicit rules: back-channel and
   fillers ("okay", "k", "uh-huh", "I hear you"), fragments, a mid-call
   "hello?", and noise are acknowledgements → none; bare agreement only maps

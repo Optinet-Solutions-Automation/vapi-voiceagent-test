@@ -64,7 +64,7 @@ const STEPS: Step[] = [
         text: "Wire the green Then dot to a Send SMS box and the red Else dot to a gentle-nudge Scenario; finish with an End call box. Save — anything missing shows up as a warning.",
       },
     ],
-    tip: "Open “Demo — Basic Welcome Call” to see a finished one. “Sales Call — Phased (example)” is the same idea split into reusable phases (Opening → Pitch → Close).",
+    tip: "Open “Demo — Basic Welcome Call” to see a finished one. “Sales Call — Phased (example)” splits it into reusable phases, and “Welcome Call — Stage Collections (example)” shows the stage pattern: a Collection box holds a whole set of expected answers, so you don't nest If/Else per reply.",
     action: { label: "Open the Script Builder", href: "/script-builder" },
   },
   {

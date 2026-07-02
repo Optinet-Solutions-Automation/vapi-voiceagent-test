@@ -692,7 +692,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         return {
           id: n.id,
           type: d.kind, // 'start' | 'step'
-          scenario_id: LINE_CONTENT.includes(ct) ? scenarioIdFor(n) : null,
+          // Collections carry a default-line scenario; line boxes carry theirs.
+          scenario_id: LINE_CONTENT.includes(ct) || ct === "collection" ? scenarioIdFor(n) : null,
           label: d.label,
           config: configFor(n),
           pos_x: n.position.x,
@@ -1191,19 +1192,41 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                     )}
 
                     {content === "collection" && (
-                      <div>
-                        <label className="mb-1 block text-xs text-gray-400">Collection <span className="text-gray-600">(agent picks among its scenarios)</span></label>
-                        <select
-                          className={inputCls + " [color-scheme:dark]"}
-                          value={(sd.config.collectionId as string) ?? ""}
-                          onChange={(e) => patchConfig(selNode.id, { collectionId: e.target.value || null })}
-                        >
-                          <option value="">(pick a collection)</option>
-                          {collections.map((c) => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                        </select>
-                      </div>
+                      <>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">Collection <span className="text-gray-600">(the reply picks a member)</span></label>
+                          <select
+                            className={inputCls + " [color-scheme:dark]"}
+                            value={(sd.config.collectionId as string) ?? ""}
+                            onChange={(e) => patchConfig(selNode.id, { collectionId: e.target.value || null })}
+                          >
+                            <option value="">(pick a collection)</option>
+                            {collections.map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">
+                            Default line <span className="text-gray-600">(when no member fits the reply)</span>
+                          </label>
+                          <select
+                            className={inputCls + " [color-scheme:dark]"}
+                            value={sd.scenarioId ?? ""}
+                            onChange={(e) => patchNodeData(selNode.id, { scenarioId: e.target.value || null })}
+                          >
+                            <option value="">(highest-priority member)</option>
+                            {scenarios.filter((s) => s.action_type !== "ignore").map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
+                          A stage in one box: whichever member scenario matches the customer&rsquo;s reply is spoken;
+                          anything else gets the default line. Loop the arrow back here to keep the stage alive until
+                          an If/Else exit fires.
+                        </p>
+                      </>
                     )}
 
                     {content === "subworkflow" && (

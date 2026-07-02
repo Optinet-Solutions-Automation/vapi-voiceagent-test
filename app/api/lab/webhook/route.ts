@@ -786,7 +786,13 @@ async function runScriptFlow(
       const ids = cfg.collectionId ? await getCollectionHandlerIds(cfg.collectionId as string).catch(() => []) : [];
       const match = allHandlers.find((h) => ids.includes(h.id) && h.intent_key === intent) ?? null;
       if (reactiveCanHandle && !pathExpected && !match) return defer(target.label || ct);
-      scenario = match ?? handlerById(ids[0]);
+      // No member fits the reply → the box's default line; failing that, the
+      // highest-priority member (never an arbitrary row).
+      scenario =
+        match ??
+        handlerById(target.scenario_id) ??
+        allHandlers.filter((h) => ids.includes(h.id)).sort((a, b) => a.priority - b.priority)[0] ??
+        null;
     } else {
       // send_sms / transfer
       scenario = handlerById(target.scenario_id);
