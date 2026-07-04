@@ -316,14 +316,25 @@ console.log(
   "short prompt saved: " + (se ? "FAILED " + se.message : `OK (${SHORT_PROMPT.length} chars)`)
 );
 
-// Seed a default Collection containing every handler (so the lab works out of the box).
+// Seed the campaign Collection: LuckySeven's own scenarios plus the
+// brand-neutral edge cases (who-is-this, scam, robot, repeat, email,
+// never-signed-up). Deliberately NOT every handler in the database — other
+// campaigns' lines must never enter this campaign's routing scope.
 const COLLECTION_NAME = "Lucky7even — Full Script";
+const NEUTRAL_EDGE_KEYS = [
+  "edge_who_is_this",
+  "edge_is_this_scam",
+  "edge_are_you_ai",
+  "edge_repeat_that",
+  "edge_want_email",
+  "edge_never_signed_up",
+];
 const { data: cols } = await sb.from("listener_collections").select("id, name");
 let collection = (cols ?? []).find((c) => c.name === COLLECTION_NAME);
 if (!collection) {
   const { data: created, error: ce } = await sb
     .from("listener_collections")
-    .insert({ name: COLLECTION_NAME, description: "All LuckySeven handlers." })
+    .insert({ name: COLLECTION_NAME, description: "All LuckySeven handlers plus brand-neutral edge cases." })
     .select()
     .single();
   if (ce) {
@@ -333,11 +344,15 @@ if (!collection) {
   }
 }
 if (collection) {
+  const wantedKeys = new Set([
+    ...handlers.map((h) => h.intent_key).filter((k) => k !== "first_message"),
+    ...NEUTRAL_EDGE_KEYS,
+  ]);
   const { data: allHandlers } = await sb
     .from("listener_handlers")
     .select("id, intent_key");
   const memberIds = (allHandlers ?? [])
-    .filter((h) => h.intent_key !== "first_message")
+    .filter((h) => wantedKeys.has(h.intent_key))
     .map((h) => h.id);
   await sb.from("listener_collection_handlers").delete().eq("collection_id", collection.id);
   if (memberIds.length) {

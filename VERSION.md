@@ -73,6 +73,14 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Lucky Seven campaign setup** — "Alex with BrightPath" mid-call came from
+  the persona prompt (lab_settings.short_prompt, set by the demo campaign
+  seed and auto-pushed on Start Call). `seed-lucky7-campaign-setup.mjs` now
+  flips the whole lab to Lucky Seven in one command: Tom persona on the same
+  hardened template, the "Lucky Seven — Welcome Call" script (free spins →
+  consent → SMS → goodbye, opening from the global first_message), and the
+  Lucky7even collection — now correctly scoped to Lucky Seven's scenarios
+  plus brand-neutral edge cases instead of every handler in the database.
 - **Skip-ahead: a yes never triggers a re-pitch** — reactive answers move the
   conversation forward while the flow position lags; consent then arrived
   while the flow still sat before the pitch box, and the walk re-pitched over
