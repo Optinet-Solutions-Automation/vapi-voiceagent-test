@@ -36,6 +36,7 @@ Rules:
 - Bare agreement ("yes", "sure", "okay") matches a consent/offer handler ONLY if the agent's last line in the recent turns asked exactly that question; otherwise → none.
 - Hedged or reluctant agreement still counts as agreement: "yeah I guess", "okay fine", "sure, whatever", a bare "okay" — if the agent's last line asked a yes/no question, map these to that question's handler (confidence around 0.8). Only a clear refusal or a new topic breaks the match.
 - Pick a handler only for a substantive reply or question that clearly needs that handler's knowledge or action. When unsure, pick none with low confidence.
+- A reply that is substantive but fits NOTHING in the conversation — a random word or phrase, a non-sequitur right after a question (often a speech-to-text mishearing, like "store" when they meant "sure") → the unclear/misheard-reply handler if one is listed. Do not force it into another handler, and do not call it none (none is only for back-channel, fillers, and noise).
 - A reply can contain SEVERAL statements or questions ("yes please — and how much is it?"). List every handler it clearly addresses, most important first — usually one, at most three.
 
 Given the last customer utterance (and brief context), return ONLY JSON:

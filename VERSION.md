@@ -73,6 +73,14 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Misheard-reply scenario** — when a reply is substantive but fits nothing
+  (an STT mishearing like "store" for "sure" right after a yes/no question),
+  the router now routes it to the new "Edge — unclear / misheard reply"
+  scenario instead of forcing it into none: the agent asks one friendly
+  check suggesting the likely meaning ("was that a yes to texting you the
+  link?"), never repeating the garbled words. Member of both stages and all
+  campaign collections; a new router rule separates non-sequiturs from
+  back-channel.
 - **Speaking lock — injections never overlap the agent** — the overlapping
   double-intro returned because speech-update was missing from
   serverMessages: Vapi never sent the events, leaving started-speaking

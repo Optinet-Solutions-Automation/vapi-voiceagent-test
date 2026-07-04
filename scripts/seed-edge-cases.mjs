@@ -155,6 +155,19 @@ const scenarios = [
     mode: "both",
   },
   {
+    name: "Edge — unclear / misheard reply",
+    intent_key: "edge_unclear_reply",
+    tags: ["Edge Cases", "Q&A"],
+    description:
+      "The reply is substantive but doesn't fit the conversation at all — a random or garbled word or phrase, a non-sequitur right after a question (often a speech-to-text mishearing, like 'store' when they meant 'sure'). NOT back-channel like 'okay' or 'uh-huh'.",
+    response_template:
+      "Their reply didn't fit — likely a mishearing. Ask ONE quick, friendly check tied to your last question, suggesting the likely meaning ('Sorry, I might've misheard — was that a yes to texting you the link?'). Never repeat their garbled words back, and offer only one suggestion.",
+    action_type: "answer",
+    delivery: "reword",
+    priority: 28,
+    mode: "both",
+  },
+  {
     name: "Edge — repeat that?",
     intent_key: "edge_repeat_that",
     tags: ["Edge Cases", "Q&A"],
