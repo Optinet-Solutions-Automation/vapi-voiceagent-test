@@ -829,6 +829,20 @@ async function runScriptFlow(
     return false;
   }
 
+  // Does the single box after `fromId` branch on one of this turn's intents?
+  // Used to skip a speaking box the reply has already answered past — consent
+  // arriving while the flow still sits before the pitch must take the branch,
+  // not trigger a re-pitch.
+  function nextIfElseRecognizes(fromId: string): boolean {
+    const outs = graph.edges.filter((e) => e.source_node_id === fromId);
+    if (outs.length !== 1) return false;
+    const nxt = nodeById(graph.nodes, outs[0].target_node_id);
+    if (!nxt || contentTypeOf(nxt) !== "ifelse") return false;
+    const c = (nxt.config ?? {}) as Record<string, unknown>;
+    if (((c.condBy as string) ?? "intent") !== "intent") return false;
+    return intents.includes(c.condValue as string);
+  }
+
   // Fetch the control URL lazily — a deferred walk never needs it.
   let controlUrlCache: string | null | undefined;
   async function ctl(): Promise<string | null> {
@@ -942,6 +956,13 @@ async function runScriptFlow(
     if (ct === "scenario") {
       const cands = [target.scenario_id, ...((cfg.candidateScenarioIds as string[]) ?? [])].filter(Boolean) as string[];
       const match = allHandlers.find((h) => cands.includes(h.id) && intents.includes(h.intent_key)) ?? null;
+      // Skip-ahead: this box has no line for the reply, but the if/else right
+      // after it does — pass through silently and let the branch fire.
+      if (!match && nextIfElseRecognizes(target.id)) {
+        currentNodeId = target.id;
+        note("", target, ct, edgeCond, null, "skipped_ahead");
+        continue;
+      }
       if (reactiveCanHandle && !pathExpected && !match) return defer(target.label || ct);
       scenario = match ?? handlerById(target.scenario_id) ?? handlerById(cands[0]);
     } else if (ct === "collection") {
@@ -950,6 +971,11 @@ async function runScriptFlow(
       const matches = allHandlers
         .filter((h) => ids.includes(h.id) && intents.includes(h.intent_key))
         .sort((a, b) => intents.indexOf(a.intent_key) - intents.indexOf(b.intent_key));
+      if (matches.length === 0 && nextIfElseRecognizes(target.id)) {
+        currentNodeId = target.id;
+        note("", target, ct, edgeCond, null, "skipped_ahead");
+        continue;
+      }
       if (reactiveCanHandle && !pathExpected && matches.length === 0) return defer(target.label || ct);
       if (matches.length > 1) {
         mergedText =

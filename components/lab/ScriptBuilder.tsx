@@ -770,7 +770,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     const scn = d.scenarioId ? scenarios.find((s) => s.id === d.scenarioId) : undefined;
     return {
       text: scn?.response_template ?? "",
-      delivery: scn?.delivery ?? "verbatim",
+      // Gist by default — natural phrasing beats recital for most lines.
+      delivery: scn?.delivery ?? "reword",
       hint: scn?.description ?? "",
     };
   }
@@ -1080,21 +1081,41 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                     {content === "scenario" && draft && (
                       <>
                         <div>
-                          <label className="mb-1 block text-xs text-gray-400">What the agent says</label>
+                          <label className="mb-1 block text-xs text-gray-400">
+                            Description <span className="text-gray-600">(when does this fit?)</span>
+                          </label>
+                          <textarea
+                            className={inputCls + " min-h-[60px] resize-y"}
+                            value={draft.hint}
+                            onChange={(e) => patchDraft(selNode.id, draft, { hint: e.target.value })}
+                            placeholder="e.g. the customer asks about price"
+                          />
+                          <p className="mt-1 text-[10px] text-gray-600">
+                            Shown on the box, and helps the agent pick this line when the customer goes off script.
+                          </p>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">
+                            What the agent says <span className="text-gray-600">(tentative — this is the scenario&rsquo;s line)</span>
+                          </label>
                           <textarea
                             className={inputCls + " min-h-[110px] resize-y"}
                             value={draft.text}
                             onChange={(e) => patchDraft(selNode.id, draft, { text: e.target.value })}
                             placeholder="Type the line for this step — it's saved to the Playbook automatically."
                           />
+                          <p className="mt-1 text-[10px] text-gray-600">
+                            Prefilled from the selected scenario. Editing here edits that Playbook scenario — for every
+                            script and campaign that uses it. Keep campaign wording in scenarios so scripts stay reusable.
+                          </p>
                         </div>
                         <div>
                           <label className="mb-1 block text-xs text-gray-400">Delivery</label>
                           <div className="grid grid-cols-2 gap-1.5">
                             {(
                               [
-                                ["verbatim", "Exact words"],
                                 ["reword", "Just the gist"],
+                                ["verbatim", "Exact words"],
                               ] as const
                             ).map(([val, lbl]) => (
                               <button
@@ -1111,21 +1132,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             ))}
                           </div>
                           <p className="mt-1 text-[10px] text-gray-600">
-                            Exact words are spoken word-for-word; with the gist, the agent rephrases it naturally.
-                          </p>
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">
-                            Description <span className="text-gray-600">(when does this fit?)</span>
-                          </label>
-                          <input
-                            className={inputCls}
-                            value={draft.hint}
-                            onChange={(e) => patchDraft(selNode.id, draft, { hint: e.target.value })}
-                            placeholder="e.g. the customer asks about price"
-                          />
-                          <p className="mt-1 text-[10px] text-gray-600">
-                            Shown on the box, and helps the agent pick this line when the customer goes off script.
+                            Just the gist is usually best — the agent phrases it naturally in context. Keep Exact words
+                            for prices, terms, and compliance lines.
                           </p>
                         </div>
 
@@ -1236,6 +1244,23 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             ))}
                           </select>
                         </div>
+                        {(() => {
+                          const def = sd.scenarioId ? scenarios.find((s) => s.id === sd.scenarioId) : undefined;
+                          return def?.response_template ? (
+                            <div>
+                              <label className="mb-1 block text-xs text-gray-400">
+                                What the agent might say <span className="text-gray-600">(tentative)</span>
+                              </label>
+                              <p className="rounded-md bg-gray-900/60 p-2 text-[11px] italic text-gray-400">
+                                “{def.response_template}”
+                              </p>
+                              <p className="mt-1 text-[10px] text-gray-600">
+                                Only the default — each member speaks its own line depending on the customer&rsquo;s
+                                reply. Edit the lines themselves in the Playbook.
+                              </p>
+                            </div>
+                          ) : null;
+                        })()}
                         <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
                           A stage in one box: whichever member scenario matches the customer&rsquo;s reply is spoken;
                           anything else gets the default line. Loop the arrow back here to keep the stage alive until

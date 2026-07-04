@@ -73,6 +73,18 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Skip-ahead: a yes never triggers a re-pitch** — reactive answers move the
+  conversation forward while the flow position lags; consent then arrived
+  while the flow still sat before the pitch box, and the walk re-pitched over
+  the customer's yes (seen in several calls). If a speaking box has no line
+  for the reply but the If/Else right after it recognizes it, the box is now
+  passed through silently and the branch fires (logged as skipped_ahead).
+- **Builder: scenarios stay the source of truth** — the Description field is
+  a textarea directly under Label; "What the agent says" is labeled tentative
+  (it IS the scenario's line — editing it edits the Playbook scenario for
+  every script/campaign using it); Collection boxes preview their default
+  line read-only; new lines default to "Just the gist" with Exact words
+  reserved for prices/terms/compliance.
 - **One response per customer turn** — the agent answers naturally within
   ~2s while the scripted line lands at ~5s, producing stitched double
   responses ("Right. Totally fair to ask. Right. Totally fair to ask") and
