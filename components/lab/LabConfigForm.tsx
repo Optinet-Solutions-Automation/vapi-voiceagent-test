@@ -163,7 +163,10 @@ export default function LabConfigForm({ onAssistantChange }: Props) {
         </div>
       </Section>
 
-      <Section title="Short Behavior Prompt" hint="Persona + delivery + how to treat [STAFF] notes — no knowledge.">
+      <Section
+        title="Campaign Persona (fallback)"
+        hint='Identity + delivery only. If the Playbook has an "identity" scenario, THAT is used instead — keep the persona there, next to the opening line. The listener operating rules are appended automatically when pushed.'
+      >
         <textarea
           className={inputCls + " resize-none font-mono text-xs"}
           rows={9}

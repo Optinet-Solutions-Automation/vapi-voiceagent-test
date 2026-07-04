@@ -73,6 +73,16 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **The prompt is composed, not written** — the system prompt now assembles
+  from three layers: the campaign identity (a special "identity" scenario in
+  the Playbook — editable next to the opening line, swapped per campaign like
+  any other data, never routed), an optional short persona fallback in
+  Configuration, and the universal listener operating rules (engagement,
+  STAFF/INSTRUCTION handling, hard rules) which live in code
+  (lab-tools.LAB_OPERATING_RULES) and are appended automatically on push.
+  Campaign seeds shrank ~80%: they now write identity + delivery only.
+  Identity stays standing prompt material rather than an injected scenario
+  because on un-injected turns an agent with no identity invents one.
 - **Lucky Seven campaign setup** — "Alex with BrightPath" mid-call came from
   the persona prompt (lab_settings.short_prompt, set by the demo campaign
   seed and auto-pushed on Start Call). `seed-lucky7-campaign-setup.mjs` now

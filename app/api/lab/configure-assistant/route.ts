@@ -1,8 +1,8 @@
 // One-click "Configure for Lab": attaches tools, serverMessages, server.url and
 // monitorPlan to the chosen assistant so the listener loop can run.
 import { NextResponse } from "next/server";
-import { LAB_TOOLS } from "@/lib/lab-tools";
-import { getLabSettings, saveLabSettings } from "@/lib/lab-db";
+import { LAB_TOOLS, LAB_OPERATING_RULES, DEFAULT_SHORT_PROMPT } from "@/lib/lab-tools";
+import { getLabSettings, saveLabSettings, listHandlers } from "@/lib/lab-db";
 
 const VAPI_BASE = "https://api.vapi.ai";
 
@@ -48,18 +48,26 @@ export async function POST(req: Request) {
   }
   const assistant = await getRes.json();
 
-  // Push the persona prompt from lab settings too — a stale assistant prompt
-  // ("still the old brand") kept haunting test calls when only the settings
-  // row had been updated.
+  // The system prompt is COMPOSED, not written: the campaign persona comes
+  // from the Playbook's special "identity" scenario (editable next to the
+  // opening line, swapped per campaign like any other data), falling back to
+  // lab_settings.short_prompt; the universal listener operating rules are
+  // appended so campaigns never duplicate mechanics. Identity must be
+  // standing prompt material — on un-injected turns an agent with no identity
+  // invents one (the "BrightPath" incident).
+  const identityScenario = await listHandlers()
+    .then((hs) => hs.find((h) => h.intent_key === "identity" && h.enabled))
+    .catch(() => undefined);
+  const persona =
+    identityScenario?.response_template?.trim() || settings?.short_prompt?.trim() || DEFAULT_SHORT_PROMPT;
+  const prompt = `${persona}\n\n${LAB_OPERATING_RULES}`;
+
   const model = assistant.model ?? {};
   let messages: Array<{ role: string; content: string }> = model.messages ?? [];
-  const prompt = settings?.short_prompt?.trim();
-  if (prompt) {
-    const hasSystem = messages.some((m) => m.role === "system");
-    messages = hasSystem
-      ? messages.map((m) => (m.role === "system" ? { ...m, content: prompt } : m))
-      : [{ role: "system", content: prompt }, ...messages];
-  }
+  const hasSystem = messages.some((m) => m.role === "system");
+  messages = hasSystem
+    ? messages.map((m) => (m.role === "system" ? { ...m, content: prompt } : m))
+    : [{ role: "system", content: prompt }, ...messages];
 
   const patchBody = {
     model: { ...model, messages, tools: LAB_TOOLS },

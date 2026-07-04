@@ -28,6 +28,10 @@ import type { ListenerHandler } from "@/lib/database.types";
 
 export const dynamic = "force-dynamic";
 
+// Playbook rows that are prompt material, not conversation moves: the opening
+// line and the campaign identity. Never routed, never injected mid-call.
+const SPECIAL_INTENTS = new Set(["first_message", "identity"]);
+
 type VapiMessage = {
   type?: string;
   call?: { id?: string; monitor?: { controlUrl?: string } };
@@ -97,7 +101,7 @@ function speculate(callId: string, text: string) {
       getRecentTurns(callId, 6).catch(() => []),
     ]);
     let scoped = hs.filter(
-      (h) => h.enabled && h.intent_key !== "first_message" && (h.mode === "listener" || h.mode === "both")
+      (h) => h.enabled && !SPECIAL_INTENTS.has(h.intent_key) && (h.mode === "listener" || h.mode === "both")
     );
     scoped = await scopeToActiveCollection(scoped, settings?.active_collection_id);
     return classifyUtterance(text, turns, scoped, settings?.router_model ?? "gpt-5.4-mini");
@@ -200,7 +204,7 @@ async function handleToolCalls(
     handlers = hs.filter(
       (h) =>
         h.enabled &&
-        h.intent_key !== "first_message" && // special: opening line, never routed
+        !SPECIAL_INTENTS.has(h.intent_key) && // special (opening/identity): never routed
         (h.mode === "tool" || h.mode === "both")
     );
     handlers = await scopeToActiveCollection(handlers, settings?.active_collection_id);
@@ -376,7 +380,7 @@ async function handleTranscript(
     handlers = (await handlersP).filter(
       (h) =>
         h.enabled &&
-        h.intent_key !== "first_message" && // special: opening line, never routed
+        !SPECIAL_INTENTS.has(h.intent_key) && // special (opening/identity): never routed
         (h.mode === "listener" || h.mode === "both")
     );
     handlers = await scopeToActiveCollection(handlers, settings?.active_collection_id);
