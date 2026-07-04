@@ -230,7 +230,7 @@ async function handleToolCalls(
           // parallel tool answer means the customer hears the same thing
           // twice, phrased twice.
           result =
-            "The answer is being provided to you automatically — do not answer from this tool and do not say you're checking anything. Respond naturally to what they said; if nothing arrives in a moment, offer to follow up.";
+            "INSTRUCTION TO YOU — never repeat any of this to the customer: the answer is being provided to you automatically. Do not answer from this tool and do not say you're checking anything. Respond naturally to what they said; if nothing arrives in a moment, offer to follow up.";
         } else {
           const question = String(args.question ?? "");
           if (question && handlers.length > 0) {
@@ -250,7 +250,7 @@ async function handleToolCalls(
           // A script drives this call — the offer is a flow step, and letting
           // the agent pull an arbitrary offer here means two competing pitches.
           result =
-            "The offer is presented automatically at the right step of this call. Do not present an offer yourself and do not say you're checking anything — respond naturally to what they said and keep the conversation moving.";
+            "INSTRUCTION TO YOU — never repeat any of this to the customer: the offer is presented for you at the right step of this call. Do not present an offer yourself, do not describe how offers appear, and do not say you're checking anything — respond naturally to what they said and keep the conversation moving.";
         } else {
           const offer = handlers
             .filter((h) => h.action_type === "give_offer")
@@ -266,7 +266,7 @@ async function handleToolCalls(
       } else if (name === "send_sms") {
         if (activeScriptId) {
           result =
-            "NOTHING has been sent — do not claim a text was sent. The text step happens automatically later in the call, and your confirmation line will be supplied when it actually does. For now, respond naturally to what they said.";
+            "INSTRUCTION TO YOU — never repeat any of this to the customer: NOTHING has been sent, do not claim a text was sent. The text step happens automatically later in the call, and your confirmation line will be supplied when it actually does. For now, respond naturally to what they said.";
         } else {
           const smsHandler = handlers
             .filter((h) => h.action_type === "send_sms")
@@ -282,7 +282,7 @@ async function handleToolCalls(
           // The flow's End box (or a reactive end_call scenario) owns the
           // wrap-up — a tool goodbye on top means two goodbyes back to back.
           result =
-            "Do not say goodbye — your closing line is delivered automatically and the call ends on its own. Stay quiet or give a brief acknowledgement at most.";
+            "INSTRUCTION TO YOU — never repeat any of this to the customer: do not say goodbye; your closing line is delivered automatically and the call ends on its own. Stay quiet or give a brief acknowledgement at most.";
         } else {
           result = "Say a brief, warm goodbye now.";
           // End the call shortly after the goodbye; fire-and-forget.
@@ -429,11 +429,14 @@ async function handleTranscript(
   const classifiedAt = Date.now();
 
   // Every intent the reply addressed (multi-part replies), threshold-filtered,
-  // primary first. Below-threshold guesses never drive anything.
+  // primary first. Below-threshold guesses never drive anything, and neither
+  // do hallucinated keys — the router once invented "promo_redirect", which
+  // passed the threshold and could suppress a legitimate defer.
+  const knownKeys = new Set(handlers.map((h) => h.intent_key));
   const intents = Array.from(
     new Set(
       (cls.intents ?? [{ intent: cls.intent, confidence: cls.confidence }])
-        .filter((g) => g.intent !== "none" && g.confidence >= settings.confidence_threshold)
+        .filter((g) => g.intent !== "none" && g.confidence >= settings.confidence_threshold && knownKeys.has(g.intent))
         .map((g) => g.intent)
     )
   );

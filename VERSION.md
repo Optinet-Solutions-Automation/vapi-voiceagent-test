@@ -73,6 +73,15 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Fifth live-call QA round** — the merge worked in production ("who is
+  this and how did you get my number?" → one flowing paragraph). Remaining
+  defects fixed: the wait-phrases were the agent announcing its own tool
+  calls ("this will just take a sec"), now a hard rule — call tools
+  silently; a gated tool result leaked to the customer ("it shows up
+  automatically at the right step"), all four now carry an "INSTRUCTION TO
+  YOU — never repeat this" prefix; and the router hallucinated an intent key
+  (promo_redirect) that passed the threshold — classified intents are now
+  validated against real handler keys.
 - **Meeting fixes (Val's review)** — three upgrades. (1) *Merged replies*: the
   router now returns every intent a reply addresses (up to three); when a
   multi-part reply ("how much is it — and where did you get my number?")
