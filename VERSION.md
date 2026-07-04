@@ -73,6 +73,15 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **One response per customer turn** — the agent answers naturally within
+  ~2s while the scripted line lands at ~5s, producing stitched double
+  responses ("Right. Totally fair to ask. Right. Totally fair to ask") and
+  questions asked twice. Injections now check the agent_said log: if the
+  agent already replied to this turn, the line is delivered as a
+  CONTINUATION ("continue with ONLY the following, without repeating or
+  re-acknowledging") — and verbatim lines become continuation notes instead
+  of restating on top. Injected events log mode: fresh vs
+  continue_after_reply.
 - **Fifth live-call QA round** — the merge worked in production ("who is
   this and how did you get my number?" → one flowing paragraph). Remaining
   defects fixed: the wait-phrases were the agent announcing its own tool

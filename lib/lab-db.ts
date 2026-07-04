@@ -317,6 +317,22 @@ export async function insertLabEventReturningId(event: EventInsert): Promise<num
   return (data?.id as number) ?? null;
 }
 
+/** Has the agent already spoken since this customer utterance? Injections
+ *  land seconds after the agent's own natural reply — when it has, the line
+ *  must CONTINUE the reply (no re-acknowledging, no re-asking), never start a
+ *  second one. */
+export async function agentSpokeSince(callId: string, afterId: number): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("id")
+    .eq("call_id", callId)
+    .eq("event_type", "agent_said")
+    .gt("id", afterId)
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
 /** Did a newer customer utterance arrive after this one? Split final
  *  transcripts land as separate turns ~1s apart — only the newest deserves a
  *  response; earlier fragments are stale. */

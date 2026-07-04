@@ -8,6 +8,7 @@ import {
   insertLabEvent,
   insertLabEventReturningId,
   hasNewerUtterance,
+  agentSpokeSince,
   getLastInjectedEvent,
   getRecentTurns,
   getCollectionHandlerIds,
@@ -603,10 +604,17 @@ async function handleTranscript(
     // verbatim → the agent speaks the line word-for-word (say);
     // reword → the line is a [STAFF] briefing the agent rephrases (add-message).
     const verbatim = handler.delivery === "verbatim";
+    // One response per customer turn: if the agent already answered naturally
+    // while this line was in flight, it must CONTINUE that reply — never
+    // re-acknowledge, never restart, never ask again.
+    const alreadyReplied =
+      utteranceEventId != null && (await agentSpokeSince(callId, utteranceEventId).catch(() => false));
     // Ground the briefing in the customer's actual words so the reply connects
     // to the conversation instead of reading like a recital.
     const brief = (t: string) =>
-      `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
+      alreadyReplied
+        ? `You already replied to this turn — continue with ONLY the following, WITHOUT repeating or rephrasing anything you just said and without re-acknowledging (keep facts, prices and terms word-accurate): ${t}`
+        : `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
     // Multi-part replies ("how much is it — and where did you get my number?"):
     // fold every additional matched answer into the SAME briefing so the agent
     // gives ONE short reply instead of answering piece by piece.
@@ -641,10 +649,12 @@ async function handleTranscript(
       injectedText = mergeTexts([handler.response_template, ...extraHandlers.map((h) => h.response_template)]);
       injectResult = await injectStaffNote(controlUrl, brief(injectedText), settings.trigger_response);
     } else {
-      // answer / give_offer
-      injectResult = verbatim
-        ? await injectSay(controlUrl, injectedText, false)
-        : await injectStaffNote(controlUrl, brief(injectedText), settings.trigger_response);
+      // answer / give_offer — a verbatim say after the agent's own reply
+      // would restate/re-ask on top of it, so it becomes a continuation note.
+      injectResult =
+        verbatim && !alreadyReplied
+          ? await injectSay(controlUrl, injectedText, false)
+          : await injectStaffNote(controlUrl, brief(injectedText), settings.trigger_response);
     }
 
     const injectedAtMs = Date.now();
@@ -660,7 +670,12 @@ async function handleTranscript(
       classified_at: new Date(classifiedAt).toISOString(),
       injected_at: new Date(injectedAtMs).toISOString(),
       latency_ms: injectedAtMs - utteranceAt.getTime(),
-      meta: { controlStatus: injectResult.status, controlOk: injectResult.ok, delivery: handler.delivery },
+      meta: {
+        controlStatus: injectResult.status,
+        controlOk: injectResult.ok,
+        delivery: handler.delivery,
+        mode: alreadyReplied ? "continue_after_reply" : "fresh",
+      },
     });
   } catch (e) {
     await log({
@@ -719,10 +734,10 @@ async function runScriptFlow(
   }
 
   // Side effects are queued and flushed only when the flow consumes the turn.
-  type PendingLog = { content: string; targetId: string; targetLabel: string; ct: string; edgeCond: unknown; scenarioId: string | null };
+  type PendingLog = { content: string; targetId: string; targetLabel: string; ct: string; edgeCond: unknown; scenarioId: string | null; mode?: string };
   const pending: PendingLog[] = [];
-  const note = (content: string, target: { id: string; label: string }, ct: string, edgeCond: unknown, scenarioId: string | null) =>
-    pending.push({ content, targetId: target.id, targetLabel: target.label, ct, edgeCond, scenarioId });
+  const note = (content: string, target: { id: string; label: string }, ct: string, edgeCond: unknown, scenarioId: string | null, mode?: string) =>
+    pending.push({ content, targetId: target.id, targetLabel: target.label, ct, edgeCond, scenarioId, mode });
 
   // Commit the walk. False = another concurrent turn (split final transcripts)
   // already advanced this call — drop everything; the customer must not hear
@@ -755,7 +770,7 @@ async function runScriptFlow(
         classified_at: new Date(classifiedAt).toISOString(),
         injected_at: new Date(ms).toISOString(),
         latency_ms: ms - utteranceAt.getTime(),
-        meta: { flow: true, toNode: p.targetId, nodeType: p.ct, edgeCondition: p.edgeCond },
+        meta: { flow: true, toNode: p.targetId, nodeType: p.ct, edgeCondition: p.edgeCond, ...(p.mode ? { mode: p.mode } : {}) },
       });
     }
     return true;
@@ -956,10 +971,17 @@ async function runScriptFlow(
 
     if (await staleNow()) return true;
     currentNodeId = target.id;
+    // One response per customer turn: if the agent already answered naturally
+    // while this step was in flight, the line continues that reply instead of
+    // starting a second one (no re-acknowledging, no re-asking).
+    const alreadyReplied =
+      utteranceEventId != null && (await agentSpokeSince(callId, utteranceEventId).catch(() => false));
     // Ground briefings in the customer's actual words — the step should feel
     // like a reply to them, not a recital of the next script line.
     const brief = (t: string) =>
-      `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
+      alreadyReplied
+        ? `You already replied to this turn — continue with ONLY the following, WITHOUT repeating or rephrasing anything you just said and without re-acknowledging (keep facts, prices and terms word-accurate): ${t}`
+        : `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
     let injectedText = "";
     if (ct === "send_sms") {
       injectedText = scenario?.response_template || "The SMS with the details is on its way. Confirm that to the customer.";
@@ -971,7 +993,7 @@ async function runScriptFlow(
       injectedText = scenario.response_template ?? "";
     }
 
-    note(injectedText, target, ct, edgeCond, scenario?.id ?? null);
+    note(injectedText, target, ct, edgeCond, scenario?.id ?? null, alreadyReplied ? "continue_after_reply" : "fresh");
     if (!(await flush())) return true; // lost the race — say nothing
     const controlUrl = await ctl();
     if (controlUrl) {
@@ -983,7 +1005,9 @@ async function runScriptFlow(
         // Merged multi-point reply is always a briefing — one paragraph out.
         await injectStaffNote(controlUrl, brief(injectedText), true);
       } else if (scenario) {
-        scenario.delivery === "verbatim"
+        // A verbatim say after the agent's own reply would restate/re-ask on
+        // top of it — deliver it as a continuation note instead.
+        scenario.delivery === "verbatim" && !alreadyReplied
           ? await injectSay(controlUrl, injectedText, false)
           : await injectStaffNote(controlUrl, brief(injectedText), true);
       }
