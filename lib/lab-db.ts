@@ -339,6 +339,28 @@ export async function agentSpokeSince(callId: string, afterId: number): Promise<
   );
 }
 
+/** The agent's actual spoken words since this utterance (joined fragments,
+ *  most recent tail). Quoted back in continuation briefings — showing the
+ *  model what it already said beats telling it "don't repeat yourself"
+ *  ("This is Tom with Lucky's. I'm Tom with Lucky Seven, and…"). */
+export async function agentWordsSince(callId: string, afterId: number): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("content")
+    .eq("call_id", callId)
+    .eq("event_type", "agent_said")
+    .gt("id", afterId)
+    .order("id", { ascending: true })
+    .limit(10);
+  if (error) throw new Error(error.message);
+  const joined = (data ?? [])
+    .map((e) => (e.content ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+  if (!joined) return null;
+  return joined.length > 220 ? "…" + joined.slice(-220) : joined;
+}
+
 /** Did a newer customer utterance arrive after this one? Split final
  *  transcripts land as separate turns ~1s apart — only the newest deserves a
  *  response; earlier fragments are stale. */

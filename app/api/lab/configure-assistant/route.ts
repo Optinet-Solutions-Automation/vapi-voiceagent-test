@@ -60,7 +60,9 @@ export async function POST(req: Request) {
     .catch(() => undefined);
   const persona =
     identityScenario?.response_template?.trim() || settings?.short_prompt?.trim() || DEFAULT_SHORT_PROMPT;
-  const prompt = `${persona}\n\n${LAB_OPERATING_RULES}`;
+  // The wait-phrase ban is bookended: first line of the prompt AND inside the
+  // hard rules — it kept leaking from an end-only position.
+  const prompt = `ABSOLUTE RULE — never say "hold on", "hold on a sec", "one moment", "just a sec", "just a moment", "give me a second", "please hold" or any wait-phrase, in any situation, ever. If you need a beat: one tiny casual filler ("mm-hmm", "okay so—") or silence.\n\n${persona}\n\n${LAB_OPERATING_RULES}`;
 
   const model = assistant.model ?? {};
   let messages: Array<{ role: string; content: string }> = model.messages ?? [];

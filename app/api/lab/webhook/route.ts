@@ -9,6 +9,7 @@ import {
   insertLabEventReturningId,
   hasNewerUtterance,
   agentSpokeSince,
+  agentWordsSince,
   getLastInjectedEvent,
   getRecentTurns,
   getCollectionHandlerIds,
@@ -610,14 +611,19 @@ async function handleTranscript(
     const verbatim = handler.delivery === "verbatim";
     // One response per customer turn: if the agent already answered naturally
     // while this line was in flight, it must CONTINUE that reply — never
-    // re-acknowledge, never restart, never ask again.
+    // re-acknowledge, never restart, never ask again. Quote its own words
+    // back: showing what it said beats telling it not to repeat itself.
     const alreadyReplied =
       utteranceEventId != null && (await agentSpokeSince(callId, utteranceEventId).catch(() => false));
+    const spokenSince =
+      alreadyReplied && utteranceEventId != null
+        ? await agentWordsSince(callId, utteranceEventId).catch(() => null)
+        : null;
     // Ground the briefing in the customer's actual words so the reply connects
     // to the conversation instead of reading like a recital.
     const brief = (t: string) =>
       alreadyReplied
-        ? `You already replied to this turn — continue with ONLY the following, WITHOUT repeating or rephrasing anything you just said and without re-acknowledging (keep facts, prices and terms word-accurate): ${t}`
+        ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
         : `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
     // Multi-part replies ("how much is it — and where did you get my number?"):
     // fold every additional matched answer into the SAME briefing so the agent
@@ -1003,14 +1009,19 @@ async function runScriptFlow(
     currentNodeId = target.id;
     // One response per customer turn: if the agent already answered naturally
     // while this step was in flight, the line continues that reply instead of
-    // starting a second one (no re-acknowledging, no re-asking).
+    // starting a second one — quoting its own words back so it can't restart
+    // ("This is Tom with Lucky's. I'm Tom with Lucky Seven, and…").
     const alreadyReplied =
       utteranceEventId != null && (await agentSpokeSince(callId, utteranceEventId).catch(() => false));
+    const spokenSince =
+      alreadyReplied && utteranceEventId != null
+        ? await agentWordsSince(callId, utteranceEventId).catch(() => null)
+        : null;
     // Ground briefings in the customer's actual words — the step should feel
     // like a reply to them, not a recital of the next script line.
     const brief = (t: string) =>
       alreadyReplied
-        ? `You already replied to this turn — continue with ONLY the following, WITHOUT repeating or rephrasing anything you just said and without re-acknowledging (keep facts, prices and terms word-accurate): ${t}`
+        ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
         : `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
     let injectedText = "";
     if (ct === "send_sms") {
