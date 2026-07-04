@@ -287,7 +287,7 @@ async function handleToolCalls(
           // The flow's End box (or a reactive end_call scenario) owns the
           // wrap-up — a tool goodbye on top means two goodbyes back to back.
           result =
-            "INSTRUCTION TO YOU — never repeat any of this to the customer: do not say goodbye; your closing line is delivered automatically and the call ends on its own. Stay quiet or give a brief acknowledgement at most.";
+            "INSTRUCTION TO YOU — never repeat any of this to the customer: do not say goodbye; your closing line is delivered automatically and the call ends on its own. The call is WRAPPING UP — never say 'hold on', 'one sec' or any wait-phrase now; a warm 'alright—' is the most you may say, or stay silent.";
         } else {
           result = "Say a brief, warm goodbye now.";
           // End the call shortly after the goodbye; fire-and-forget.
