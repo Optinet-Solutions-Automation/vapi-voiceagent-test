@@ -103,9 +103,11 @@ export async function POST(req: Request) {
       ],
       interruptionPhrases: ["stop", "wait", "hold on", "no no", "excuse me", "actually", "question"],
     },
-    // Wait for the customer to actually finish before replying — coalesces
-    // the split final transcripts that caused double answers.
-    startSpeakingPlan: { waitSeconds: 0.8, smartEndpointingPlan: { provider: "vapi" } },
+    // Wait for the customer to actually finish before replying (smart
+    // endpointing coalesces split finals) — but keep the wait short: fillers
+    // only buy time if they start the instant the customer stops, and the
+    // supersede/lock guards already handle fragment stragglers.
+    startSpeakingPlan: { waitSeconds: 0.5, smartEndpointingPlan: { provider: "vapi" } },
   };
 
   const patchRes = await fetch(`${VAPI_BASE}/assistant/${assistantId}`, {
