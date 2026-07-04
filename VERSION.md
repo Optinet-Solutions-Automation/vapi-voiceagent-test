@@ -73,6 +73,17 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Sixth live-call QA round** — the merge produced one natural paragraph for
+  two questions; three residual defects fixed. The "Right. It's Tom from—"
+  restart: continuation detection relied on the agent's transcript, which
+  lags until a sentence finishes — Vapi's real-time speech-STARTED events now
+  count, so a line landing while the agent is mid-word continues instead of
+  restarting. The abrupt "Great news!" tone jump: main_offer switched from
+  Exact words to Just the gist (facts kept exact by the hard rules; new
+  RETUNED mechanism refreshes it on existing rows). "Yeah, I guess" / "okay"
+  after a direct ask classified as none, so consent never reached the SMS
+  box and the agent promised an unsent text: new router rule — hedged or
+  reluctant agreement after a yes/no ask IS agreement.
 - **The prompt is composed, not written** — the system prompt now assembles
   from three layers: the campaign identity (a special "identity" scenario in
   the Playbook — editable next to the opening line, swapped per campaign like

@@ -34,6 +34,7 @@ ${handlerLines}
 Rules:
 - Back-channel and fillers ("okay", "k", "uh-huh", "right", "hmm", "I hear you", "whatever"), incomplete fragments, a mid-call "hello?", stutters, or background noise → none. These are acknowledgements, not requests.
 - Bare agreement ("yes", "sure", "okay") matches a consent/offer handler ONLY if the agent's last line in the recent turns asked exactly that question; otherwise → none.
+- Hedged or reluctant agreement still counts as agreement: "yeah I guess", "okay fine", "sure, whatever", a bare "okay" — if the agent's last line asked a yes/no question, map these to that question's handler (confidence around 0.8). Only a clear refusal or a new topic breaks the match.
 - Pick a handler only for a substantive reply or question that clearly needs that handler's knowledge or action. When unsure, pick none with low confidence.
 - A reply can contain SEVERAL statements or questions ("yes please — and how much is it?"). List every handler it clearly addresses, most important first — usually one, at most three.
 

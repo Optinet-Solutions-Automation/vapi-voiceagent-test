@@ -317,20 +317,26 @@ export async function insertLabEventReturningId(event: EventInsert): Promise<num
   return (data?.id as number) ?? null;
 }
 
-/** Has the agent already spoken since this customer utterance? Injections
- *  land seconds after the agent's own natural reply — when it has, the line
- *  must CONTINUE the reply (no re-acknowledging, no re-asking), never start a
- *  second one. */
+/** Has the agent already spoken (or STARTED speaking) since this customer
+ *  utterance? Injections land seconds after the agent's own natural reply —
+ *  when it has, the line must CONTINUE the reply (no re-acknowledging, no
+ *  re-asking), never start a second one. Transcripts lag until a sentence
+ *  finishes, so Vapi's real-time speech-started events count too — that lag
+ *  once produced "Right. It's Tom from— Right. It's Tom with Lucky Seven". */
 export async function agentSpokeSince(callId: string, afterId: number): Promise<boolean> {
   const { data, error } = await supabase
     .from("lab_call_events")
-    .select("id")
+    .select("event_type, content")
     .eq("call_id", callId)
-    .eq("event_type", "agent_said")
     .gt("id", afterId)
-    .limit(1);
+    .in("event_type", ["agent_said", "status"])
+    .limit(25);
   if (error) throw new Error(error.message);
-  return (data ?? []).length > 0;
+  return (data ?? []).some(
+    (e) =>
+      e.event_type === "agent_said" ||
+      (e.content ?? "").startsWith("speech-update: started (assistant")
+  );
 }
 
 /** Did a newer customer utterance arrive after this one? Split final

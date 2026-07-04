@@ -63,10 +63,13 @@ const handlers = [
     tags: ["Promotions"],
     description:
       "Customer shows interest, asks what the call is about, what the offer/bonus/surprise is, or says okay tell me more.",
+    // Gist, not verbatim: a canned "Great news —" spoken word-for-word right
+    // after the agent's own sentence broke the tone; the facts (20 spins, no
+    // deposit, today only) stay word-accurate per the hard rules.
     response_template:
-      "Great news — you've got twenty free spins waiting in your account already, no deposit needed. You just log in and activate them, and they're available today only. Would it be alright if I text you the details?",
+      "Present the offer, keeping these facts exact: twenty free spins are already waiting in their account, no deposit needed, available today only — they just log in and activate them. Then ask whether you can text them the details.",
     action_type: "give_offer",
-    delivery: "verbatim",
+    delivery: "reword",
     priority: 10,
     mode: "both",
   },
@@ -286,12 +289,21 @@ const SHORT_PROMPT = `[Identity] You are Tom — a warm, natural-sounding voice 
 
 [Delivery & personality] Calm, human, and easy to talk to. Never rushed or breathy; enunciate clearly and mind your pacing. Keep replies short — one or two sentences — and let the customer lead. Friendly, not pushy. Ignore background noise. Never invent details, prices, or terms.`;
 
+// Scenarios tuned after first seeding — refresh these on existing rows.
+const RETUNED = ["main_offer"];
+
 const { data: existing } = await sb.from("listener_handlers").select("intent_key");
 const have = new Set((existing ?? []).map((r) => r.intent_key));
 let added = 0;
 let skipped = 0;
 for (const h of handlers) {
   if (have.has(h.intent_key)) {
+    if (RETUNED.includes(h.intent_key)) {
+      await sb
+        .from("listener_handlers")
+        .update({ response_template: h.response_template, delivery: h.delivery, updated_at: new Date().toISOString() })
+        .eq("intent_key", h.intent_key);
+    }
     skipped++;
     continue;
   }
