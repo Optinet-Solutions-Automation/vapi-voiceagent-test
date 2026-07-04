@@ -52,6 +52,8 @@ function handleOf(e: ListenerScriptEdge): string {
 
 export type FlowCtx = {
   intent: string;
+  /** All intents the utterance addressed (multi-part replies); primary first. */
+  intents?: string[];
   tags: string[];
   result: string | null;
   /** read/increment a per-edge loop counter; returns the new count */
@@ -79,7 +81,8 @@ export function pickNextEdge(
     const by = (cfg.condBy as string) ?? "intent";
     const value = (cfg.condValue as string) ?? "";
     let truthy = false;
-    if (by === "intent") truthy = value === ctx.intent;
+    // Multi-part replies ("yes — and how much is it?") match on ANY intent.
+    if (by === "intent") truthy = !!value && (ctx.intents ?? [ctx.intent]).includes(value);
     else if (by === "tag") truthy = !!value && ctx.tags.includes(value);
     else if (by === "result") truthy = !!ctx.result && value === ctx.result;
     const want = truthy ? "then" : "else";
@@ -102,7 +105,7 @@ export function pickNextEdge(
     for (const e of legacy) {
       const c = cond(e);
       const by = c.by ?? c.kind;
-      if (by === "intent" && c.value === ctx.intent) return e;
+      if (by === "intent" && c.value && (ctx.intents ?? [ctx.intent]).includes(c.value)) return e;
       if (by === "tag" && c.value && ctx.tags.includes(c.value)) return e;
       if (by === "result" && ctx.result && c.value === ctx.result) return e;
     }

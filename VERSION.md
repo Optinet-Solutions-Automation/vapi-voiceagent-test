@@ -73,6 +73,20 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Meeting fixes (Val's review)** — three upgrades. (1) *Merged replies*: the
+  router now returns every intent a reply addresses (up to three); when a
+  multi-part reply ("how much is it — and where did you get my number?")
+  matches several collection members or Playbook answers, their content is
+  folded into ONE briefing: a single short paragraph, exact facts kept
+  word-accurate. Branching also matches on any of the intents, so "sure,
+  text me — oh and how much?" still takes the consent branch. (2)
+  *Interruption buffer*: acknowledgements ("okay", "uh-huh", "got it") never
+  stop the agent; three or more words do; "stop"/"wait" cut through
+  instantly. And the listener anticipates: partial transcripts warm up the
+  router while the customer is still speaking, so the classification is
+  usually ready the moment they stop. (3) *Latency-matched fillers*: instant
+  answer → no filler; short beat → tiny filler; info being fetched → a
+  bridge phrase that flows into the answer — never dead air.
 - **Fourth live-call QA round** — the double goodbye is gone: in script mode
   the agent's end_call_goodbye tool stands down (the flow's End box or a
   reactive end_call scenario owns the wrap-up and the hang-up). The persona

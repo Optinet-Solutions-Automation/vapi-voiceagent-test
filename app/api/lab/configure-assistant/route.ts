@@ -83,10 +83,18 @@ export async function POST(req: Request) {
       idleTimeoutSeconds: 10,
       idleMessageMaxSpokenCount: 2,
     },
-    // Interruptions are analyzed, not knee-jerk: the customer must say at
-    // least two words before the agent stops talking (back-channel like
-    // "mm-hmm" no longer cuts it off mid-sentence).
-    stopSpeakingPlan: { numWords: 2, backoffSeconds: 1 },
+    // Interruptions are analyzed, not knee-jerk: acknowledgements and noise
+    // never stop the agent; three or more words do; explicit interruption
+    // words ("stop", "wait") cut through instantly.
+    stopSpeakingPlan: {
+      numWords: 3,
+      backoffSeconds: 1,
+      acknowledgementPhrases: [
+        "okay", "ok", "yeah", "yes", "uh-huh", "mm-hmm", "mhm", "right",
+        "sure", "got it", "i see", "alright", "gotcha", "cool", "i hear you",
+      ],
+      interruptionPhrases: ["stop", "wait", "hold on", "no no", "excuse me", "actually", "question"],
+    },
     // Wait for the customer to actually finish before replying — coalesces
     // the split final transcripts that caused double answers.
     startSpeakingPlan: { waitSeconds: 0.8, smartEndpointingPlan: { provider: "vapi" } },

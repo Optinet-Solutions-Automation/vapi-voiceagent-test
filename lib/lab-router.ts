@@ -3,9 +3,15 @@
 import OpenAI from "openai";
 import type { ListenerHandler } from "./database.types";
 
+export type IntentGuess = { intent: string; confidence: number };
+
 export type Classification = {
+  /** Primary (most important) intent — kept for all single-intent logic. */
   intent: string;
   confidence: number;
+  /** Every intent the utterance clearly addresses (a reply can contain
+   *  several questions/statements), most important first. Max 3. */
+  intents: IntentGuess[];
   raw?: string;
 };
 
@@ -29,9 +35,10 @@ Rules:
 - Back-channel and fillers ("okay", "k", "uh-huh", "right", "hmm", "I hear you", "whatever"), incomplete fragments, a mid-call "hello?", stutters, or background noise → none. These are acknowledgements, not requests.
 - Bare agreement ("yes", "sure", "okay") matches a consent/offer handler ONLY if the agent's last line in the recent turns asked exactly that question; otherwise → none.
 - Pick a handler only for a substantive reply or question that clearly needs that handler's knowledge or action. When unsure, pick none with low confidence.
+- A reply can contain SEVERAL statements or questions ("yes please — and how much is it?"). List every handler it clearly addresses, most important first — usually one, at most three.
 
 Given the last customer utterance (and brief context), return ONLY JSON:
-{"intent":"<intent_key or none>","confidence":<0..1>}`;
+{"intents":[{"intent":"<intent_key or none>","confidence":<0..1>}]}`;
 
   const contextBlock =
     recentTurns.length > 0 ? `Recent turns:\n${recentTurns.join("\n")}\n\n` : "";
@@ -73,15 +80,25 @@ Given the last customer utterance (and brief context), return ONLY JSON:
 
   const raw =
     "choices" in completion ? completion.choices[0]?.message?.content ?? "" : "";
+  const none: Classification = { intent: "none", confidence: 0, intents: [{ intent: "none", confidence: 0 }], raw };
   try {
     // Tolerate markdown fences / prose around the JSON
     const jsonText = raw.match(/\{[\s\S]*\}/)?.[0] ?? raw;
     const parsed = JSON.parse(jsonText);
-    const intent = typeof parsed.intent === "string" ? parsed.intent : "none";
-    const confidence =
-      typeof parsed.confidence === "number" ? Math.max(0, Math.min(1, parsed.confidence)) : 0;
-    return { intent, confidence, raw };
+    const clamp = (n: unknown) => (typeof n === "number" ? Math.max(0, Math.min(1, n)) : 0);
+    // New shape {intents:[...]} with legacy {intent,confidence} still accepted.
+    let intents: IntentGuess[] = Array.isArray(parsed.intents)
+      ? parsed.intents
+          .filter((g: unknown): g is Record<string, unknown> => !!g && typeof g === "object")
+          .filter((g: Record<string, unknown>) => typeof g.intent === "string")
+          .map((g: Record<string, unknown>) => ({ intent: g.intent as string, confidence: clamp(g.confidence) }))
+      : typeof parsed.intent === "string"
+        ? [{ intent: parsed.intent, confidence: clamp(parsed.confidence) }]
+        : [];
+    intents = intents.slice(0, 3);
+    if (intents.length === 0) return none;
+    return { intent: intents[0].intent, confidence: intents[0].confidence, intents, raw };
   } catch {
-    return { intent: "none", confidence: 0, raw };
+    return none;
   }
 }

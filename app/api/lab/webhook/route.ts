@@ -16,7 +16,7 @@ import {
   persistFlowStateGuarded,
 } from "@/lib/lab-db";
 import { findEntryNode, nodeById, pickNextEdge, contentTypeOf } from "@/lib/lab-flow";
-import { classifyUtterance } from "@/lib/lab-router";
+import { classifyUtterance, type Classification } from "@/lib/lab-router";
 import {
   getControlUrl,
   injectStaffNote,
@@ -75,6 +75,36 @@ async function log(event: Parameters<typeof insertLabEvent>[0]) {
   }
 }
 
+// ── Anticipatory classification ───────────────────────────────
+// Start the router on the customer's LAST partial transcript while they're
+// still speaking. The final transcript very often equals the last partial, so
+// by the time they stop, the classification is already in flight — the
+// listener anticipates instead of waiting for the turn to end.
+type SpecEntry = { text: string; promise: Promise<Classification>; at: number };
+const speculativeCls = new Map<string, SpecEntry>();
+
+function speculate(callId: string, text: string) {
+  const now = Date.now();
+  for (const [k, v] of speculativeCls) if (now - v.at > 30000) speculativeCls.delete(k);
+  if (text.split(/\s+/).length < 4) return; // too short to be worth a router call
+  const cur = speculativeCls.get(callId);
+  if (cur && (cur.text === text || now - cur.at < 1000)) return; // throttle
+  const promise = (async () => {
+    const [settings, hs, turns] = await Promise.all([
+      getLabSettings(),
+      listHandlers(),
+      getRecentTurns(callId, 6).catch(() => []),
+    ]);
+    let scoped = hs.filter(
+      (h) => h.enabled && h.intent_key !== "first_message" && (h.mode === "listener" || h.mode === "both")
+    );
+    scoped = await scopeToActiveCollection(scoped, settings?.active_collection_id);
+    return classifyUtterance(text, turns, scoped, settings?.router_model ?? "gpt-5.4-mini");
+  })();
+  promise.catch(() => {}); // never an unhandled rejection
+  speculativeCls.set(callId, { text, promise, at: now });
+}
+
 /** Restrict handlers to the active collection (if one is set and non-empty). */
 async function scopeToActiveCollection(
   handlers: ListenerHandler[],
@@ -108,6 +138,13 @@ export async function POST(req: Request) {
       return handleToolCalls(message, callId, controlUrlHint);
 
     case "transcript":
+      // Anticipate while the customer is still speaking: partials warm up the
+      // router so the final's classification is usually already in flight.
+      if (message.role === "user" && message.transcriptType === "partial") {
+        const partial = (message.transcript ?? "").trim();
+        if (partial) speculate(callId, partial);
+        return NextResponse.json({});
+      }
       await handleTranscript(message, callId, controlUrlHint);
       return NextResponse.json({});
 
@@ -362,20 +399,45 @@ async function handleTranscript(
     return;
   }
 
-  // Classify
+  // Classify — reusing the speculative run from the partial transcripts when
+  // the final matches it (the router's answer is then already in flight).
   let cls;
-  try {
-    cls = await classifyUtterance(utterance, recentTurns, handlers, settings.router_model);
-  } catch (e) {
-    await log({
-      call_id: callId,
-      event_type: "error",
-      content: "router failed",
-      meta: { error: e instanceof Error ? e.message : String(e) },
-    });
-    return;
+  let speculativeHit = false;
+  const spec = speculativeCls.get(callId);
+  if (spec && spec.text === utterance) {
+    try {
+      cls = await spec.promise;
+      speculativeHit = true;
+    } catch {
+      /* fall through to a fresh classification */
+    }
+    speculativeCls.delete(callId);
+  }
+  if (!cls) {
+    try {
+      cls = await classifyUtterance(utterance, recentTurns, handlers, settings.router_model);
+    } catch (e) {
+      await log({
+        call_id: callId,
+        event_type: "error",
+        content: "router failed",
+        meta: { error: e instanceof Error ? e.message : String(e) },
+      });
+      return;
+    }
   }
   const classifiedAt = Date.now();
+
+  // Every intent the reply addressed (multi-part replies), threshold-filtered,
+  // primary first. Below-threshold guesses never drive anything.
+  const intents = Array.from(
+    new Set(
+      (cls.intents ?? [{ intent: cls.intent, confidence: cls.confidence }])
+        .filter((g) => g.intent !== "none" && g.confidence >= settings.confidence_threshold)
+        .map((g) => g.intent)
+    )
+  );
+  const flowIntent = intents[0] ?? "none";
 
   await log({
     call_id: callId,
@@ -385,13 +447,13 @@ async function handleTranscript(
     confidence: cls.confidence,
     utterance_at: utteranceAt.toISOString(),
     classified_at: new Date(classifiedAt).toISOString(),
-    meta: { raw: cls.raw },
+    meta: { raw: cls.raw, intents, speculative: speculativeHit },
   });
 
   // Can the Playbook answer this turn on its own? The flow uses this to let
   // off-script questions fall through to the reactive layer instead of
   // dragging them down an Else branch.
-  const reactiveHandler = handlers.find((h) => h.intent_key === cls.intent);
+  const reactiveHandler = handlers.find((h) => h.intent_key === flowIntent);
   // Conversion actions are flow steps: when a script is active the reactive
   // layer must never pitch the offer or confirm an SMS out of order — that
   // desyncs the conversation from the flow position for the rest of the call.
@@ -401,11 +463,7 @@ async function handleTranscript(
     !!reactiveHandler &&
     (reactiveHandler.action_type === "send_sms" || reactiveHandler.action_type === "give_offer");
   const reactiveCanHandle =
-    cls.intent !== "none" &&
-    cls.confidence >= settings.confidence_threshold &&
-    !!reactiveHandler &&
-    reactiveHandler.action_type !== "ignore" &&
-    !flowOwnsAction;
+    flowIntent !== "none" && !!reactiveHandler && reactiveHandler.action_type !== "ignore" && !flowOwnsAction;
 
   // Split finals: if a newer customer fragment arrived while we were busy
   // classifying, this one is stale — the newest fragment gets the response.
@@ -420,11 +478,6 @@ async function handleTranscript(
     return;
   }
 
-  // Below-threshold guesses must never drive branching (a 0.4-confidence
-  // "consent" once marched a live question straight into the goodbye) — the
-  // flow sees such turns as "none" and just follows plain arrows.
-  const flowIntent = cls.confidence >= settings.confidence_threshold ? cls.intent : "none";
-
   // ── Script runtime: if a script is active, try to advance the flow first.
   //    Reactive scenarios still handle anything the flow doesn't consume.
   if (settings.active_script_id) {
@@ -434,6 +487,7 @@ async function handleTranscript(
         controlUrlHint,
         settings.active_script_id,
         flowIntent,
+        intents,
         utterance,
         utteranceAt,
         classifiedAt,
@@ -474,21 +528,21 @@ async function handleTranscript(
   // agent answers from its own context.
   if (
     lastInjected?.injected_at &&
-    lastInjected.intent_key === cls.intent &&
+    lastInjected.intent_key === flowIntent &&
     receivedAt - new Date(lastInjected.injected_at).getTime() < 45000
   ) {
     await log({
       call_id: callId,
       event_type: "skipped",
       content: utterance,
-      intent_key: cls.intent,
+      intent_key: flowIntent,
       meta: { reason: "repeat_suppressed" },
     });
     return;
   }
 
   // Decision gate — the conflict protocol
-  if (cls.intent === "none" || cls.confidence < settings.confidence_threshold) {
+  if (flowIntent === "none") {
     await log({
       call_id: callId,
       event_type: "skipped",
@@ -500,7 +554,7 @@ async function handleTranscript(
     return;
   }
 
-  const handler = handlers.find((h) => h.intent_key === cls.intent);
+  const handler = handlers.find((h) => h.intent_key === flowIntent);
   if (!handler || handler.action_type === "ignore" || flowOwnsAction) {
     await log({
       call_id: callId,
@@ -550,6 +604,16 @@ async function handleTranscript(
     // to the conversation instead of reading like a recital.
     const brief = (t: string) =>
       `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
+    // Multi-part replies ("how much is it — and where did you get my number?"):
+    // fold every additional matched answer into the SAME briefing so the agent
+    // gives ONE short reply instead of answering piece by piece.
+    const extraHandlers = intents
+      .slice(1)
+      .map((k) => handlers.find((h) => h.intent_key === k))
+      .filter((h): h is ListenerHandler => !!h && h.action_type === "answer" && h.id !== handler.id);
+    const mergeTexts = (texts: string[]) =>
+      `The customer raised ${texts.length} points at once — cover ALL of them in ONE short, natural reply (a single paragraph, keep exact facts, prices and terms word-accurate): ` +
+      texts.map((t, i) => `(${i + 1}) ${t}`).join(" ");
 
     if (handler.action_type === "end_call") {
       // Goodbyes are always spoken verbatim, then the call ends.
@@ -569,6 +633,10 @@ async function handleTranscript(
       injectResult = verbatim
         ? await injectSay(controlUrl, injectedText, false)
         : await injectStaffNote(controlUrl, brief(injectedText), settings.trigger_response);
+    } else if (extraHandlers.length > 0) {
+      // answer / give_offer with additional matched answers → one merged reply
+      injectedText = mergeTexts([handler.response_template, ...extraHandlers.map((h) => h.response_template)]);
+      injectResult = await injectStaffNote(controlUrl, brief(injectedText), settings.trigger_response);
     } else {
       // answer / give_offer
       injectResult = verbatim
@@ -618,6 +686,7 @@ async function runScriptFlow(
   controlUrlHint: string | null,
   activeScriptId: string,
   intent: string,
+  intents: string[],
   utterance: string,
   utteranceAt: Date,
   classifiedAt: number,
@@ -732,12 +801,12 @@ async function runScriptFlow(
       if ((c.handle as string) !== "then") return false;
       const cfg = (node.config ?? {}) as Record<string, unknown>;
       const by = (cfg.condBy as string) ?? "intent";
-      if (by === "intent") return cfg.condValue === intent;
+      if (by === "intent") return intents.includes(cfg.condValue as string);
       if (by === "tag") return !!cfg.condValue && intentTags.includes(cfg.condValue as string);
       return false; // result-driven — unrelated to this utterance
     }
     const by = (c.by as string) ?? (c.kind as string);
-    if (by === "intent") return c.value === intent;
+    if (by === "intent") return intents.includes(c.value as string);
     if (by === "tag") return !!c.value && intentTags.includes(c.value as string);
     return false;
   }
@@ -765,7 +834,7 @@ async function runScriptFlow(
     } else {
       const currentNode = nodeById(graph.nodes, currentNodeId!);
       if (!currentNode) return false;
-      const edge = pickNextEdge(currentNode, graph.edges, { intent, tags: intentTags, result, bumpLoop });
+      const edge = pickNextEdge(currentNode, graph.edges, { intent, intents, tags: intentTags, result, bumpLoop });
       if (!edge) return false; // nowhere to go → reactive layer handles it
       if (edgeRecognizedIntent(currentNode, edge)) pathExpected = true;
       target = nodeById(graph.nodes, edge.target_node_id);
@@ -831,7 +900,7 @@ async function runScriptFlow(
     if (ct === "end" || ct === "return") {
       // End Call (or a top-level Return) → goodbye + hang up.
       const scn = handlerById(target.scenario_id);
-      if (reactiveCanHandle && !pathExpected && scn?.intent_key !== intent) return defer(target.label || ct);
+      if (reactiveCanHandle && !pathExpected && !(scn && intents.includes(scn.intent_key))) return defer(target.label || ct);
       if (await staleNow()) return true;
       const text = scn?.response_template || "Thanks for your time today. Goodbye!";
       currentNodeId = target.id;
@@ -848,27 +917,38 @@ async function runScriptFlow(
     // ── Speaking / action steps: consume the turn (or defer if the reply
     //    belongs to the Playbook and this box has no line for it) ──
     let scenario: ListenerHandler | null = null;
+    // Multi-part replies at a collection: every matched member's content is
+    // folded into ONE briefing so the agent gives a single short reply.
+    let mergedText: string | null = null;
 
     if (ct === "scenario") {
       const cands = [target.scenario_id, ...((cfg.candidateScenarioIds as string[]) ?? [])].filter(Boolean) as string[];
-      const match = allHandlers.find((h) => cands.includes(h.id) && h.intent_key === intent) ?? null;
+      const match = allHandlers.find((h) => cands.includes(h.id) && intents.includes(h.intent_key)) ?? null;
       if (reactiveCanHandle && !pathExpected && !match) return defer(target.label || ct);
       scenario = match ?? handlerById(target.scenario_id) ?? handlerById(cands[0]);
     } else if (ct === "collection") {
       const ids = cfg.collectionId ? await getCollectionHandlerIds(cfg.collectionId as string).catch(() => []) : [];
-      const match = allHandlers.find((h) => ids.includes(h.id) && h.intent_key === intent) ?? null;
-      if (reactiveCanHandle && !pathExpected && !match) return defer(target.label || ct);
+      // Keep the customer's order of points: sort matches by intent position.
+      const matches = allHandlers
+        .filter((h) => ids.includes(h.id) && intents.includes(h.intent_key))
+        .sort((a, b) => intents.indexOf(a.intent_key) - intents.indexOf(b.intent_key));
+      if (reactiveCanHandle && !pathExpected && matches.length === 0) return defer(target.label || ct);
+      if (matches.length > 1) {
+        mergedText =
+          `The customer raised ${matches.length} points at once — cover ALL of them in ONE short, natural reply (a single paragraph, keep exact facts, prices and terms word-accurate): ` +
+          matches.map((m, i) => `(${i + 1}) ${m.response_template}`).join(" ");
+      }
       // No member fits the reply → the box's default line; failing that, the
       // highest-priority member (never an arbitrary row).
       scenario =
-        match ??
+        matches[0] ??
         handlerById(target.scenario_id) ??
         allHandlers.filter((h) => ids.includes(h.id)).sort((a, b) => a.priority - b.priority)[0] ??
         null;
     } else {
       // send_sms / transfer
       scenario = handlerById(target.scenario_id);
-      if (reactiveCanHandle && !pathExpected && scenario?.intent_key !== intent) return defer(target.label || ct);
+      if (reactiveCanHandle && !pathExpected && !(scenario && intents.includes(scenario.intent_key))) return defer(target.label || ct);
     }
 
     if (await staleNow()) return true;
@@ -882,6 +962,8 @@ async function runScriptFlow(
       injectedText = scenario?.response_template || "The SMS with the details is on its way. Confirm that to the customer.";
     } else if (ct === "transfer") {
       injectedText = scenario?.response_template || "Thanks — let me connect you to one of our team now.";
+    } else if (mergedText) {
+      injectedText = mergedText;
     } else if (scenario) {
       injectedText = scenario.response_template ?? "";
     }
@@ -894,6 +976,9 @@ async function runScriptFlow(
         await injectStaffNote(controlUrl, brief(injectedText), true);
       } else if (ct === "transfer") {
         await injectSay(controlUrl, injectedText, false);
+      } else if (mergedText) {
+        // Merged multi-point reply is always a briefing — one paragraph out.
+        await injectStaffNote(controlUrl, brief(injectedText), true);
       } else if (scenario) {
         scenario.delivery === "verbatim"
           ? await injectSay(controlUrl, injectedText, false)
