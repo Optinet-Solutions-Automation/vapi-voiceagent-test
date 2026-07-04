@@ -73,6 +73,16 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Speaking lock — injections never overlap the agent** — the overlapping
+  double-intro returned because speech-update was missing from
+  serverMessages: Vapi never sent the events, leaving started-speaking
+  detection blind. Fixed, and injections now hold a speaking lock: if the
+  agent is mid-sentence, the line waits (short poll, 4s cap) for
+  speech-stopped, re-checks staleness, then lands as a continuation quoting
+  the agent's words so far. Real interruptions still cut through
+  (stopSpeakingPlan: "wait"/"stop" instant, 3+ words interrupt); nods and
+  noise never do. The wait-phrase ban is bookended as the composed prompt's
+  first line.
 - **Sixth live-call QA round** — the merge produced one natural paragraph for
   two questions; three residual defects fixed. The "Right. It's Tom from—"
   restart: continuation detection relied on the agent's transcript, which

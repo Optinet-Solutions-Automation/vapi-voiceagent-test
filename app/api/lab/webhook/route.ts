@@ -10,6 +10,7 @@ import {
   hasNewerUtterance,
   agentSpokeSince,
   agentWordsSince,
+  assistantSpeaking,
   getLastInjectedEvent,
   getRecentTurns,
   getCollectionHandlerIds,
@@ -78,6 +79,18 @@ async function log(event: Parameters<typeof insertLabEvent>[0]) {
     await insertLabEvent(event);
   } catch (e) {
     console.error("[lab webhook] failed to log event:", e);
+  }
+}
+
+// Speaking lock: never fire an injection while the agent is mid-sentence —
+// that's what produced the overlapping double-intro. Poll briefly until it
+// stops (or a short cap, so a long monologue can't block the line forever).
+async function waitForAgentSilence(callId: string, maxMs = 4000): Promise<void> {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    const speaking = await assistantSpeaking(callId).catch(() => false);
+    if (!speaking) return;
+    await new Promise((r) => setTimeout(r, 400));
   }
 }
 
@@ -603,6 +616,21 @@ async function handleTranscript(
     return;
   }
 
+  // Speaking lock: never inject over a mid-sentence agent — wait for it to
+  // finish, then deliver as a continuation. A fragment may land while
+  // waiting, so staleness is re-checked after.
+  await waitForAgentSilence(callId);
+  if (utteranceEventId != null && (await hasNewerUtterance(callId, utteranceEventId).catch(() => false))) {
+    await log({
+      call_id: callId,
+      event_type: "skipped",
+      content: utterance,
+      intent_key: cls.intent,
+      meta: { reason: "superseded" },
+    });
+    return;
+  }
+
   try {
     let injectResult;
     let injectedText = handler.response_template;
@@ -944,6 +972,8 @@ async function runScriptFlow(
       const scn = handlerById(target.scenario_id);
       if (reactiveCanHandle && !pathExpected && !(scn && intents.includes(scn.intent_key))) return defer(target.label || ct);
       if (await staleNow()) return true;
+      await waitForAgentSilence(callId); // speaking lock
+      if (await staleNow()) return true;
       const text = scn?.response_template || "Thanks for your time today. Goodbye!";
       currentNodeId = target.id;
       note(text, target, ct, edgeCond, scn?.id ?? null);
@@ -1005,6 +1035,10 @@ async function runScriptFlow(
       if (reactiveCanHandle && !pathExpected && !(scenario && intents.includes(scenario.intent_key))) return defer(target.label || ct);
     }
 
+    if (await staleNow()) return true;
+    // Speaking lock: if the agent is mid-sentence, wait for it to finish —
+    // the line then lands as a continuation instead of an overlap.
+    await waitForAgentSilence(callId);
     if (await staleNow()) return true;
     currentNodeId = target.id;
     // One response per customer turn: if the agent already answered naturally

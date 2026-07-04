@@ -361,6 +361,23 @@ export async function agentWordsSince(callId: string, afterId: number): Promise<
   return joined.length > 220 ? "…" + joined.slice(-220) : joined;
 }
 
+/** Is the assistant speaking RIGHT NOW? True when its latest speech-update
+ *  status event is a "started" without a later "stopped". Powers the speaking
+ *  lock: a response-triggering injection over a mid-sentence agent produces
+ *  the overlapping double-intro. */
+export async function assistantSpeaking(callId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("content")
+    .eq("call_id", callId)
+    .eq("event_type", "status")
+    .like("content", "speech-update:%(assistant)")
+    .order("id", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return ((data ?? [])[0]?.content ?? "").startsWith("speech-update: started");
+}
+
 /** Did a newer customer utterance arrive after this one? Split final
  *  transcripts land as separate turns ~1s apart — only the newest deserves a
  *  response; earlier fragments are stale. */

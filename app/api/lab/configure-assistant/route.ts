@@ -78,6 +78,10 @@ export async function POST(req: Request) {
       "tool-calls",
       "transcript",
       "status-update",
+      // Real-time speaking state: powers the speaking lock (never inject over
+      // the agent mid-sentence) and started-speaking detection. Without this
+      // in serverMessages, Vapi never sends the events and both are blind.
+      "speech-update",
       "end-of-call-report",
     ],
     monitorPlan: { listenEnabled: true, controlEnabled: true },
