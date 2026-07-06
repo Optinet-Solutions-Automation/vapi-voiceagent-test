@@ -665,15 +665,22 @@ async function handleTranscript(
       texts.map((t, i) => `(${i + 1}) ${t}`).join(" ");
 
     if (handler.action_type === "end_call") {
-      // Goodbyes are always spoken verbatim, then the call ends.
-      injectedText = handler.response_template || "Thanks for your time today. Goodbye!";
-      injectResult = await injectSay(controlUrl, injectedText, true);
-      if (!injectResult.ok) {
-        // Fallback: plain say then explicit end-call
-        injectResult = await injectSay(controlUrl, injectedText, false);
-        setTimeout(() => {
-          endCall(controlUrl).catch(() => {});
-        }, 4000);
+      if (!handler.response_template) {
+        // Empty template = machine/voicemail detected: hang up WITHOUT
+        // speaking — pitching into a recording costs money and never sells.
+        injectResult = await endCall(controlUrl);
+        injectedText = "(machine detected — hung up without speaking)";
+      } else {
+        // Goodbyes are spoken verbatim, then the call ends.
+        injectedText = handler.response_template;
+        injectResult = await injectSay(controlUrl, injectedText, true);
+        if (!injectResult.ok) {
+          // Fallback: plain say then explicit end-call
+          injectResult = await injectSay(controlUrl, injectedText, false);
+          setTimeout(() => {
+            endCall(controlUrl).catch(() => {});
+          }, 4000);
+        }
       }
     } else if (handler.action_type === "send_sms") {
       injectedText =

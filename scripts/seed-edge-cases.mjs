@@ -38,6 +38,32 @@ const scenarios = [
     priority: 5,
     mode: "both",
   },
+  {
+    name: "Edge — voicemail / machine answered",
+    intent_key: "edge_machine_detected",
+    tags: ["Edge Cases", "Compliance"],
+    description:
+      "Not a live person: a voicemail greeting, recording, carrier intercept, or phone menu — 'leave a message', 'after the tone', 'voicemail', 'can't take your call', 'not available', 'record your message', 'you've reached', 'press 1', 'press hash', 'main menu', 'number not in service', 'call cannot be completed', 'has been disconnected', 'thank you for calling'.",
+    // Empty template = hang up WITHOUT speaking — never pitch into a recording.
+    response_template: "",
+    action_type: "end_call",
+    delivery: "verbatim",
+    priority: 1,
+    mode: "both",
+  },
+  {
+    name: "Edge — don't text me",
+    intent_key: "edge_no_sms",
+    tags: ["Edge Cases", "Compliance"],
+    description:
+      "Customer objects to being texted or messaged — don't text me, no SMS, stop messaging me, don't send me anything, I don't want texts.",
+    response_template:
+      "They declined texts — accept it the FIRST time, never pressure, never send. Acknowledge politely, mention everything is visible in their account when they log in, and move to a warm close.",
+    action_type: "answer",
+    delivery: "reword",
+    priority: 6,
+    mode: "both",
+  },
   // ── Suspicion & identity ──
   {
     name: "Edge — who is this?",

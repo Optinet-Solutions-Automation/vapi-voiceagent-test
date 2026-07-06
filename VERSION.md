@@ -73,6 +73,20 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Victor @ Lucky Seven campaign (v2 production spec)** — the previous AI
+  agent's full prompt decomposed into data: Victor identity + opening in the
+  Playbook, ten v7_* campaign scenarios (spins reveal as a personal favor,
+  expiry + 300% deposit bonus, SMS announce-and-send, not-interested still
+  sends "in case you change your mind", wrong number, no-longer-plays,
+  website spelling, goodbye), the "Lucky Seven — Victor (v2)" collection (32
+  scenarios incl. lucky7 Q&A/compliance), and the "Lucky Seven — Victor
+  Call" script (stages → objects-to-texts If/Else → SMS box → goodbye).
+  Platform rules became neutral scenarios + code: edge_no_sms (a texts
+  objection is accepted the FIRST time — flow branch skips the send) and
+  edge_machine_detected (voicemail/carrier/IVR greetings → the call ends
+  WITHOUT speaking: empty-template end_call now hangs up silently; new
+  router rule recognizes recordings). Structure enforces: SMS dispatch
+  verbally confirmed, never ending right on consent.
 - **Misheard-reply scenario** — when a reply is substantive but fits nothing
   (an STT mishearing like "store" for "sure" right after a yes/no question),
   the router now routes it to the new "Edge — unclear / misheard reply"
