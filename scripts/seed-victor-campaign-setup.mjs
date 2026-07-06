@@ -387,12 +387,15 @@ const start = node("Start call", "start", { mode: "agent_first" }, null, 272, 16
 const stage1 = node("Stage 1 — Opening replies", "step", { contentType: "collection", collectionId: stage1Id }, scn("v7_ack_bridge"), 272, 144);
 const reveal = node("Reveal the free spins", "step", { contentType: "scenario" }, scn("v7_spins_reveal"), 272, 288);
 const stage2 = node("Stage 2 — Reactions & questions", "step", { contentType: "collection", collectionId: stage2Id }, scn("v7_expiry_bonus"), 272, 432);
-const noSms = node("Objects to texts?", "step", { contentType: "ifelse", condBy: "intent", condValue: "edge_no_sms" }, null, 272, 576);
-const wrap = node("Wrap without SMS", "step", { contentType: "scenario" }, scn("v7_no_sms_wrap"), 80, 720);
-const sms = node("Announce & send the SMS", "step", { contentType: "send_sms" }, scn("v7_sms_announce"), 464, 720);
-const end = node("Goodbye", "step", { contentType: "end" }, scn("v7_goodbye"), 272, 864);
+// Consent is checked FIRST — "just send me the SMS" must jump straight to the
+// send (chain skip-ahead sees both if/elses); only then the objection check.
+const saidYes = node("Asked for the text?", "step", { contentType: "ifelse", condBy: "intent", condValue: "sms_consent" }, null, 272, 576);
+const noSms = node("Objects to texts?", "step", { contentType: "ifelse", condBy: "intent", condValue: "edge_no_sms" }, null, 464, 664);
+const wrap = node("Wrap without SMS", "step", { contentType: "scenario" }, scn("v7_no_sms_wrap"), 656, 780);
+const sms = node("Announce & send the SMS", "step", { contentType: "send_sms" }, scn("v7_sms_announce"), 160, 780);
+const end = node("Goodbye", "step", { contentType: "end" }, scn("v7_goodbye"), 272, 920);
 
-const nodes = [start, stage1, reveal, stage2, noSms, wrap, sms, end];
+const nodes = [start, stage1, reveal, stage2, saidYes, noSms, wrap, sms, end];
 const edge = (s, t, handle = "out", label = "") => ({
   id: randomUUID(),
   script_id: scriptId,
@@ -405,7 +408,9 @@ const edges = [
   edge(start, stage1),
   edge(stage1, reveal),
   edge(reveal, stage2),
-  edge(stage2, noSms),
+  edge(stage2, saidYes),
+  edge(saidYes, sms, "then", "Then"),
+  edge(saidYes, noSms, "else", "Else"),
   edge(noSms, wrap, "then", "Then"),
   edge(noSms, sms, "else", "Else"),
   edge(wrap, end),

@@ -73,6 +73,19 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Ninth live-call QA (two Victor calls)** — three fixes. False send claims
+  ("I just sent the SMS over") returned when script mode dropped the tools —
+  the guard lived in the gated tool result; it's now standing hard rule 7:
+  never mention sending until the system's confirmation line arrives.
+  Explicit consent ("just send me the SMS") was ignored at Stage 2 because
+  the Victor script's only branch was the objection check — a consent
+  If/Else now comes first, and skip-ahead walks CHAINS of consecutive
+  If/Elses (via their Else edges), so consent from any position jumps
+  straight to the send while objections still reach the no-SMS wrap. The
+  reactive layer front-ran the pitch with lucky7's upsell ("do you have
+  something for me?" → the $500 version before the reveal): upsell_offer is
+  now give_offer, flow-owned in script mode. The who-is-this briefing no
+  longer commands a full re-introduction after the first one.
 - **Eighth live-call QA — fragments fold, the pitch lands** — the spins
   reveal never happened because v7_ack_bridge's reply-shaped description let
   the router match every "what about it?" to the bridge (defer loop, flow

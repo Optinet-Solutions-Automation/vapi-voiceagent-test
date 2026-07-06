@@ -71,7 +71,7 @@ const scenarios = [
     tags: ["Edge Cases", "Trust"],
     description: "Customer asks who's calling, who this is, or what company you're from.",
     response_template:
-      "Give your name and company again, remind them you're calling about the account they created with us this week, and reassure them it's just a quick courtesy call. Then return to the reason for the call.",
+      "Give your name and company again, remind them you're calling about the account they created with us this week, and reassure them it's just a quick courtesy call. Then return to the reason for the call. If you've already introduced yourself earlier in this call, do NOT restate the full introduction — a quick 'still me' with your name, then answer what they actually asked.",
     action_type: "answer",
     delivery: "reword",
     priority: 18,
@@ -209,7 +209,7 @@ const scenarios = [
 ];
 
 // Templates tuned after the first seeding — refresh them on existing rows.
-const RETUNED = ["edge_repeat_that"];
+const RETUNED = ["edge_repeat_that", "edge_who_is_this"];
 
 const { data: existing } = await sb.from("listener_handlers").select("id, intent_key");
 const have = new Set((existing ?? []).map((r) => r.intent_key));

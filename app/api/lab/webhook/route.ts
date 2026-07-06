@@ -886,18 +886,29 @@ async function runScriptFlow(
     return false;
   }
 
-  // Does the single box after `fromId` branch on one of this turn's intents?
-  // Used to skip a speaking box the reply has already answered past — consent
-  // arriving while the flow still sits before the pitch must take the branch,
-  // not trigger a re-pitch.
+  // Does an if/else within the next few hops branch on one of this turn's
+  // intents? Used to skip a speaking box the reply has already answered past —
+  // consent arriving while the flow still sits before the pitch (or before a
+  // chain of checks) must take its branch, not trigger the box's default.
+  // Chains of consecutive if/elses are walked via their Else edges.
   function nextIfElseRecognizes(fromId: string): boolean {
-    const outs = graph.edges.filter((e) => e.source_node_id === fromId);
-    if (outs.length !== 1) return false;
-    const nxt = nodeById(graph.nodes, outs[0].target_node_id);
-    if (!nxt || contentTypeOf(nxt) !== "ifelse") return false;
-    const c = (nxt.config ?? {}) as Record<string, unknown>;
-    if (((c.condBy as string) ?? "intent") !== "intent") return false;
-    return intents.includes(c.condValue as string);
+    let cursor = fromId;
+    for (let hops = 0; hops < 3; hops++) {
+      const outs = graph.edges.filter((e) => e.source_node_id === cursor);
+      const step =
+        hops === 0
+          ? outs.length === 1
+            ? outs[0]
+            : undefined
+          : outs.find((e) => (((e.condition ?? {}) as Record<string, unknown>).handle as string) === "else");
+      if (!step) return false;
+      const nxt = nodeById(graph.nodes, step.target_node_id);
+      if (!nxt || contentTypeOf(nxt) !== "ifelse") return false;
+      const c = (nxt.config ?? {}) as Record<string, unknown>;
+      if (((c.condBy as string) ?? "intent") === "intent" && intents.includes(c.condValue as string)) return true;
+      cursor = nxt.id;
+    }
+    return false;
   }
 
   // Fetch the control URL lazily — a deferred walk never needs it.

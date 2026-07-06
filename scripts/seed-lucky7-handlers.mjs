@@ -81,7 +81,9 @@ const handlers = [
       "Customer asks if there is anything more, another bonus, a deposit offer, or about the extra treat mentioned in the SMS.",
     response_template:
       "There's also an exclusive bonus — a three hundred percent match up to five hundred dollars on a deposit, with just a thirty dollar minimum. The twenty free spins themselves still need no deposit at all.",
-    action_type: "answer",
+    // give_offer: flow-owned in script mode — a reactive "do you have
+    // something for me?" once delivered this BEFORE the scripted reveal.
+    action_type: "give_offer",
     delivery: "verbatim",
     priority: 11,
     mode: "both",
@@ -290,7 +292,7 @@ const SHORT_PROMPT = `[Identity] You are Tom — a warm, natural-sounding voice 
 [Delivery & personality] Calm, human, and easy to talk to. Never rushed or breathy; enunciate clearly and mind your pacing. Keep replies short — one or two sentences — and let the customer lead. Friendly, not pushy. Ignore background noise. Never invent details, prices, or terms.`;
 
 // Scenarios tuned after first seeding — refresh these on existing rows.
-const RETUNED = ["main_offer"];
+const RETUNED = ["main_offer", "upsell_offer"];
 
 const { data: existing } = await sb.from("listener_handlers").select("intent_key");
 const have = new Set((existing ?? []).map((r) => r.intent_key));
@@ -301,7 +303,12 @@ for (const h of handlers) {
     if (RETUNED.includes(h.intent_key)) {
       await sb
         .from("listener_handlers")
-        .update({ response_template: h.response_template, delivery: h.delivery, updated_at: new Date().toISOString() })
+        .update({
+          response_template: h.response_template,
+          delivery: h.delivery,
+          action_type: h.action_type,
+          updated_at: new Date().toISOString(),
+        })
         .eq("intent_key", h.intent_key);
     }
     skipped++;
