@@ -361,6 +361,40 @@ export async function agentWordsSince(callId: string, afterId: number): Promise<
   return joined.length > 220 ? "…" + joined.slice(-220) : joined;
 }
 
+/** The immediately-previous customer fragment, if it's recent and unanswered.
+ *  Split finals ("who is this again?" + "what is this about?") are ONE
+ *  customer turn — the newest fragment folds the previous one in before
+ *  classification so multi-part merging works across fragments. */
+export async function recentUnansweredFragment(
+  callId: string,
+  beforeId: number,
+  withinMs: number
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("id, content, utterance_at")
+    .eq("call_id", callId)
+    .eq("event_type", "utterance")
+    .lt("id", beforeId)
+    .order("id", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const prev = (data ?? [])[0];
+  if (!prev?.utterance_at) return null;
+  if (Date.now() - new Date(prev.utterance_at).getTime() > withinMs) return null;
+  // If anything was already injected after it, that turn is answered — done.
+  const { data: inj, error: e2 } = await supabase
+    .from("lab_call_events")
+    .select("id")
+    .eq("call_id", callId)
+    .eq("event_type", "injected")
+    .gt("id", prev.id)
+    .limit(1);
+  if (e2) throw new Error(e2.message);
+  if ((inj ?? []).length > 0) return null;
+  return (prev.content ?? "").trim() || null;
+}
+
 /** Is the assistant speaking RIGHT NOW? True when its latest speech-update
  *  status event is a "started" without a later "stopped". Powers the speaking
  *  lock: a response-triggering injection over a mid-sentence agent produces

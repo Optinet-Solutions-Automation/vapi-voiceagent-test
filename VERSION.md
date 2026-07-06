@@ -73,6 +73,16 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Eighth live-call QA — fragments fold, the pitch lands** — the spins
+  reveal never happened because v7_ack_bridge's reply-shaped description let
+  the router match every "what about it?" to the bridge (defer loop, flow
+  parked forever): the speak-only description rule now applies to all Victor
+  flow lines. Split finals ("who is this again?" + "what is this about?")
+  now FOLD into one turn before classification — the newest fragment
+  prepends the recent unanswered one, so multi-part merging works across
+  fragments and both questions get one combined answer. The speaking-lock
+  cap rises to 6s (a long agent monologue outlasted 4s and got overlapped).
+  Notably absent from this call: wait-phrases — tool removal worked.
 - **Seventh live-call QA (Victor's first run)** — the SMS "didn't send"
   because nothing real is wired: the lab simulates sends. The timeline now
   says so explicitly (an "sms — SIMULATED" event); real sends need an SMS

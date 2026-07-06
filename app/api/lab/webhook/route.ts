@@ -11,6 +11,7 @@ import {
   agentSpokeSince,
   agentWordsSince,
   assistantSpeaking,
+  recentUnansweredFragment,
   getLastInjectedEvent,
   getRecentTurns,
   getCollectionHandlerIds,
@@ -85,7 +86,7 @@ async function log(event: Parameters<typeof insertLabEvent>[0]) {
 // Speaking lock: never fire an injection while the agent is mid-sentence —
 // that's what produced the overlapping double-intro. Poll briefly until it
 // stops (or a short cap, so a long monologue can't block the line forever).
-async function waitForAgentSilence(callId: string, maxMs = 4000): Promise<void> {
+async function waitForAgentSilence(callId: string, maxMs = 6000): Promise<void> {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
     const speaking = await assistantSpeaking(callId).catch(() => false);
@@ -387,6 +388,15 @@ async function handleTranscript(
     console.error("[lab webhook] failed to log utterance:", e);
   }
 
+  // Split finals are ONE customer turn: fold the recent unanswered fragment
+  // into the newest one so the router sees the whole turn ("who is this
+  // again? what is this about?") and multi-part merging can work.
+  let turnText = utterance;
+  if (utteranceEventId != null) {
+    const prevFrag = await recentUnansweredFragment(callId, utteranceEventId, 4000).catch(() => null);
+    if (prevFrag) turnText = `${prevFrag} ${utterance}`;
+  }
+
   let settings;
   let handlers: ListenerHandler[] = [];
   try {
@@ -423,7 +433,9 @@ async function handleTranscript(
   let cls;
   let speculativeHit = false;
   const spec = speculativeCls.get(callId);
-  if (spec && spec.text === utterance) {
+  // The speculative run only covers this fragment — reuse it only when no
+  // earlier fragment was folded in.
+  if (spec && spec.text === utterance && turnText === utterance) {
     try {
       cls = await spec.promise;
       speculativeHit = true;
@@ -434,7 +446,7 @@ async function handleTranscript(
   }
   if (!cls) {
     try {
-      cls = await classifyUtterance(utterance, recentTurns, handlers, settings.router_model);
+      cls = await classifyUtterance(turnText, recentTurns, handlers, settings.router_model);
     } catch (e) {
       await log({
         call_id: callId,
@@ -464,12 +476,12 @@ async function handleTranscript(
   await log({
     call_id: callId,
     event_type: "classified",
-    content: utterance,
+    content: turnText,
     intent_key: cls.intent,
     confidence: cls.confidence,
     utterance_at: utteranceAt.toISOString(),
     classified_at: new Date(classifiedAt).toISOString(),
-    meta: { raw: cls.raw, intents, speculative: speculativeHit },
+    meta: { raw: cls.raw, intents, speculative: speculativeHit, merged: turnText !== utterance },
   });
 
   // Can the Playbook answer this turn on its own? The flow uses this to let
@@ -510,7 +522,7 @@ async function handleTranscript(
         settings.active_script_id,
         flowIntent,
         intents,
-        utterance,
+        turnText,
         utteranceAt,
         classifiedAt,
         reactiveCanHandle,
@@ -652,7 +664,7 @@ async function handleTranscript(
     const brief = (t: string) =>
       alreadyReplied
         ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
-        : `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
+        : `The customer just said: "${turnText.slice(0, 160)}" — react to that naturally in your own words, then: ${t}`;
     // Multi-part replies ("how much is it — and where did you get my number?"):
     // fold every additional matched answer into the SAME briefing so the agent
     // gives ONE short reply instead of answering piece by piece.

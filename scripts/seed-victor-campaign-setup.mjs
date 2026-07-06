@@ -48,7 +48,10 @@ const scenarios = [
     name: "Victor — acknowledge & hook",
     intent_key: "v7_ack_bridge",
     tags: ["Victor v2", "Greeting"],
-    description: "Their answer to the opening question — logged in or not, either way the call continues.",
+    // Reply-shaped wording here once let the router match every "what about
+    // it?" to the bridge, deferring forever — the spins were never revealed.
+    description:
+      "SPEAK-ONLY bridge — spoken by the script after the opening reply. Not a customer reply; never match replies to it.",
     response_template:
       "Acknowledge their answer briefly and warmly in a few words, then mention you were actually just looking over their account right before calling.",
     action_type: "answer",
@@ -60,7 +63,8 @@ const scenarios = [
     name: "Victor — reveal the free spins",
     intent_key: "v7_spins_reveal",
     tags: ["Victor v2", "Promotions"],
-    description: "Time to reveal the free spins — the personal-favor moment of the call.",
+    description:
+      "SPEAK-ONLY: the free-spins reveal, delivered by the script at its step. Not a customer reply; never match replies to it.",
     response_template:
       "Reveal it personally: you were going over their account and YOU added twenty free spins for them — you just wanted to make sure they knew the spins are there. Casual, like a favor, not a pitch. (Free spins: at most two mentions in the whole call.)",
     action_type: "give_offer",
@@ -72,7 +76,8 @@ const scenarios = [
     name: "Victor — expiry + deposit bonus",
     intent_key: "v7_expiry_bonus",
     tags: ["Victor v2", "Promotions"],
-    description: "Their reaction to the spins — time for the reason of the call: the expiry, plus the deposit bonus.",
+    description:
+      "SPEAK-ONLY: the reason for the call — spins expiry plus the deposit bonus, delivered by the script at its step. Not a customer reply; never match replies to it.",
     response_template:
       "Tell them the spins do have an expiry on them — that's actually why you're calling. Then add that on top of that, they can claim a three hundred percent bonus on their next deposit. (Each offer: at most two mentions per call.)",
     action_type: "give_offer",
