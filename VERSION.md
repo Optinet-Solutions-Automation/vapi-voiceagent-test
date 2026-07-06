@@ -73,6 +73,16 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 - **Injection latency** — the webhook's transcript hot path now runs its
   independent reads in parallel (recent turns, settings, handlers, cooldown,
   flow state) instead of sequentially.
+- **Seventh live-call QA (Victor's first run)** — the SMS "didn't send"
+  because nothing real is wired: the lab simulates sends. The timeline now
+  says so explicitly (an "sms — SIMULATED" event); real sends need an SMS
+  provider (Twilio) plus a phone-call customer number. The remaining
+  "just a sec"/"hold on" were, as always, tool-call announcements — in
+  script mode the assistant now gets NO tools at all (all four were gated
+  to stand down anyway; no tools → no announcements, no roundtrips). The
+  cooldown default drops 4000 → 1500ms (it starved the misheard-reply
+  confirm — the speaking lock does its job properly now). New v7_how_claim
+  scenario ("how do I claim this?" previously classified none).
 - **Victor @ Lucky Seven campaign (v2 production spec)** — the previous AI
   agent's full prompt decomposed into data: Victor identity + opening in the
   Playbook, ten v7_* campaign scenarios (spins reveal as a personal favor,

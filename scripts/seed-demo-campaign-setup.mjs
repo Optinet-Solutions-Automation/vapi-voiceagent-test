@@ -71,6 +71,7 @@ const { error } = await sb
     short_prompt: WELCOME_PROMPT,
     active_collection_id: col.id,
     active_script_id: script.id,
+    injection_cooldown_ms: 1500,
     updated_at: new Date().toISOString(),
   })
   .eq("id", "default");

@@ -71,8 +71,14 @@ export async function POST(req: Request) {
     ? messages.map((m) => (m.role === "system" ? { ...m, content: prompt } : m))
     : [{ role: "system", content: prompt }, ...messages];
 
+  // In script mode the agent gets NO tools: all four are gated to stand down
+  // anyway, and every remaining "just a sec"/"hold on" in live calls was the
+  // model announcing its own tool calls. No tools → no announcements, and no
+  // wasted roundtrips. Without a script, the classic tool loop still works.
+  const tools = settings?.active_script_id ? [] : LAB_TOOLS;
+
   const patchBody = {
-    model: { ...model, messages, tools: LAB_TOOLS },
+    model: { ...model, messages, tools },
     server: { url: webhookUrl, timeoutSeconds: 20 },
     serverMessages: [
       "tool-calls",
@@ -133,7 +139,7 @@ export async function POST(req: Request) {
     assistantId,
     assistantName: assistant.name ?? null,
     webhookUrl,
-    toolCount: LAB_TOOLS.length,
+    toolCount: tools.length,
   });
 }
 

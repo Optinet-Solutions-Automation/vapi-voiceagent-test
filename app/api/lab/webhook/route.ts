@@ -1077,6 +1077,18 @@ async function runScriptFlow(
 
     note(injectedText, target, ct, edgeCond, scenario?.id ?? null, alreadyReplied ? "continue_after_reply" : "fresh");
     if (!(await flush())) return true; // lost the race — say nothing
+    if (ct === "send_sms") {
+      // Honesty in the timeline: no SMS provider is wired yet — the send is
+      // SIMULATED. Real sends need Twilio (or similar) plus a phone-call
+      // customer number; browser test calls have neither.
+      await log({
+        call_id: callId,
+        event_type: "sms",
+        content: "SIMULATED — no SMS provider wired; nothing was actually sent.",
+        handler_id: scenario?.id ?? null,
+        meta: { simulated: true },
+      });
+    }
     const controlUrl = await ctl();
     if (controlUrl) {
       if (ct === "send_sms") {

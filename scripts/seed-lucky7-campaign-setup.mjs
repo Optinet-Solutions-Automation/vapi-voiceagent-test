@@ -163,6 +163,7 @@ const { error } = await sb
     short_prompt: LUCKY7_PROMPT,
     active_collection_id: col.id,
     active_script_id: scriptId,
+    injection_cooldown_ms: 1500,
     updated_at: new Date().toISOString(),
   })
   .eq("id", "default");

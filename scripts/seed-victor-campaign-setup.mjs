@@ -141,6 +141,19 @@ const scenarios = [
     mode: "both",
   },
   {
+    name: "Victor — how to claim the spins",
+    intent_key: "v7_how_claim",
+    tags: ["Victor v2", "Q&A"],
+    description:
+      "Customer asks how to claim, activate, use, or get the free spins or the bonus — how do I claim this, what do I do, do I just log in.",
+    response_template:
+      "It's simple: just log in at Lucky Seven dot com — the twenty free spins are already sitting in your balance, ready to activate, and the deposit bonus shows when you make your next deposit.",
+    action_type: "answer",
+    delivery: "reword",
+    priority: 19,
+    mode: "both",
+  },
+  {
     name: "Victor — website / spell it out",
     intent_key: "v7_website",
     tags: ["Victor v2", "Q&A"],
@@ -318,6 +331,7 @@ const stage2Id = await buildStage(
   [
     "v7_expiry_bonus",
     "v7_not_interested",
+    "v7_how_claim",
     "v7_website",
     "upsell_offer",
     "wagering_requirements",
@@ -412,6 +426,9 @@ const { error } = await sb
     short_prompt: VICTOR_PROMPT,
     active_collection_id: col.id,
     active_script_id: scriptId,
+    // The speaking lock sequences injections now — the old 4s cooldown just
+    // starved legitimate answers (it once blocked the misheard-reply confirm).
+    injection_cooldown_ms: 1500,
     updated_at: new Date().toISOString(),
   })
   .eq("id", "default");
