@@ -40,7 +40,7 @@ import {
   insertLabEvent,
 } from "@/lib/lab-db";
 import { getVapi, vapiErrorText } from "@/lib/vapi";
-import type { ListenerScript, ListenerHandler, ListenerCollection } from "@/lib/database.types";
+import type { ListenerScript, ListenerHandler, ListenerCollection, LabCallEvent } from "@/lib/database.types";
 
 // ── Content types a Step box can hold ─────────────────────────
 type Content =
@@ -871,6 +871,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [qa, setQa] = useState<QaResult | null>(null);
   const [qaBusy, setQaBusy] = useState(false);
   const lastRunEvId = useRef(0);
+  // Everything the call has produced so far — feeds the live dock's three
+  // views (transcript / listener / thinking).
+  const [runEvents, setRunEvents] = useState<LabCallEvent[]>([]);
+  const [runPanelOpen, setRunPanelOpen] = useState(true);
 
   // Built-in QA: everything that would keep a call from being a full
   // conversation — broken connections, dead ends, no way to finish, and
@@ -989,6 +993,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     }
     if (run.status === "ended") {
       setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null });
+      setRunEvents([]);
       return;
     }
     if (!scriptId) return;
@@ -1017,6 +1022,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         return;
       }
       lastRunEvId.current = 0;
+      setRunEvents([]);
+      setRunPanelOpen(true);
       setRun({ callId: null, status: "connecting", currentNodeId: null, visited: [], lastLine: null });
       // Push webhook/persona config before dialing, same as the Lab's panel.
       await fetch("/api/lab/configure-assistant", {
@@ -1068,6 +1075,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         ]);
         if (evs.length) {
           lastRunEvId.current = evs[evs.length - 1].id;
+          setRunEvents((prev) => [...prev, ...evs]);
           const spoken = [...evs].reverse().find((e) => e.event_type === "injected" || e.event_type === "agent_said");
           const ended = evs.some((e) => e.event_type === "status" && ["ended", "end-of-call-report"].includes((e.content ?? "").trim()));
           const flowNodes = evs.map((e) => (e.meta as Record<string, unknown> | null)?.toNode as string | undefined).filter((x): x is string => !!x);
@@ -1567,43 +1575,184 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
 
         {/* Canvas */}
         <div className="relative min-w-0 flex-1" onDrop={onDrop} onDragOver={onDragOver}>
-          {/* Live-run strip: where the call is right now */}
-          {run.status !== "idle" && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center">
-              <div className="pointer-events-auto flex max-w-[90%] items-center gap-3 rounded-full border border-gray-700 bg-gray-900/95 px-4 py-2 shadow-2xl">
-                <span
-                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-                    run.status === "live" ? "animate-pulse bg-emerald-400" : run.status === "connecting" ? "animate-pulse bg-amber-400" : "bg-gray-500"
-                  }`}
-                />
-                <span className="shrink-0 text-xs font-semibold text-white">
-                  {run.status === "connecting"
-                    ? "Connecting…"
-                    : run.status === "ended"
-                      ? "Call ended"
-                      : run.currentNodeId
-                        ? `In: ${(nodes.find((n) => n.id === run.currentNodeId)?.data as NodeData | undefined)?.label ?? "…"}`
-                        : "Live — waiting for the first reply"}
-                </span>
-                {run.lastLine && <span className="min-w-0 truncate text-[11px] italic text-gray-500">“{snip(run.lastLine, 90)}”</span>}
-                {run.status === "ended" ? (
-                  <button
-                    onClick={() => setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null })}
-                    className="shrink-0 rounded-full border border-gray-600 px-2.5 py-0.5 text-[11px] text-gray-300 hover:bg-gray-800"
-                  >
-                    Dismiss
-                  </button>
-                ) : (
-                  <button
-                    onClick={stopRun}
-                    className="shrink-0 rounded-full bg-red-600 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-red-500"
-                  >
-                    End call
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+          {/* Live-run dock: transcript / listener / thinking, live from the call */}
+          {run.status !== "idle" &&
+            (() => {
+              const nodeLabel = (id?: unknown) =>
+                typeof id === "string" ? ((nodes.find((n) => n.id === id)?.data as NodeData | undefined)?.label ?? null) : null;
+              const metaOf = (e: LabCallEvent) => (e.meta ?? {}) as Record<string, unknown>;
+              const REASON_TEXT: Record<string, string> = {
+                superseded: "a newer reply arrived — stayed quiet",
+                self_covered: "the agent already covered it by itself — stayed quiet",
+                deferred_to_playbook: "flow parked — the Playbook answers this one",
+                concurrent_turn: "duplicate turn dropped",
+                cooldown: "too soon after the last line — stayed quiet",
+                handler_not_found: "no matching reply — ignored",
+                no_handlers: "no matching reply — ignored",
+                no_settings: "no matching reply — ignored",
+                handler_ignore: "recognized, deliberately not answered",
+                flow_owns_action: "the flow owns this action — reactive stood down",
+              };
+              const transcript = runEvents.filter(
+                (e) => e.event_type === "utterance" || e.event_type === "agent_said" || (e.event_type === "injected" && !!metaOf(e).opening)
+              );
+              const listener = runEvents.filter(
+                (e) =>
+                  ["classified", "sms", "error"].includes(e.event_type) ||
+                  (e.event_type === "injected" && !metaOf(e).opening && (e.content ?? "") !== "" && metaOf(e).mode !== "skipped_ahead")
+              );
+              const thinking = runEvents.filter(
+                (e) =>
+                  e.event_type === "speculated" ||
+                  e.event_type === "skipped" ||
+                  (e.event_type === "injected" && !!metaOf(e).flow && ((e.content ?? "") === "" || metaOf(e).mode === "skipped_ahead"))
+              );
+              const thinkingText = (e: LabCallEvent): string => {
+                const m = metaOf(e);
+                if (e.event_type === "speculated") {
+                  const cls = m.cls as { intent?: string; confidence?: number } | undefined;
+                  return cls?.intent && cls.intent !== "none"
+                    ? `still talking… likely “${cls.intent}” (${Math.round((cls.confidence ?? 0) * 100)}%)`
+                    : "still talking… nothing actionable yet";
+                }
+                if (e.event_type === "skipped") return REASON_TEXT[(m.reason as string) ?? ""] ?? `skipped (${(m.reason as string) ?? "?"})`;
+                const lb = nodeLabel(m.toNode);
+                if (m.mode === "skipped_ahead") return `passed through ${lb ? `“${lb}”` : "a box"} — the reply answered past it`;
+                return `moved to ${lb ? `“${lb}”` : "the next box"}`;
+              };
+              const col = "flex min-h-0 flex-1 flex-col-reverse gap-1.5 overflow-y-auto p-3";
+              const head = "shrink-0 border-b border-gray-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500";
+              return (
+                <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col border-t border-gray-700 bg-gray-950/95 shadow-2xl backdrop-blur">
+                  {/* Dock header: status, position, controls */}
+                  <div className="flex items-center gap-3 px-4 py-2">
+                    <span
+                      className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                        run.status === "live" ? "animate-pulse bg-emerald-400" : run.status === "connecting" ? "animate-pulse bg-amber-400" : "bg-gray-500"
+                      }`}
+                    />
+                    <span className="shrink-0 text-xs font-semibold text-white">
+                      {run.status === "connecting"
+                        ? "Connecting…"
+                        : run.status === "ended"
+                          ? "Call ended"
+                          : run.currentNodeId
+                            ? `In: ${nodeLabel(run.currentNodeId) ?? "…"}`
+                            : "Live — waiting for the first reply"}
+                    </span>
+                    {!runPanelOpen && run.lastLine && (
+                      <span className="min-w-0 truncate text-[11px] italic text-gray-500">“{snip(run.lastLine, 80)}”</span>
+                    )}
+                    <span className="flex-1" />
+                    <button
+                      onClick={() => setRunPanelOpen((o) => !o)}
+                      title={runPanelOpen ? "Collapse" : "Expand"}
+                      className="shrink-0 rounded-md border border-gray-700 p-1 text-gray-400 transition hover:bg-gray-800 hover:text-gray-200"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        {runPanelOpen ? (
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        ) : (
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                        )}
+                      </svg>
+                    </button>
+                    {run.status === "ended" ? (
+                      <button
+                        onClick={() => {
+                          setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null });
+                          setRunEvents([]);
+                        }}
+                        className="shrink-0 rounded-full border border-gray-600 px-2.5 py-0.5 text-[11px] text-gray-300 hover:bg-gray-800"
+                      >
+                        Dismiss
+                      </button>
+                    ) : (
+                      <button
+                        onClick={stopRun}
+                        className="shrink-0 rounded-full bg-red-600 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-red-500"
+                      >
+                        End call
+                      </button>
+                    )}
+                  </div>
+                  {/* Three live views */}
+                  {runPanelOpen && (
+                    <div className="grid h-60 grid-cols-3 divide-x divide-gray-800 border-t border-gray-800">
+                      <div className="flex min-w-0 flex-col">
+                        <p className={head}>Transcript</p>
+                        <div className={col}>
+                          {transcript.length === 0 && <p className="text-[11px] text-gray-600">Waiting for the first words…</p>}
+                          {transcript
+                            .slice()
+                            .reverse()
+                            .map((e) => (
+                              <p key={e.id} className="text-[11px] leading-snug">
+                                <span className={e.event_type === "utterance" ? "font-semibold text-sky-300" : "font-semibold text-teal-300"}>
+                                  {e.event_type === "utterance" ? "Customer" : "Agent"}:
+                                </span>{" "}
+                                <span className="text-gray-300">{e.content}</span>
+                              </p>
+                            ))}
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-col">
+                        <p className={head}>Listener</p>
+                        <div className={col}>
+                          {listener.length === 0 && <p className="text-[11px] text-gray-600">Classifications and lines land here…</p>}
+                          {listener
+                            .slice()
+                            .reverse()
+                            .map((e) => (
+                              <p key={e.id} className="text-[11px] leading-snug">
+                                {e.event_type === "classified" ? (
+                                  <>
+                                    <span className="font-semibold text-violet-300">heard as</span>{" "}
+                                    <span className="text-gray-300">
+                                      “{e.intent_key}” ({Math.round(Number(e.confidence ?? 0) * 100)}%)
+                                      {metaOf(e).speculative ? " — pre-thought while they spoke" : ""}
+                                    </span>
+                                  </>
+                                ) : e.event_type === "sms" ? (
+                                  <>
+                                    <span className="font-semibold text-amber-300">sms</span>{" "}
+                                    <span className="text-gray-400">{snip(e.content ?? "", 80)}</span>
+                                  </>
+                                ) : e.event_type === "error" ? (
+                                  <>
+                                    <span className="font-semibold text-rose-400">error</span>{" "}
+                                    <span className="text-gray-400">{snip(e.content ?? "", 80)}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="font-semibold text-emerald-300">{metaOf(e).flow ? "script" : "playbook"}</span>{" "}
+                                    <span className="text-gray-300">{snip(e.content ?? "", 110)}</span>
+                                    {e.latency_ms != null && <span className="text-gray-600"> · {(e.latency_ms / 1000).toFixed(1)}s</span>}
+                                  </>
+                                )}
+                              </p>
+                            ))}
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-col">
+                        <p className={head}>Thinking</p>
+                        <div className={col}>
+                          {thinking.length === 0 && <p className="text-[11px] text-gray-600">Anticipation and decisions show up here…</p>}
+                          {thinking
+                            .slice()
+                            .reverse()
+                            .map((e) => (
+                              <p key={e.id} className="text-[11px] italic leading-snug text-gray-400">
+                                {thinkingText(e)}
+                              </p>
+                            ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           {scriptId ? (
             <ReactFlow
               nodes={displayNodes}
