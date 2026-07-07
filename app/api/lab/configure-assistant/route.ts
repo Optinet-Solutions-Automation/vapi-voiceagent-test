@@ -116,12 +116,14 @@ export async function POST(req: Request) {
     // silence otherwise means nothing ever happens. These re-engage naturally,
     // at most twice, without sounding like a stuck record.
     messagePlan: {
+      // Content-neutral nudges only — "want me to go over that again?"
+      // presumed content and sounded absurd right after the opener.
       idleMessages: [
         "Take your time — I'm still here.",
         "Are you still with me?",
-        "No pressure — want me to go over that again?",
+        "Can you hear me okay?",
       ],
-      idleTimeoutSeconds: 10,
+      idleTimeoutSeconds: 12,
       idleMessageMaxSpokenCount: 2,
     },
     // Interruptions are analyzed, not knee-jerk: acknowledgements and noise

@@ -36,7 +36,7 @@ export async function classifyUtterance(
     .map((h) => `- intent_key: ${h.intent_key} — ${h.description || h.name}`)
     .join("\n");
   const expectedLine = expected.size
-    ? `\n- The script is at a step where these replies are EXPECTED next: ${expectedKeys.join(", ")}. When the utterance plausibly fits one of them, prefer it over other handlers; if it clearly matches something else, pick what truly matches.`
+    ? `\n- The script is at a step where these replies are EXPECTED next: ${expectedKeys.join(", ")}. When the utterance plausibly fits one of them, prefer it over other handlers; if it clearly matches something else, pick what truly matches. A bare agreement ("yes", "yeah", "yup", "okay") right after the agent asked a question maps to the EXPECTED agreement-style handler.`
     : "";
 
   const systemPrompt = `You route utterances from a live phone call to handlers. Handlers:

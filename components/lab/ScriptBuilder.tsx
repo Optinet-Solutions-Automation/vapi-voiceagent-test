@@ -1147,7 +1147,14 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         body: JSON.stringify({ assistantId: aid }),
       }).catch(() => {});
       const startNode = nodes.find((n) => (n.data as NodeData).kind === "start");
-      const opening = ((((startNode?.data as NodeData) ?? {}).config?.opening as string) ?? "").trim();
+      let opening = ((((startNode?.data as NodeData) ?? {}).config?.opening as string) ?? "").trim();
+      // No opening on the Start box → the campaign's First Message scenario
+      // (same fallback as the Lab's call panel). A bare VAPI "Hello." asks no
+      // question, which also breaks bare-"yes" routing on the first reply.
+      if (!opening) {
+        const fm = scenarios.find((s) => s.intent_key === "first_message" && s.enabled);
+        opening = (fm?.response_template ?? "").trim();
+      }
       const vapi = getVapi();
       const call = await vapi.start(
         aid,
@@ -1817,6 +1824,21 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 if (m.mode === "skipped_ahead") return `passed through ${lb ? `“${lb}”` : "a box"} — the reply answered past it`;
                 return `moved to ${lb ? `“${lb}”` : "the next box"}`;
               };
+              // Pinned observer line: what the current box is waiting for —
+              // shown the moment a box is entered, before the customer speaks.
+              const waitingFor = (() => {
+                if (!run.currentNodeId || run.status === "ended") return null;
+                const outs = edges.filter((e) => e.source === run.currentNodeId);
+                if (!outs.length) return null;
+                const parts = outs.map((e) => {
+                  const c = ((e.data as { condition?: Record<string, unknown> })?.condition ?? {}) as Record<string, unknown>;
+                  const tgt = nodeLabel(e.target) ?? "next box";
+                  if (c.kind === "any") return `anything else → ${tgt}`;
+                  const scn = scenarios.find((s) => s.intent_key === c.value);
+                  return `${scn ? `“${snip(scn.name, 26)}”` : `“${(c.value as string) ?? "?"}”`} → ${tgt}`;
+                });
+                return `at “${nodeLabel(run.currentNodeId) ?? "…"}” — waiting for: ${parts.join("  ·  ")}`;
+              })();
               const col = "flex min-h-0 flex-1 flex-col-reverse gap-1.5 overflow-y-auto overscroll-contain p-3";
               const head = "shrink-0 border-b border-gray-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500";
               return (
@@ -1958,7 +1980,12 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                       <div className="flex min-h-0 min-w-0 flex-col">
                         <p className={head}>Observer</p>
                         <div className={col}>
-                          {observer.length === 0 && (
+                          {waitingFor && (
+                            <p className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium leading-snug text-emerald-300">
+                              {waitingFor}
+                            </p>
+                          )}
+                          {observer.length === 0 && !waitingFor && (
                             <p className="text-[11px] text-gray-600">The observer narrates every turn here — expectations, verdicts, advice…</p>
                           )}
                           {observer
