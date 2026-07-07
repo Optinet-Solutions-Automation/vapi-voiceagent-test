@@ -504,22 +504,30 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   );
 
   const onConnect = useCallback(
-    (c: Connection) =>
-      setEdges((eds) => {
-        const bits = edgeBitsForHandle(c.source, c.sourceHandle);
-        return addEdge(
+    (c: Connection) => {
+      const bits = edgeBitsForHandle(c.source, c.sourceHandle);
+      // Without an explicit id, xyflow names the edge "xy-edge__…" — the DB
+      // id column is uuid, so every save would be rejected.
+      const id = crypto.randomUUID();
+      setEdges((eds) =>
+        addEdge(
           {
             ...c,
-            // Without an explicit id, xyflow names the edge "xy-edge__…" —
-            // the DB id column is uuid, so every save would be rejected.
-            id: crypto.randomUUID(),
+            id,
             ...bits.visual,
             data: { condition: bits.condition },
             markerEnd: { type: MarkerType.ArrowClosed },
           },
           eds
-        );
-      }),
+        )
+      );
+      // A connector arrow with no reply picked yet: open the arrow's panel so
+      // the pick happens right as the line lands.
+      if (isConnectorHandle(c.sourceHandle) && !(bits.condition.value as string)) {
+        setSelEdgeId(id);
+        setSelNodeId(null);
+      }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges, edgeBitsForHandle]
   );
@@ -1249,51 +1257,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                   </>
                 )}
 
-                {/* Reply connectors — added with the + button on the box itself */}
-                {selNode && connectorsOf(sd.config).length > 0 && (
-                  <div>
-                    <label className="mb-1 block text-xs text-gray-400">
-                      Reply connectors <span className="text-gray-600">(the + on the box adds one)</span>
-                    </label>
-                    {connectorsOf(sd.config).map((c) => (
-                      <div key={c.id} className="mb-1.5 flex items-center gap-1.5">
-                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-400" />
-                        <select
-                          className={inputCls + " [color-scheme:dark]"}
-                          value={c.intentKey}
-                          onChange={(e) => setConnectorIntent(selNode.id, c.id, e.target.value)}
-                        >
-                          <option value="">(pick the reply…)</option>
-                          <optgroup label="Expected replies">
-                            {scenarios.filter((s) => s.action_type === "ignore").map((s) => (
-                              <option key={s.id} value={s.intent_key}>{s.name}</option>
-                            ))}
-                          </optgroup>
-                          <optgroup label="All scenarios (matched by their description)">
-                            {scenarios
-                              .filter((s) => s.action_type !== "ignore" && !["first_message", "identity"].includes(s.intent_key))
-                              .map((s) => (
-                                <option key={s.id} value={s.intent_key}>{s.name}</option>
-                              ))}
-                          </optgroup>
-                        </select>
-                        <button
-                          onClick={() => removeConnector(selNode.id, c.id)}
-                          className="shrink-0 text-sm text-gray-500 hover:text-rose-400"
-                          title="Remove connector (and its arrow)"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    <p className="mt-1.5 rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
-                      Each green dot fires when the reply matches its scenario — draw its arrow to the next box, or
-                      back <strong>up</strong> to an earlier box to repeat it. Replies that match no connector follow
-                      the plain default dot; leave the default unconnected and the box stays put while the Playbook
-                      answers.
-                    </p>
-                  </div>
-                )}
+                {/* Reply connectors are managed on the canvas: + on the box adds a
+                    dot, and clicking a dot's ARROW picks its reply / removes it. */}
 
                 {sd.kind === "step" && (
                   <>
