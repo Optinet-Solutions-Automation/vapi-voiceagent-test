@@ -96,21 +96,24 @@ export function pickNextEdge(
     return outs.find((e) => handleOf(e) === want) ?? null;
   }
 
-  // Legacy condition edges (old graphs that branched on the edge itself).
-  const legacy = outs.filter((e) => {
+  // Reply connectors: the condition lives on the edge itself (the connector
+  // model; also the legacy pre-if/else shape). A connector whose reply
+  // matches wins; otherwise the default "out" connector. With reply
+  // connectors and NO default, stay parked (null) — the Playbook answers and
+  // the box re-checks its connectors on the next reply.
+  const conditional = outs.filter((e) => {
     const c = cond(e);
     return c.kind === "intent" || c.kind === "tag" || c.kind === "branch";
   });
-  if (legacy.length) {
-    for (const e of legacy) {
+  if (conditional.length) {
+    for (const e of conditional) {
       const c = cond(e);
       const by = c.by ?? c.kind;
       if (by === "intent" && c.value && (ctx.intents ?? [ctx.intent]).includes(c.value)) return e;
       if (by === "tag" && c.value && ctx.tags.includes(c.value)) return e;
       if (by === "result" && ctx.result && c.value === ctx.result) return e;
     }
-    const fallback = outs.find((e) => handleOf(e) === "else");
-    if (fallback) return fallback;
+    return outs.find((e) => handleOf(e) === "else") ?? outs.find((e) => handleOf(e) === "out") ?? null;
   }
 
   // Plain: first outgoing connector.

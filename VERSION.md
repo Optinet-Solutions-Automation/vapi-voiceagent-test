@@ -11,6 +11,20 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 
 ## v2.2 — current
 
+- **Reply connectors — routing moves onto the boxes** (user-requested
+  redesign). If/Else and Loop are gone from the palette. Instead, every box
+  (including Start) can grow green "reply connector" dots: pick a scenario
+  per dot (a predicted customer reply — who-is-calling, wrong-number,
+  takes-the-bait…) and draw its arrow to the next box. The matching reply's
+  arrow fires; unmatched replies follow the plain default dot; a box with
+  connectors and NO default arrow stays parked while the Playbook answers,
+  then re-checks on the next reply. Repeating = drawing a connector's arrow
+  back UP to an earlier box — no Loop box needed. A reply that matches a
+  connector on the box being entered skips through it silently (the early-
+  consent case, connector edition). Legacy If/Else and Loop boxes still
+  render and run for old scripts. Verified 12/12: Start-connector routing,
+  default-dot advance, parked member Q&A, objection routing, loop-back
+  repeat, skip-ahead.
 - **Production (Vercel) latency forensics — self-covered skip + serverless
   speculation** — timing data from live calls showed the "11s reply" was
   mostly the speaking lock correctly waiting out the agent ANSWERING BY

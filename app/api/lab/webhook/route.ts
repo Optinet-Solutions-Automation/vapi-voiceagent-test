@@ -990,6 +990,18 @@ async function runScriptFlow(
     return false;
   }
 
+  // Connector model: does one of this box's OWN reply connectors match the
+  // turn? The reply answered PAST the box (e.g. consent while the flow still
+  // sits before the pitch) — pass through silently; the connector routes it.
+  function connectorRecognizes(nodeId: string): boolean {
+    return graph.edges.some((e) => {
+      if (e.source_node_id !== nodeId) return false;
+      const c = (e.condition ?? {}) as Record<string, unknown>;
+      const by = (c.by as string) ?? (c.kind as string);
+      return by === "intent" && !!c.value && intents.includes(c.value as string);
+    });
+  }
+
   // Fetch the control URL lazily — a deferred walk never needs it.
   let controlUrlCache: string | null | undefined;
   async function ctl(): Promise<string | null> {
@@ -1106,8 +1118,9 @@ async function runScriptFlow(
       const cands = [target.scenario_id, ...((cfg.candidateScenarioIds as string[]) ?? [])].filter(Boolean) as string[];
       const match = allHandlers.find((h) => cands.includes(h.id) && intents.includes(h.intent_key)) ?? null;
       // Skip-ahead: this box has no line for the reply, but the if/else right
-      // after it does — pass through silently and let the branch fire.
-      if (!match && nextIfElseRecognizes(target.id)) {
+      // after it (or one of its own reply connectors) does — pass through
+      // silently and let the branch fire.
+      if (!match && (nextIfElseRecognizes(target.id) || (!pathExpected && connectorRecognizes(target.id)))) {
         currentNodeId = target.id;
         note("", target, ct, edgeCond, null, "skipped_ahead");
         continue;
@@ -1120,7 +1133,7 @@ async function runScriptFlow(
       const matches = allHandlers
         .filter((h) => ids.includes(h.id) && intents.includes(h.intent_key))
         .sort((a, b) => intents.indexOf(a.intent_key) - intents.indexOf(b.intent_key));
-      if (matches.length === 0 && nextIfElseRecognizes(target.id)) {
+      if (matches.length === 0 && (nextIfElseRecognizes(target.id) || (!pathExpected && connectorRecognizes(target.id)))) {
         currentNodeId = target.id;
         note("", target, ct, edgeCond, null, "skipped_ahead");
         continue;

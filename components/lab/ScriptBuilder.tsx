@@ -80,9 +80,26 @@ const snip = (t: string, n: number) => {
   return s.length > n ? s.slice(0, n) + "…" : s;
 };
 
+// A reply connector: an extra output dot on a box whose arrow fires when the
+// customer's reply matches the picked scenario. Ids are "c:<uuid>" so they're
+// distinguishable from the fixed handles (out/then/else/loop/exit) everywhere.
+type Connector = { id: string; intentKey: string; label?: string };
+const isConnectorHandle = (h: string | null | undefined): h is string => !!h && h.startsWith("c:");
+const connectorsOf = (config: Record<string, unknown>): Connector[] =>
+  Array.isArray(config.connectors) ? (config.connectors as Connector[]) : [];
+
 // Source handles a box exposes (id used as edge.sourceHandle for routing).
-function sourceHandlesFor(isStart: boolean, content: Content): { id: string; label?: string; color?: string }[] {
-  if (isStart) return [{ id: "out" }];
+function sourceHandlesFor(
+  isStart: boolean,
+  content: Content,
+  connectors: Connector[]
+): { id: string; label?: string; color?: string }[] {
+  const conns = connectors.map((c) => ({
+    id: c.id,
+    label: c.label ? snip(c.label, 13) : "reply?",
+    color: "#34d399",
+  }));
+  if (isStart) return [{ id: "out", label: conns.length ? "other" : undefined }, ...conns];
   if (CONTENT_META[content].terminal) return [];
   if (content === "ifelse")
     return [
@@ -94,7 +111,7 @@ function sourceHandlesFor(isStart: boolean, content: Content): { id: string; lab
       { id: "loop", label: "Repeat", color: "#f59e0b" },
       { id: "exit", label: "Exit", color: "#9ca3af" },
     ];
-  return [{ id: "out" }];
+  return [{ id: "out", label: conns.length ? "other" : undefined }, ...conns];
 }
 
 // ── Custom node ───────────────────────────────────────────────
@@ -103,12 +120,14 @@ function FlowNode({ data, selected }: NodeProps) {
   const isStart = d.kind === "start";
   const content = (d.config.contentType as Content) ?? "scenario";
   const meta = isStart ? { label: "Start call", color: "border-emerald-500 bg-emerald-500/10" } : CONTENT_META[content];
-  const handles = sourceHandlesFor(isStart, content);
+  const handles = sourceHandlesFor(isStart, content, connectorsOf(d.config));
+  const labelled = handles.some((h) => h.label);
   return (
     <div
-      className={`min-w-[160px] max-w-[230px] rounded-lg border-2 px-3 ${handles.length === 2 ? "pb-5 pt-2" : "py-2"} text-left shadow ${meta.color} ${
+      className={`max-w-[420px] rounded-lg border-2 px-3 ${labelled ? "pb-5 pt-2" : "py-2"} text-left shadow ${meta.color} ${
         selected ? "ring-2 ring-white/60" : ""
       }`}
+      style={{ minWidth: Math.max(160, handles.length * 64) }}
     >
       {!isStart && (
         <Handle
@@ -122,7 +141,7 @@ function FlowNode({ data, selected }: NodeProps) {
       {d.subtitle && <p className="mt-0.5 truncate text-[11px] text-gray-400">{d.subtitle}</p>}
       {d.note && <p className="mt-0.5 line-clamp-2 text-[10px] italic text-gray-500">{d.note}</p>}
       {handles.map((h, i) => {
-        const left = handles.length === 2 ? (i === 0 ? "30%" : "70%") : "50%";
+        const left = `${((i + 1) / (handles.length + 1)) * 100}%`;
         return (
           <span key={h.id}>
             <Handle
@@ -133,7 +152,7 @@ function FlowNode({ data, selected }: NodeProps) {
             />
             {h.label && (
               <span
-                className="absolute bottom-1 -translate-x-1/2 text-[8px] font-semibold text-gray-300"
+                className="absolute bottom-1 max-w-[72px] -translate-x-1/2 truncate text-[8px] font-semibold text-gray-300"
                 style={{ left }}
               >
                 {h.label}
@@ -330,6 +349,16 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   // Refresh node subtitles/notes when reference data loads.
   useEffect(() => {
     setNodes((ns) => ns.map((n) => ({ ...n, data: annotate({ ...(n.data as NodeData) }) })));
+    // Connector-arrow labels come from scenario names, which may load after
+    // the graph — refresh them too.
+    setEdges((es) =>
+      es.map((e) => {
+        const c = (e.data as { condition?: Record<string, unknown> })?.condition;
+        if (!isConnectorHandle(c?.handle as string) || !c?.value) return e;
+        const scn = scenarios.find((s) => s.intent_key === c.value);
+        return scn ? { ...e, label: snip(scn.name, 18) } : e;
+      })
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenarios, collections, scripts]);
 
@@ -344,6 +373,21 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     });
     const rfEdges: Edge[] = g.edges.map((e) => {
       const condRaw = (e.condition ?? {}) as Record<string, unknown>;
+      // Reply-connector arrows keep their stored intent condition verbatim.
+      if (isConnectorHandle(condRaw.handle as string)) {
+        const value = (condRaw.value as string) ?? "";
+        const scn = scenarios.find((s) => s.intent_key === value);
+        return {
+          id: e.id,
+          source: e.source_node_id,
+          target: e.target_node_id,
+          sourceHandle: condRaw.handle as string,
+          label: scn ? snip(scn.name, 18) : value || "reply?",
+          style: { stroke: "#34d399" },
+          data: { condition: condRaw },
+          markerEnd: { type: MarkerType.ArrowClosed },
+        };
+      }
       const cond = normalizeCondition(condRaw);
       const handle = (condRaw.handle as string | undefined) ?? legacyHandle(cond);
       return {
@@ -413,24 +457,45 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     }
   }
 
+  // Condition + visual for an arrow leaving a given handle: a reply connector
+  // carries its scenario as an intent condition; everything else is plain.
+  const edgeBitsForHandle = useCallback(
+    (sourceId: string | null, handle: string | null | undefined): { condition: Record<string, unknown>; visual: Partial<Edge> } => {
+      const h = handle ?? "out";
+      if (isConnectorHandle(h) && sourceId) {
+        const src = nodes.find((n) => n.id === sourceId);
+        const conn = src ? connectorsOf((src.data as NodeData).config).find((x) => x.id === h) : undefined;
+        const scn = conn?.intentKey ? scenarios.find((s) => s.intent_key === conn.intentKey) : undefined;
+        return {
+          condition: { kind: "intent", by: "intent", value: conn?.intentKey ?? "", handle: h },
+          visual: { label: scn ? snip(scn.name, 18) : "reply?", style: { stroke: "#34d399" } },
+        };
+      }
+      return { condition: { kind: "plain", handle: h }, visual: edgeVisualByHandle(h) };
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nodes, scenarios]
+  );
+
   const onConnect = useCallback(
     (c: Connection) =>
-      setEdges((eds) =>
-        addEdge(
+      setEdges((eds) => {
+        const bits = edgeBitsForHandle(c.source, c.sourceHandle);
+        return addEdge(
           {
             ...c,
             // Without an explicit id, xyflow names the edge "xy-edge__…" —
             // the DB id column is uuid, so every save would be rejected.
             id: crypto.randomUUID(),
-            ...edgeVisualByHandle(c.sourceHandle ?? undefined),
-            data: { condition: { kind: "plain", handle: c.sourceHandle ?? "out" } },
+            ...bits.visual,
+            data: { condition: bits.condition },
             markerEnd: { type: MarkerType.ArrowClosed },
           },
           eds
-        )
-      ),
+        );
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setEdges]
+    [setEdges, edgeBitsForHandle]
   );
 
   // Reconnecting an existing arrow's endpoint — if it's dropped on nothing, delete it.
@@ -440,13 +505,14 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   }
   function onReconnect(oldEdge: Edge, c: Connection) {
     reconnectOk.current = true;
+    const bits = edgeBitsForHandle(c.source, c.sourceHandle);
     setEdges((els) =>
       reconnectEdge(oldEdge, c, els).map((e) =>
         e.id === oldEdge.id
           ? {
               ...e,
-              ...edgeVisualByHandle(c.sourceHandle ?? undefined),
-              data: { condition: { kind: "plain", handle: c.sourceHandle ?? "out" } },
+              ...bits.visual,
+              data: { condition: bits.condition },
             }
           : e
       )
@@ -492,14 +558,15 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     createBox(payload, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
   }
 
+  // If/Else and Loop are gone from the palette: routing lives on each box's
+  // reply connectors now, and repeating = drawing an arrow back up. Legacy
+  // boxes still render and run for old scripts.
   const PALETTE: { payload: string; label: string; cls: string }[] = [
     { payload: "start", label: "Start call", cls: "border-emerald-500 bg-emerald-500/10" },
     { payload: "scenario", label: "Scenario", cls: "border-indigo-500 bg-indigo-500/10" },
     { payload: "collection", label: "Collection", cls: "border-fuchsia-500 bg-fuchsia-500/10" },
     { payload: "subworkflow", label: "Sub-workflow", cls: "border-teal-500 bg-teal-500/10" },
     { payload: "wait", label: "Wait", cls: "border-sky-500 bg-sky-500/10" },
-    { payload: "ifelse", label: "If / Else", cls: "border-yellow-500 bg-yellow-500/10" },
-    { payload: "loop", label: "Loop", cls: "border-amber-500 bg-amber-500/10" },
     { payload: "send_sms", label: "Send SMS", cls: "border-amber-500 bg-amber-500/10" },
     { payload: "transfer", label: "Transfer to human", cls: "border-orange-500 bg-orange-500/10" },
     { payload: "return", label: "Return result", cls: "border-lime-500 bg-lime-500/10" },
@@ -525,6 +592,41 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       })
     );
   }
+  // ── Reply connectors: extra output dots that route by the customer's reply ──
+  function addConnector(nodeId: string) {
+    const n = nodes.find((x) => x.id === nodeId);
+    if (!n) return;
+    const cur = connectorsOf((n.data as NodeData).config);
+    patchConfig(nodeId, { connectors: [...cur, { id: "c:" + crypto.randomUUID(), intentKey: "" }] });
+  }
+  function setConnectorIntent(nodeId: string, connId: string, intentKey: string) {
+    const n = nodes.find((x) => x.id === nodeId);
+    if (!n) return;
+    const scn = scenarios.find((s) => s.intent_key === intentKey);
+    const cur = connectorsOf((n.data as NodeData).config);
+    patchConfig(nodeId, {
+      connectors: cur.map((c) => (c.id === connId ? { ...c, intentKey, label: scn?.name ?? intentKey } : c)),
+    });
+    // Arrows already drawn from this dot follow the new pick.
+    setEdges((es) =>
+      es.map((e) =>
+        e.source === nodeId && e.sourceHandle === connId
+          ? {
+              ...e,
+              label: scn ? snip(scn.name, 18) : "reply?",
+              data: { condition: { kind: "intent", by: "intent", value: intentKey, handle: connId } },
+            }
+          : e
+      )
+    );
+  }
+  function removeConnector(nodeId: string, connId: string) {
+    const n = nodes.find((x) => x.id === nodeId);
+    if (!n) return;
+    patchConfig(nodeId, { connectors: connectorsOf((n.data as NodeData).config).filter((c) => c.id !== connId) });
+    setEdges((es) => es.filter((e) => !(e.source === nodeId && e.sourceHandle === connId)));
+  }
+
   function deleteSelected() {
     if (selNodeId) {
       setNodes((ns) => ns.filter((n) => n.id !== selNodeId));
@@ -645,8 +747,15 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     const targeted = new Set(edges.map((e) => e.target));
     for (const n of nodes) {
       const d = n.data as NodeData;
-      if (d.kind === "start") continue;
       const label = d.label || "Box";
+      // Reply connectors need both a picked reply and an arrow.
+      connectorsOf(d.config).forEach((c, i) => {
+        const cname = c.label ? `“${snip(c.label, 24)}”` : `#${i + 1}`;
+        if (!c.intentKey) w.push(`“${label}” reply connector ${cname} has no reply picked.`);
+        else if (!outsOf(n.id).some((e) => (e.sourceHandle ?? handleOf(e)) === c.id))
+          w.push(`“${label}” reply connector ${cname} has no arrow.`);
+      });
+      if (d.kind === "start") continue;
       const ct = (d.config.contentType as Content) ?? "scenario";
       if (ct === "scenario" && !d.scenarioId && !(lineDrafts[n.id]?.text ?? "").trim())
         w.push(`“${label}” has no line to speak.`);
@@ -710,12 +819,21 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       if (keyedEdges.some((e, i) => e !== edges[i])) setEdges(keyedEdges);
       const edgeRows = keyedEdges.map((e) => {
         const cond = ((e.data as { condition?: Record<string, unknown> })?.condition ?? { kind: "plain" }) as Record<string, unknown>;
+        const handle = (e.sourceHandle ?? (cond.handle as string) ?? "out") as string;
+        // Persist which output handle the arrow leaves from inside condition.
+        let condition: Record<string, unknown> = { ...cond, handle };
+        // Reply-connector arrows: re-derive the intent from the box's current
+        // connector definition — the node config is the source of truth.
+        if (isConnectorHandle(handle)) {
+          const src = nodes.find((n) => n.id === e.source);
+          const conn = src ? connectorsOf((src.data as NodeData).config).find((x) => x.id === handle) : undefined;
+          condition = { kind: "intent", by: "intent", value: conn?.intentKey ?? (cond.value as string) ?? "", handle };
+        }
         return {
           id: e.id,
           source_node_id: e.source,
           target_node_id: e.target,
-          // Persist which output handle the arrow leaves from (then/else/loop/exit) inside condition.
-          condition: { ...cond, handle: e.sourceHandle ?? cond.handle ?? "out" },
+          condition,
           label: typeof e.label === "string" ? e.label : "",
         };
       });
@@ -983,8 +1101,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
             ))}
           </div>
           <p className="shrink-0 border-t border-gray-800 p-2 text-[10px] text-gray-600">
-            Drag a box onto the canvas, then click it to configure. Connect boxes dot-to-dot — arrows are just
-            connectors. Branching lives in the If/Else and Loop boxes (drag from their Then / Else / Repeat / Exit dots).
+            Drag a box onto the canvas, then click it to configure. Add <span className="text-emerald-400">reply
+            connectors</span> to a box to route by what the customer says — each green dot is one predicted reply.
+            Draw an arrow back up to an earlier box to repeat it.
           </p>
         </div>
 
@@ -1082,6 +1201,58 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                       </div>
                     )}
                   </>
+                )}
+
+                {/* Reply connectors — extra output dots that route by the reply */}
+                {selNode && (sd.kind === "start" || !["ifelse", "loop", "transfer", "return", "end"].includes(content)) && (
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400">
+                      Reply connectors <span className="text-gray-600">(route by what the customer says)</span>
+                    </label>
+                    {connectorsOf(sd.config).map((c) => (
+                      <div key={c.id} className="mb-1.5 flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-400" />
+                        <select
+                          className={inputCls + " [color-scheme:dark]"}
+                          value={c.intentKey}
+                          onChange={(e) => setConnectorIntent(selNode.id, c.id, e.target.value)}
+                        >
+                          <option value="">(pick the reply…)</option>
+                          <optgroup label="Expected replies">
+                            {scenarios.filter((s) => s.action_type === "ignore").map((s) => (
+                              <option key={s.id} value={s.intent_key}>{s.name}</option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="All scenarios (matched by their description)">
+                            {scenarios
+                              .filter((s) => s.action_type !== "ignore" && !["first_message", "identity"].includes(s.intent_key))
+                              .map((s) => (
+                                <option key={s.id} value={s.intent_key}>{s.name}</option>
+                              ))}
+                          </optgroup>
+                        </select>
+                        <button
+                          onClick={() => removeConnector(selNode.id, c.id)}
+                          className="shrink-0 text-sm text-gray-500 hover:text-rose-400"
+                          title="Remove connector (and its arrow)"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => addConnector(selNode.id)}
+                      className="rounded-md border border-dashed border-gray-600 px-2 py-1 text-[11px] text-gray-400 transition hover:border-emerald-500 hover:text-emerald-300"
+                    >
+                      + Add reply connector
+                    </button>
+                    <p className="mt-1.5 rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
+                      Each green dot fires when the reply matches its scenario — draw its arrow to the next box, or
+                      back <strong>up</strong> to an earlier box to repeat it. Replies that match no connector follow
+                      the plain default dot; leave the default unconnected and the box stays put while the Playbook
+                      answers.
+                    </p>
+                  </div>
                 )}
 
                 {sd.kind === "step" && (
@@ -1271,8 +1442,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                         })()}
                         <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
                           A stage in one box: whichever member scenario matches the customer&rsquo;s reply is spoken;
-                          anything else gets the default line. Loop the arrow back here to keep the stage alive until
-                          an If/Else exit fires.
+                          anything else gets the default line. Add reply connectors below to move on when a reply
+                          calls for the next stage.
                         </p>
                       </>
                     )}
@@ -1572,12 +1743,19 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
             {selEdge && (
               <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[11px] text-gray-400">
                 {(() => {
-                  const h = (selEdge.data as { condition?: { handle?: string } } | undefined)?.condition?.handle;
+                  const c = (selEdge.data as { condition?: { handle?: string; value?: string } } | undefined)?.condition;
+                  const h = c?.handle;
+                  if (isConnectorHandle(h)) {
+                    const scn = scenarios.find((s) => s.intent_key === c?.value);
+                    return scn
+                      ? `Fires when the reply matches “${scn.name}”${scn.description ? ` — ${snip(scn.description, 90)}` : ""}`
+                      : "A reply connector — pick its reply on the box it leaves from.";
+                  }
                   if (h === "then") return "This is the Then path of an If/Else box.";
                   if (h === "else") return "This is the Else (fallback) path of an If/Else box.";
                   if (h === "loop") return "This is the Repeat path of a Loop box.";
                   if (h === "exit") return "This is the Exit path of a Loop box.";
-                  return "A plain connector — the call moves to the next box.";
+                  return "The default path — replies that match no reply connector continue here.";
                 })()}
                 <br />
                 <span className="text-gray-600">Use Delete above to remove it.</span>
