@@ -1834,7 +1834,39 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 return `at “${nodeLabel(run.currentNodeId) ?? "…"}” — waiting for: ${parts.join("  ·  ")}`;
               })();
               const col = "flex min-h-0 flex-1 flex-col-reverse gap-1.5 overflow-y-auto overscroll-contain p-3";
-              const head = "shrink-0 border-b border-gray-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500";
+              const head = "flex shrink-0 items-center justify-between border-b border-gray-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500";
+              // Plain-text builders for copy-to-clipboard (chronological).
+              const transcriptLine = (e: LabCallEvent) =>
+                `${e.event_type === "utterance" ? "Customer" : "Agent"}: ${e.content ?? ""}`;
+              const listenerLine = (e: LabCallEvent) => {
+                const m = metaOf(e);
+                if (e.event_type === "classified")
+                  return `heard as "${e.intent_key}" (${Math.round(Number(e.confidence ?? 0) * 100)}%)${m.speculative ? " — pre-thought while they spoke" : ""}`;
+                if (e.event_type === "sms") return `sms: ${e.content ?? ""}`;
+                if (e.event_type === "error") return `error: ${e.content ?? ""}`;
+                return `${m.flow ? "script" : "playbook"}: ${e.content ?? ""}${e.latency_ms != null ? ` (${(e.latency_ms / 1000).toFixed(1)}s)` : ""}`;
+              };
+              const copyCol = (label: string, lines: string[]) => {
+                navigator.clipboard
+                  .writeText(lines.join("\n"))
+                  .then(() => setNotice(`${label} copied to clipboard.`))
+                  .catch(() => setError("Couldn't copy — clipboard blocked by the browser."));
+              };
+              const copyBtn = (label: string, lines: string[]) => (
+                <button
+                  onClick={() => copyCol(label, lines)}
+                  title={`Copy the ${label.toLowerCase()} to the clipboard`}
+                  className="shrink-0 rounded p-0.5 text-gray-600 transition hover:bg-gray-800 hover:text-gray-300"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    />
+                  </svg>
+                </button>
+              );
               return (
                 <div className="order-2 flex shrink-0 flex-col border-t border-gray-700 bg-gray-950">
                   {/* Drag the top edge to resize the dock */}
@@ -1917,7 +1949,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                       style={{ height: dockFull ? "calc(100vh - 170px)" : dockH }}
                     >
                       <div className="flex min-h-0 min-w-0 flex-col">
-                        <p className={head}>Transcript</p>
+                        <p className={head}>
+                          <span>Transcript</span>
+                          {copyBtn("Transcript", transcript.map(transcriptLine))}
+                        </p>
                         <div className={col}>
                           {transcript.length === 0 && <p className="text-[11px] text-gray-600">Waiting for the first words…</p>}
                           {transcript
@@ -1934,7 +1969,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                         </div>
                       </div>
                       <div className="flex min-h-0 min-w-0 flex-col">
-                        <p className={head}>Listener</p>
+                        <p className={head}>
+                          <span>Listener</span>
+                          {copyBtn("Listener log", listener.map(listenerLine))}
+                        </p>
                         <div className={col}>
                           {listener.length === 0 && <p className="text-[11px] text-gray-600">Classifications and lines land here…</p>}
                           {listener
@@ -1972,7 +2010,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                         </div>
                       </div>
                       <div className="flex min-h-0 min-w-0 flex-col">
-                        <p className={head}>Observer</p>
+                        <p className={head}>
+                          <span>Observer</span>
+                          {copyBtn("Observer log", [...observer.map(observerText), ...(waitingFor ? [waitingFor] : [])])}
+                        </p>
                         <div className={col}>
                           {waitingFor && (
                             <p className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium leading-snug text-emerald-300">

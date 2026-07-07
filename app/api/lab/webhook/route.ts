@@ -147,14 +147,22 @@ async function expectedIntentKeys(
   if (!nodeId || !graph.nodes.find((n) => n.id === nodeId)) nodeId = findEntryNode(graph.nodes, graph.edges)?.id ?? null;
   if (!nodeId) return [];
   const keys: string[] = [];
+  const collectionIds = new Set<string>();
   for (const e of graph.edges.filter((x) => x.source_node_id === nodeId)) {
     const c = (e.condition ?? {}) as Record<string, unknown>;
     if (((c.by as string) ?? (c.kind as string)) === "intent" && c.value) keys.push(c.value as string);
+    // Members of collections this box's arrows lead INTO are live choices too:
+    // a "yes" that routes into a reaction stage is ALSO 'player takes the
+    // bait' — the router should return both so the stage speaks its member.
+    const tgt = graph.nodes.find((n) => n.id === e.target_node_id);
+    const tcfg = (tgt?.config ?? {}) as Record<string, unknown>;
+    if (tgt && contentTypeOf(tgt) === "collection" && tcfg.collectionId) collectionIds.add(tcfg.collectionId as string);
   }
   const node = graph.nodes.find((n) => n.id === nodeId);
   const cfg = (node?.config ?? {}) as Record<string, unknown>;
-  if (node && contentTypeOf(node) === "collection" && cfg.collectionId) {
-    const ids = await getCollectionHandlerIds(cfg.collectionId as string).catch(() => [] as string[]);
+  if (node && contentTypeOf(node) === "collection" && cfg.collectionId) collectionIds.add(cfg.collectionId as string);
+  for (const cid of collectionIds) {
+    const ids = await getCollectionHandlerIds(cid).catch(() => [] as string[]);
     for (const h of handlers) if (ids.includes(h.id)) keys.push(h.intent_key);
   }
   return [...new Set(keys)];
