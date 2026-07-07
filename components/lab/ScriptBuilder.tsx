@@ -1156,13 +1156,14 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     else if (run.status === "idle") setPaletteOpen(true);
   }, [run.status]);
 
-  // Zoom out to the whole workflow when a run starts (after the palette has
-  // collapsed and the dock has risen, so the fit uses the final canvas size).
+  // Zoom out to the whole workflow whenever the run view changes size — on
+  // start (palette collapses, dock rises), on dock expand/collapse, and when
+  // the run ends — so every box is always in view.
   useEffect(() => {
-    if (run.status !== "connecting") return;
-    const t = setTimeout(() => rf?.fitView({ padding: 0.25, duration: 500 }), 350);
+    if (run.status === "idle") return;
+    const t = setTimeout(() => rf?.fitView({ padding: 0.2, duration: 400 }), 350);
     return () => clearTimeout(t);
-  }, [run.status, rf]);
+  }, [run.status, runPanelOpen, rf]);
 
   // Paint the call's position onto the canvas (display-only).
   const displayNodes = useMemo(() => {
@@ -1632,8 +1633,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         </div>
         )}
 
-        {/* Canvas */}
-        <div className="relative min-w-0 flex-1" onDrop={onDrop} onDragOver={onDragOver}>
+        {/* Canvas + live-run dock (dock is a real panel below the canvas, so
+            zoom-to-fit fits the actually visible area) */}
+        <div className="flex min-w-0 flex-1 flex-col" onDrop={onDrop} onDragOver={onDragOver}>
           {/* Live-run dock: transcript / listener / thinking, live from the call */}
           {run.status !== "idle" &&
             (() => {
@@ -1682,7 +1684,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               const col = "flex min-h-0 flex-1 flex-col-reverse gap-1.5 overflow-y-auto p-3";
               const head = "shrink-0 border-b border-gray-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500";
               return (
-                <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col border-t border-gray-700 bg-gray-950/95 shadow-2xl backdrop-blur">
+                <div className="order-2 flex shrink-0 flex-col border-t border-gray-700 bg-gray-950">
                   {/* Dock header: status, position, controls */}
                   <div className="flex items-center gap-3 px-4 py-2">
                     <span
@@ -1812,6 +1814,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 </div>
               );
             })()}
+          <div className="relative order-1 min-h-0 flex-1">
           {scriptId ? (
             <ReactFlow
               nodes={displayNodes}
@@ -1851,6 +1854,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               Select or create a script to start building.
             </div>
           )}
+          </div>
         </div>
 
         {/* Config panel */}
