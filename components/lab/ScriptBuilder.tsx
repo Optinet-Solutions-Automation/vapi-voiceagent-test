@@ -271,6 +271,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [collections, setCollections] = useState<ListenerCollection[]>([]);
   const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
+  // The VAPI assistant test calls dial — same setting the Listener Lab uses,
+  // shown here so a run never grabs a random/stale assistant.
+  const [assistants, setAssistants] = useState<{ id: string; name: string }[]>([]);
+  const [labAssistantId, setLabAssistantId] = useState<string>("");
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -395,6 +399,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         setCollections(cols);
         setActiveScriptId(settings?.active_script_id ?? null);
         setActiveCollectionId(settings?.active_collection_id ?? null);
+        setLabAssistantId(((settings as unknown as { lab_assistant_id?: string } | null)?.lab_assistant_id ?? "") as string);
+        fetch("/api/vapi-assistants")
+          .then((r) => r.json())
+          .then((a) => Array.isArray(a) && setAssistants(a))
+          .catch(() => {});
         if (initialScriptId) loadScript(initialScriptId);
         else if (scs.length && !scriptId) loadScript(scs[0].id);
       } catch (e: unknown) {
@@ -1101,10 +1110,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         await saveLabSettings({ active_script_id: scriptId });
         setActiveScriptId(scriptId);
       }
-      const settings = await getLabSettings().catch(() => null);
-      const aid = (settings as unknown as { lab_assistant_id?: string } | null)?.lab_assistant_id;
+      const aid =
+        labAssistantId ||
+        (((await getLabSettings().catch(() => null)) as unknown as { lab_assistant_id?: string } | null)?.lab_assistant_id ?? "");
       if (!aid) {
-        setError("No lab assistant configured — pick one in the Listener Lab first.");
+        setError("Pick the voice agent in the top bar first — that's the VAPI assistant the test call dials.");
         return;
       }
       lastRunEvId.current = 0;
@@ -1572,6 +1582,35 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${activeScriptId === scriptId ? "left-[18px]" : "left-0.5"}`} />
             </button>
           </label>
+
+          {/* Voice agent for test calls — same setting as the Listener Lab */}
+          <select
+            value={labAssistantId}
+            onChange={async (e) => {
+              const v = e.target.value;
+              setLabAssistantId(v);
+              if (v) {
+                try {
+                  await saveLabSettings({ lab_assistant_id: v });
+                } catch (err: unknown) {
+                  setError(err instanceof Error ? err.message : "Failed to save the voice agent");
+                }
+              }
+            }}
+            disabled={run.status === "live" || run.status === "connecting"}
+            title="The VAPI assistant test calls dial — shared with the Listener Lab"
+            className="w-40 shrink-0 rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-200 focus:border-indigo-500 focus:outline-none disabled:opacity-50 [color-scheme:dark]"
+          >
+            <option value="">(pick the voice agent…)</option>
+            {assistants.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+            {labAssistantId && !assistants.some((a) => a.id === labAssistantId) && (
+              <option value={labAssistantId}>(saved assistant)</option>
+            )}
+          </select>
 
           {/* Run history: replay past calls of this script */}
           <button
