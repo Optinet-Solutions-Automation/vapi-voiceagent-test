@@ -11,6 +11,14 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 
 ## v2.2 — current
 
+- **Unified replies everywhere — routing no longer drops the side question.**
+  A reply that routes down a connector AND raises something else ("sure,
+  text me — but what's the catch?") now folds every other matched Playbook
+  answer into the routed box's briefing: one paragraph covering all of it.
+  Intents consumed by the routing itself are excluded (the box IS their
+  answer), so single-intent replies stay untouched. This closes the last
+  merge gap — reactive replies, collection members, split fragments, and
+  now flow-routed turns all produce ONE unified response.
 - **Run workflow from the builder — the canvas IS the monitor.** A ▶ Run
   button saves the script, runs a built-in QA, and (when clean) starts a
   live browser test call. While the call runs, the box the call is

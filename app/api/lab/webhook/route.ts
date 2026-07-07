@@ -948,19 +948,30 @@ async function runScriptFlow(
   };
 
   // Did a branch fire *because of* this utterance? (Then edge whose intent/tag
-  // condition matched, or a legacy intent/tag condition edge.)
+  // condition matched, or a connector/legacy intent condition edge.) Intents
+  // consumed by the routing are remembered so the routed box's line isn't
+  // ALSO merged with those intents' own Playbook answers.
+  const consumedIntents = new Set<string>();
   function edgeRecognizedIntent(node: NonNullable<ReturnType<typeof nodeById>>, edge: NonNullable<ReturnType<typeof pickNextEdge>>): boolean {
     const c = (edge.condition ?? {}) as Record<string, unknown>;
     if (contentTypeOf(node) === "ifelse") {
       if ((c.handle as string) !== "then") return false;
       const cfg = (node.config ?? {}) as Record<string, unknown>;
       const by = (cfg.condBy as string) ?? "intent";
-      if (by === "intent") return intents.includes(cfg.condValue as string);
+      if (by === "intent") {
+        const ok = intents.includes(cfg.condValue as string);
+        if (ok) consumedIntents.add(cfg.condValue as string);
+        return ok;
+      }
       if (by === "tag") return !!cfg.condValue && intentTags.includes(cfg.condValue as string);
       return false; // result-driven — unrelated to this utterance
     }
     const by = (c.by as string) ?? (c.kind as string);
-    if (by === "intent") return intents.includes(c.value as string);
+    if (by === "intent") {
+      const ok = intents.includes(c.value as string);
+      if (ok) consumedIntents.add(c.value as string);
+      return ok;
+    }
     if (by === "tag") return !!c.value && intentTags.includes(c.value as string);
     return false;
   }
@@ -1113,6 +1124,7 @@ async function runScriptFlow(
     // Multi-part replies at a collection: every matched member's content is
     // folded into ONE briefing so the agent gives a single short reply.
     let mergedText: string | null = null;
+    let mergedIds: string[] = [];
 
     if (ct === "scenario") {
       const cands = [target.scenario_id, ...((cfg.candidateScenarioIds as string[]) ?? [])].filter(Boolean) as string[];
@@ -1143,6 +1155,7 @@ async function runScriptFlow(
         mergedText =
           `The customer raised ${matches.length} points at once — cover ALL of them in ONE short, natural reply (a single paragraph, keep exact facts, prices and terms word-accurate): ` +
           matches.map((m, i) => `(${i + 1}) ${m.response_template}`).join(" ");
+        mergedIds = matches.map((m) => m.id);
       }
       // No member fits the reply → the box's default line; failing that, the
       // highest-priority member (never an arbitrary row).
@@ -1190,6 +1203,32 @@ async function runScriptFlow(
       injectedText = scenario.response_template ?? "";
     }
 
+    // The reply often carries MORE than the routed step expects ("sure, text
+    // me — but what's the catch?"): fold every OTHER matched Playbook answer
+    // into the same briefing so the agent gives ONE unified reply and no part
+    // of the customer's turn is silently dropped.
+    let sideMerged = false;
+    if (ct !== "transfer") {
+      const covered = new Set<string>([...(scenario ? [scenario.id] : []), ...mergedIds]);
+      const sideAnswers: ListenerHandler[] = [];
+      for (const k of intents) {
+        if (consumedIntents.has(k)) continue; // the routing itself answers these
+        const h = allHandlers.find((x) => x.intent_key === k);
+        if (!h || covered.has(h.id)) continue;
+        if (h.action_type !== "answer" && h.action_type !== "give_offer") continue;
+        if (!h.response_template) continue;
+        covered.add(h.id);
+        sideAnswers.push(h);
+      }
+      if (sideAnswers.length > 0 && injectedText) {
+        const parts = [injectedText, ...sideAnswers.map((h) => h.response_template)];
+        injectedText =
+          `The customer raised ${parts.length} points at once — cover ALL of them in ONE short, natural reply (a single paragraph, keep exact facts, prices and terms word-accurate): ` +
+          parts.map((t, i) => `(${i + 1}) ${t}`).join(" ");
+        sideMerged = true;
+      }
+    }
+
     note(injectedText, target, ct, edgeCond, scenario?.id ?? null, alreadyReplied ? "continue_after_reply" : "fresh");
     if (!(await flush())) return true; // lost the race — say nothing
     if (ct === "send_sms") {
@@ -1210,7 +1249,7 @@ async function runScriptFlow(
         await injectStaffNote(controlUrl, brief(injectedText), true);
       } else if (ct === "transfer") {
         await injectSay(controlUrl, injectedText, false);
-      } else if (mergedText) {
+      } else if (mergedText || sideMerged) {
         // Merged multi-point reply is always a briefing — one paragraph out.
         await injectStaffNote(controlUrl, brief(injectedText), true);
       } else if (scenario) {
