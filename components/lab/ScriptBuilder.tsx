@@ -906,6 +906,22 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   // views (transcript / listener / thinking).
   const [runEvents, setRunEvents] = useState<LabCallEvent[]>([]);
   const [runPanelOpen, setRunPanelOpen] = useState(true);
+  // Dock sizing: drag the top edge to resize, or toggle fullscreen.
+  const [dockH, setDockH] = useState(240);
+  const [dockFull, setDockFull] = useState(false);
+  function startDockDrag(e: React.MouseEvent) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = dockH;
+    const move = (ev: MouseEvent) =>
+      setDockH(Math.min(Math.max(140, startH + (startY - ev.clientY)), Math.round(window.innerHeight * 0.75)));
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
   // Run history: past calls of this script (null = closed).
   const [history, setHistory] = useState<{ call_id: string; current_node_id: string | null; updated_at: string }[] | null>(null);
   const [histBusy, setHistBusy] = useState(false);
@@ -1202,7 +1218,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (run.status === "idle") return;
     const t = setTimeout(() => rf?.fitView({ padding: 0.2, duration: 400 }), 350);
     return () => clearTimeout(t);
-  }, [run.status, runPanelOpen, rf]);
+  }, [run.status, runPanelOpen, dockFull, rf]);
 
   // Paint the call's position onto the canvas (display-only).
   const displayNodes = useMemo(() => {
@@ -1713,13 +1729,16 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                   ["classified", "sms", "error"].includes(e.event_type) ||
                   (e.event_type === "injected" && !metaOf(e).opening && (e.content ?? "") !== "" && metaOf(e).mode !== "skipped_ahead")
               );
-              const thinking = runEvents.filter(
+              const observer = runEvents.filter(
                 (e) =>
                   e.event_type === "speculated" ||
                   e.event_type === "skipped" ||
-                  (e.event_type === "injected" && !!metaOf(e).flow && ((e.content ?? "") === "" || metaOf(e).mode === "skipped_ahead"))
+                  e.event_type === "classified" ||
+                  (e.event_type === "injected" &&
+                    (((metaOf(e).repeated as number) ?? 0) > 0 ||
+                      (!!metaOf(e).flow && ((e.content ?? "") === "" || metaOf(e).mode === "skipped_ahead"))))
               );
-              const thinkingText = (e: LabCallEvent): string => {
+              const observerText = (e: LabCallEvent): string => {
                 const m = metaOf(e);
                 if (e.event_type === "speculated") {
                   const cls = m.cls as { intent?: string; confidence?: number } | undefined;
@@ -1732,15 +1751,33 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                       : "still talking… nothing actionable yet") + exp
                   );
                 }
+                if (e.event_type === "classified") {
+                  const exp = (Array.isArray(m.expected) ? (m.expected as string[]) : []).slice(0, 3);
+                  const heard = e.intent_key ?? "none";
+                  if (!exp.length) return `heard “${heard}” — no step expectations here`;
+                  return `step expected: ${exp.join(", ")} — heard “${heard}”${
+                    exp.includes(heard) ? " ✓ as planned" : heard === "none" ? " (just noise — holding position)" : " — off-plan, rerouting"
+                  }`;
+                }
                 if (e.event_type === "skipped") return REASON_TEXT[(m.reason as string) ?? ""] ?? `skipped (${(m.reason as string) ?? "?"})`;
+                if (((m.repeated as number) ?? 0) > 0)
+                  return `advised: this was already said ${m.repeated}× — rephrase with new emphasis, don't recite`;
                 const lb = nodeLabel(m.toNode);
                 if (m.mode === "skipped_ahead") return `passed through ${lb ? `“${lb}”` : "a box"} — the reply answered past it`;
                 return `moved to ${lb ? `“${lb}”` : "the next box"}`;
               };
-              const col = "flex min-h-0 flex-1 flex-col-reverse gap-1.5 overflow-y-auto p-3";
+              const col = "flex min-h-0 flex-1 flex-col-reverse gap-1.5 overflow-y-auto overscroll-contain p-3";
               const head = "shrink-0 border-b border-gray-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500";
               return (
                 <div className="order-2 flex shrink-0 flex-col border-t border-gray-700 bg-gray-950">
+                  {/* Drag the top edge to resize the dock */}
+                  {runPanelOpen && (
+                    <div
+                      onMouseDown={startDockDrag}
+                      title="Drag to resize"
+                      className="h-1.5 w-full shrink-0 cursor-ns-resize bg-gray-800/60 transition hover:bg-emerald-500/40"
+                    />
+                  )}
                   {/* Dock header: status, position, controls */}
                   <div className="flex items-center gap-3 px-4 py-2">
                     <span
@@ -1761,6 +1798,19 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                       <span className="min-w-0 truncate text-[11px] italic text-gray-500">“{snip(run.lastLine, 80)}”</span>
                     )}
                     <span className="flex-1" />
+                    <button
+                      onClick={() => setDockFull((f) => !f)}
+                      title={dockFull ? "Exit fullscreen" : "Fullscreen"}
+                      className="shrink-0 rounded-md border border-gray-700 p-1 text-gray-400 transition hover:bg-gray-800 hover:text-gray-200"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        {dockFull ? (
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 9H4m5 0V4m6 5h5m-5 0V4M9 15H4m5 0v5m6-5h5m-5 0v5" />
+                        ) : (
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4h4m8 0h4v4m0 8v4h-4M8 20H4v-4" />
+                        )}
+                      </svg>
+                    </button>
                     <button
                       onClick={() => setRunPanelOpen((o) => !o)}
                       title={runPanelOpen ? "Collapse" : "Expand"}
@@ -1795,8 +1845,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                   </div>
                   {/* Three live views */}
                   {runPanelOpen && (
-                    <div className="grid h-60 grid-cols-3 divide-x divide-gray-800 border-t border-gray-800">
-                      <div className="flex min-w-0 flex-col">
+                    <div
+                      className="grid grid-cols-3 divide-x divide-gray-800 border-t border-gray-800"
+                      style={{ height: dockFull ? "calc(100vh - 170px)" : dockH }}
+                    >
+                      <div className="flex min-h-0 min-w-0 flex-col">
                         <p className={head}>Transcript</p>
                         <div className={col}>
                           {transcript.length === 0 && <p className="text-[11px] text-gray-600">Waiting for the first words…</p>}
@@ -1813,7 +1866,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             ))}
                         </div>
                       </div>
-                      <div className="flex min-w-0 flex-col">
+                      <div className="flex min-h-0 min-w-0 flex-col">
                         <p className={head}>Listener</p>
                         <div className={col}>
                           {listener.length === 0 && <p className="text-[11px] text-gray-600">Classifications and lines land here…</p>}
@@ -1851,16 +1904,18 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             ))}
                         </div>
                       </div>
-                      <div className="flex min-w-0 flex-col">
-                        <p className={head}>Thinking</p>
+                      <div className="flex min-h-0 min-w-0 flex-col">
+                        <p className={head}>Observer</p>
                         <div className={col}>
-                          {thinking.length === 0 && <p className="text-[11px] text-gray-600">Anticipation and decisions show up here…</p>}
-                          {thinking
+                          {observer.length === 0 && (
+                            <p className="text-[11px] text-gray-600">The observer narrates every turn here — expectations, verdicts, advice…</p>
+                          )}
+                          {observer
                             .slice()
                             .reverse()
                             .map((e) => (
                               <p key={e.id} className="text-[11px] italic leading-snug text-gray-400">
-                                {thinkingText(e)}
+                                {observerText(e)}
                               </p>
                             ))}
                         </div>

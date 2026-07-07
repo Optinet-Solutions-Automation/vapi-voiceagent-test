@@ -583,7 +583,14 @@ async function handleTranscript(
     confidence: cls.confidence,
     utterance_at: utteranceAt.toISOString(),
     classified_at: new Date(classifiedAt).toISOString(),
-    meta: { raw: cls.raw, intents, speculative: speculativeHit, merged: turnText !== utterance },
+    meta: {
+      raw: cls.raw,
+      intents,
+      speculative: speculativeHit,
+      merged: turnText !== utterance,
+      // Observer context: what the script step was expecting when this came in.
+      expected: (await expectedPromise).slice(0, 6),
+    },
   });
 
   // Can the Playbook answer this turn on its own? The flow uses this to let
