@@ -152,7 +152,7 @@ function FlowNode({ id, data, selected }: NodeProps) {
     d.runState === "current"
       ? "ring-4 ring-emerald-400 shadow-[0_0_22px_rgba(52,211,153,0.65)]"
       : d.runState === "visited"
-        ? "ring-2 ring-emerald-600/50"
+        ? "ring-2 ring-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.35)]"
         : selected
           ? "ring-2 ring-white/60"
           : "";
@@ -1072,7 +1072,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           : undefined
       );
       if (call?.id) {
-        setRun((r) => ({ ...r, callId: call.id, status: "live" }));
+        // The engine only persists its position after the first routed turn —
+        // paint the Start box as "you are here" from second zero.
+        const startId = startNode?.id ?? null;
+        setRun((r) => ({ ...r, callId: call.id, status: "live", currentNodeId: startId, visited: startId ? [startId] : [] }));
         if (opening)
           insertLabEvent({ call_id: call.id, event_type: "injected", role: "assistant", content: opening, action_type: "opening", meta: { opening: true } }).catch(() => {});
       } else {
@@ -1152,6 +1155,14 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (run.status === "connecting" || run.status === "live") setPaletteOpen(false);
     else if (run.status === "idle") setPaletteOpen(true);
   }, [run.status]);
+
+  // Zoom out to the whole workflow when a run starts (after the palette has
+  // collapsed and the dock has risen, so the fit uses the final canvas size).
+  useEffect(() => {
+    if (run.status !== "connecting") return;
+    const t = setTimeout(() => rf?.fitView({ padding: 0.25, duration: 500 }), 350);
+    return () => clearTimeout(t);
+  }, [run.status, rf]);
 
   // Paint the call's position onto the canvas (display-only).
   const displayNodes = useMemo(() => {
@@ -1358,15 +1369,30 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   }
 
   // Loop-back arrows (target box sits above the source) render as a dashed
-  // line so a repeat reads differently from the forward flow. Display-only —
-  // the stored edges are untouched.
+  // line so a repeat reads differently from the forward flow. During a run,
+  // the arrows the call actually walked light up emerald (consecutive
+  // visited boxes) and the arrow INTO the current box animates — the
+  // transition is visible, not just the boxes. Display-only.
   const displayEdges = useMemo(() => {
     const posY = new Map(nodes.map((n) => [n.id, n.position.y]));
+    const walkedPairs = new Set<string>();
+    for (let i = 0; i + 1 < run.visited.length; i++) walkedPairs.add(run.visited[i] + ">" + run.visited[i + 1]);
     return edges.map((e) => {
       const up = (posY.get(e.target) ?? 0) < (posY.get(e.source) ?? 0);
-      return up ? { ...e, style: { ...(e.style ?? {}), strokeDasharray: "7 5" } } : e;
+      let out = up ? { ...e, style: { ...(e.style ?? {}), strokeDasharray: "7 5" } } : e;
+      if (run.status !== "idle") {
+        const walked = walkedPairs.has(e.source + ">" + e.target);
+        const intoCurrent = e.target === run.currentNodeId && walked;
+        if (walked)
+          out = {
+            ...out,
+            animated: intoCurrent,
+            style: { ...(out.style ?? {}), stroke: "#34d399", strokeWidth: 2.5 },
+          };
+      }
+      return out;
     });
-  }, [edges, nodes]);
+  }, [edges, nodes, run]);
 
   // Members of the collection a selected Collection box points at — shown as
   // a plain list in the drawer so the builder never has to leave the canvas.
