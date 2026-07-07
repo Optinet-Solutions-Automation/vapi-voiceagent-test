@@ -1,12 +1,13 @@
 // VAPI server webhook for the Listener Lab assistant.
 // Receives mid-call events (tool-calls, live transcript chunks, status updates)
 // and runs the organizer: classify utterances, resolve handlers, inject answers.
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import {
   listHandlers,
   getLabSettings,
   insertLabEvent,
   insertLabEventReturningId,
+  getSpeculated,
   hasNewerUtterance,
   agentSpokeSince,
   agentWordsSince,
@@ -30,6 +31,9 @@ import {
 import type { ListenerHandler } from "@/lib/database.types";
 
 export const dynamic = "force-dynamic";
+// A turn can legitimately hold the line for a while (speaking lock up to 6s +
+// classification + injection) — don't let the platform kill it mid-injection.
+export const maxDuration = 60;
 
 // Playbook rows that are prompt material, not conversation moves: the opening
 // line and the campaign identity. Never routed, never injected mid-call.
@@ -95,6 +99,34 @@ async function waitForAgentSilence(callId: string, maxMs = 6000): Promise<void> 
   }
 }
 
+// ── Self-coverage: did the agent's own reply already deliver this line? ──
+// The agent can answer identity-class questions from its standing prompt; when
+// it has, injecting the supplied line on top makes it say the same thing twice
+// ("It's Victor… It's Victor from Lucky Seven."). Compare content words:
+// instruction-style reword templates share almost none with real speech, so
+// they pass through — only genuinely already-spoken content is dropped.
+const STOP_WORDS = new Set([
+  "the", "and", "for", "you", "your", "from", "with", "that", "this", "just",
+  "about", "them", "they", "their", "its", "are", "was", "were", "have", "has",
+  "had", "will", "would", "can", "could", "our", "out", "not", "but", "all",
+  "any", "then", "than", "when", "what", "who", "how", "why", "say", "said",
+]);
+function contentWords(s: string): Set<string> {
+  return new Set(
+    s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/)
+      .filter((w) => w.length >= 3 && !STOP_WORDS.has(w))
+  );
+}
+function selfCovered(line: string, spoken: string | null): boolean {
+  if (!spoken) return false;
+  const need = contentWords(line);
+  if (need.size < 2) return false;
+  const have = contentWords(spoken);
+  let hit = 0;
+  for (const w of need) if (have.has(w)) hit++;
+  return hit / need.size >= 0.7;
+}
+
 // ── Anticipatory classification ───────────────────────────────
 // Start the router on the customer's LAST partial transcript while they're
 // still speaking. The final transcript very often equals the last partial, so
@@ -103,7 +135,7 @@ async function waitForAgentSilence(callId: string, maxMs = 6000): Promise<void> 
 type SpecEntry = { text: string; promise: Promise<Classification>; at: number };
 const speculativeCls = new Map<string, SpecEntry>();
 
-function speculate(callId: string, text: string) {
+function speculate(callId: string, text: string): Promise<void> | undefined {
   const now = Date.now();
   for (const [k, v] of speculativeCls) if (now - v.at > 30000) speculativeCls.delete(k);
   if (text.split(/\s+/).length < 4) return; // too short to be worth a router call
@@ -123,6 +155,19 @@ function speculate(callId: string, text: string) {
   })();
   promise.catch(() => {}); // never an unhandled rejection
   speculativeCls.set(callId, { text, promise, at: now });
+  // The map dies at the serverless instance boundary — the partial and the
+  // final rarely land on the same instance, so also persist the result; the
+  // final's handler reads it back when the map misses.
+  return promise
+    .then(async (cls) => {
+      await log({
+        call_id: callId,
+        event_type: "speculated",
+        content: text,
+        meta: { cls: cls as unknown as Record<string, unknown> },
+      });
+    })
+    .catch(() => {});
 }
 
 /** Restrict handlers to the active collection (if one is set and non-empty). */
@@ -162,7 +207,12 @@ export async function POST(req: Request) {
       // router so the final's classification is usually already in flight.
       if (message.role === "user" && message.transcriptType === "partial") {
         const partial = (message.transcript ?? "").trim();
-        if (partial) speculate(callId, partial);
+        if (partial) {
+          const p = speculate(callId, partial);
+          // Serverless freezes background work once the response returns —
+          // keep the invocation alive until the classification is stored.
+          if (p) after(() => p);
+        }
         return NextResponse.json({});
       }
       await handleTranscript(message, callId, controlUrlHint);
@@ -444,6 +494,16 @@ async function handleTranscript(
     }
     speculativeCls.delete(callId);
   }
+  // Same-instance miss (on serverless the partial and the final rarely share
+  // an instance) — check the persisted speculation before paying for a fresh
+  // router call.
+  if (!cls && turnText === utterance) {
+    const stored = await getSpeculated(callId, utterance, 15000).catch(() => null);
+    if (stored) {
+      cls = stored as unknown as Classification;
+      speculativeHit = true;
+    }
+  }
   if (!cls) {
     try {
       cls = await classifyUtterance(turnText, recentTurns, handlers, settings.router_model);
@@ -675,6 +735,25 @@ async function handleTranscript(
     const mergeTexts = (texts: string[]) =>
       `The customer raised ${texts.length} points at once — cover ALL of them in ONE short, natural reply (a single paragraph, keep exact facts, prices and terms word-accurate): ` +
       texts.map((t, i) => `(${i + 1}) ${t}`).join(" ");
+
+    // The agent's own reply already delivered this line's content — a second
+    // delivery is the double-intro. Stand down; the turn is answered.
+    if (
+      (handler.action_type === "answer" || handler.action_type === "give_offer") &&
+      extraHandlers.length === 0 &&
+      alreadyReplied &&
+      selfCovered(injectedText, spokenSince)
+    ) {
+      await log({
+        call_id: callId,
+        event_type: "skipped",
+        content: utterance,
+        intent_key: cls.intent,
+        handler_id: handler.id,
+        meta: { reason: "self_covered", spoken: (spokenSince ?? "").slice(0, 160) },
+      });
+      return;
+    }
 
     if (handler.action_type === "end_call") {
       if (!handler.response_template) {

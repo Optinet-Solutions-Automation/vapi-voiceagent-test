@@ -11,6 +11,22 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 
 ## v2.2 — current
 
+- **Production (Vercel) latency forensics — self-covered skip + serverless
+  speculation** — timing data from live calls showed the "11s reply" was
+  mostly the speaking lock correctly waiting out the agent ANSWERING BY
+  ITSELF, then our continuation briefing ordering it to repeat the same
+  content ("It's Victor… It's Victor from Lucky Seven."). Injections whose
+  content words the agent's own reply already covered (≥70%) are now skipped
+  (`skipped: self_covered`); instruction-style reword templates share almost
+  no content words with speech, so real briefings still flow. Second finding:
+  anticipation NEVER fired in production (`speculative: false` on every turn)
+  because the speculation cache is an in-memory Map — on serverless the
+  partial and the final rarely share an instance, and background work is
+  frozen once the response returns. Speculations are now also persisted as
+  `speculated` events (kept alive via `after()`), and the final's handler
+  falls back to the stored result before paying for a fresh router call —
+  recovering the 2-3.5s router cost on matching turns. Webhook exports
+  `maxDuration = 60` so the platform can't kill a turn mid-injection.
 - **Flows defer off-script questions to the Playbook** — when the customer's
   reply matches a Playbook scenario that the flow's next step doesn't expect
   (no Then branch fired on it, no matching scenario/candidate at the landing

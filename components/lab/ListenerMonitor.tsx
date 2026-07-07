@@ -15,6 +15,7 @@ const TYPE_STYLES: Record<string, { chip: string; label: string }> = {
   agent_said: { chip: "bg-teal-500/15 text-teal-300", label: "agent said" },
   sms: { chip: "bg-amber-500/15 text-amber-300", label: "sms" },
   classified: { chip: "bg-violet-500/15 text-violet-300", label: "classified" },
+  speculated: { chip: "bg-indigo-500/15 text-indigo-400", label: "speculated" },
   injected: { chip: "bg-emerald-500/15 text-emerald-300", label: "injected" },
   skipped: { chip: "bg-gray-700 text-gray-400", label: "skipped" },
   tool_call: { chip: "bg-fuchsia-500/15 text-fuchsia-300", label: "tool call" },

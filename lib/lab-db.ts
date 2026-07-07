@@ -406,6 +406,31 @@ export async function recentUnansweredFragment(
   return (prev.content ?? "").trim() || null;
 }
 
+/** A persisted speculative classification for exactly this text, if fresh.
+ *  The in-memory speculation map dies at the serverless instance boundary —
+ *  the partial and the final rarely land on the same instance — so speculate()
+ *  also stores its result as a `speculated` event and the final's handler
+ *  reads it back here. */
+export async function getSpeculated(
+  callId: string,
+  text: string,
+  withinMs: number
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("meta, created_at")
+    .eq("call_id", callId)
+    .eq("event_type", "speculated")
+    .eq("content", text)
+    .order("id", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const row = (data ?? [])[0];
+  if (!row?.created_at || Date.now() - new Date(row.created_at).getTime() > withinMs) return null;
+  const cls = (row.meta as Record<string, unknown> | null)?.cls;
+  return (cls as Record<string, unknown> | undefined) ?? null;
+}
+
 /** Is the assistant speaking RIGHT NOW? True when its latest speech-update
  *  status event is a "started" without a later "stopped". Powers the speaking
  *  lock: a response-triggering injection over a mid-sentence agent produces
