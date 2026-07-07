@@ -41,6 +41,7 @@ import {
   insertLabEvent,
 } from "@/lib/lab-db";
 import { getVapi, vapiErrorText } from "@/lib/vapi";
+import LabConfigForm from "@/components/lab/LabConfigForm";
 import type { ListenerScript, ListenerHandler, ListenerCollection, LabCallEvent } from "@/lib/database.types";
 
 // ── Content types a Step box can hold ─────────────────────────
@@ -271,10 +272,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [collections, setCollections] = useState<ListenerCollection[]>([]);
   const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
-  // The VAPI assistant test calls dial — same setting the Listener Lab uses,
-  // shown here so a run never grabs a random/stale assistant.
-  const [assistants, setAssistants] = useState<{ id: string; name: string }[]>([]);
+  // The VAPI assistant test calls dial — same setting the Listener Lab uses.
   const [labAssistantId, setLabAssistantId] = useState<string>("");
+  // The full Lab configuration, opened via the cog into the right drawer.
+  const [configOpen, setConfigOpen] = useState(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -400,10 +401,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         setActiveScriptId(settings?.active_script_id ?? null);
         setActiveCollectionId(settings?.active_collection_id ?? null);
         setLabAssistantId(((settings as unknown as { lab_assistant_id?: string } | null)?.lab_assistant_id ?? "") as string);
-        fetch("/api/vapi-assistants")
-          .then((r) => r.json())
-          .then((a) => Array.isArray(a) && setAssistants(a))
-          .catch(() => {});
         if (initialScriptId) loadScript(initialScriptId);
         else if (scs.length && !scriptId) loadScript(scs[0].id);
       } catch (e: unknown) {
@@ -1583,34 +1580,27 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
             </button>
           </label>
 
-          {/* Voice agent for test calls — same setting as the Listener Lab */}
-          <select
-            value={labAssistantId}
-            onChange={async (e) => {
-              const v = e.target.value;
-              setLabAssistantId(v);
-              if (v) {
-                try {
-                  await saveLabSettings({ lab_assistant_id: v });
-                } catch (err: unknown) {
-                  setError(err instanceof Error ? err.message : "Failed to save the voice agent");
-                }
-              }
+          {/* Configuration — the Listener Lab's full config, in the right drawer */}
+          <button
+            onClick={() => {
+              setConfigOpen((o) => !o);
+              setSelNodeId(null);
+              setSelEdgeId(null);
             }}
-            disabled={run.status === "live" || run.status === "connecting"}
-            title="The VAPI assistant test calls dial — shared with the Listener Lab"
-            className="w-40 shrink-0 rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-200 focus:border-indigo-500 focus:outline-none disabled:opacity-50 [color-scheme:dark]"
+            title="Configuration — voice agent, persona, listener tuning (shared with the Listener Lab)"
+            className={`rounded-lg border p-2 transition ${
+              configOpen ? "border-indigo-500 bg-indigo-500/15 text-indigo-300" : "border-gray-700 text-gray-300 hover:bg-gray-800"
+            }`}
           >
-            <option value="">(pick the voice agent…)</option>
-            {assistants.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-            {labAssistantId && !assistants.some((a) => a.id === labAssistantId) && (
-              <option value={labAssistantId}>(saved assistant)</option>
-            )}
-          </select>
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
 
           {/* Run history: replay past calls of this script */}
           <button
@@ -2007,8 +1997,25 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           </div>
         </div>
 
+        {/* Configuration drawer — the Lab's full settings, opened via the cog */}
+        {configOpen && (
+          <div className="flex w-96 shrink-0 flex-col border-l border-gray-800">
+            <div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Configuration</p>
+              <button onClick={() => setConfigOpen(false)} title="Close" className="text-gray-500 transition hover:text-gray-300">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              <LabConfigForm onAssistantChange={(id) => setLabAssistantId(id)} />
+            </div>
+          </div>
+        )}
+
         {/* Config panel */}
-        {(sd || selEdge) && (
+        {!configOpen && (sd || selEdge) && (
           <div className="w-72 shrink-0 space-y-3 overflow-y-auto border-l border-gray-800 p-3">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
