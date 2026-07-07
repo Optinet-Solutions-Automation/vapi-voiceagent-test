@@ -162,7 +162,7 @@ function FlowNode({ id, data, selected }: NodeProps) {
               id={h.id}
               type="source"
               position={Position.Bottom}
-              style={{ left, width: 13, height: 13, bottom: 4, background: h.color ?? "#818cf8", border: "2px solid #0f172a" }}
+              style={{ left, width: 13, height: 13, bottom: 4, background: h.color ?? "#34d399", border: "2px solid #0f172a" }}
             />
             {h.label && (
               <span
@@ -964,6 +964,17 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     });
   }
 
+  // Loop-back arrows (target box sits above the source) render as a dashed
+  // line so a repeat reads differently from the forward flow. Display-only —
+  // the stored edges are untouched.
+  const displayEdges = useMemo(() => {
+    const posY = new Map(nodes.map((n) => [n.id, n.position.y]));
+    return edges.map((e) => {
+      const up = (posY.get(e.target) ?? 0) < (posY.get(e.source) ?? 0);
+      return up ? { ...e, style: { ...(e.style ?? {}), strokeDasharray: "7 5" } } : e;
+    });
+  }, [edges, nodes]);
+
   // If/Else on result: offer the results actually declared by the Return
   // boxes of whichever sub-workflow(s) feed this box, instead of free text.
   const [subResults, setSubResults] = useState<Record<string, string[]>>({});
@@ -1147,7 +1158,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           {scriptId ? (
             <ReactFlow
               nodes={nodes}
-              edges={edges}
+              edges={displayEdges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
@@ -1802,9 +1813,18 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                           <p className="mt-1 rounded-md bg-gray-900/60 p-1.5 text-[10px] italic text-gray-500">{snip(scn.description, 110)}</p>
                         )}
                       </div>
+                      <button
+                        onClick={() => {
+                          if (selEdge.source) removeConnector(selEdge.source, h);
+                          setSelEdgeId(null);
+                        }}
+                        className="w-full rounded-md border border-gray-700 px-2 py-1.5 text-xs text-gray-400 transition hover:border-rose-500 hover:text-rose-300"
+                      >
+                        Remove this connector (dot + arrow)
+                      </button>
                       <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
-                        Point it at any box — even one further up, to repeat that step. Use Delete above to remove the
-                        arrow (the green dot stays on the box).
+                        Point it at any box — even one further up, to repeat that step (arrows going back up show as a
+                        dashed line). Delete above removes just the arrow; the button removes the dot too.
                       </p>
                     </>
                   );
