@@ -13,6 +13,7 @@ import {
   agentWordsSince,
   assistantSpeaking,
   recentUnansweredFragment,
+  getDeliveredHandlers,
   getLastInjectedEvent,
   getRecentTurns,
   getCollectionHandlerIds,
@@ -713,18 +714,40 @@ async function handleTranscript(
     // while this line was in flight, it must CONTINUE that reply — never
     // re-acknowledge, never restart, never ask again. Quote its own words
     // back: showing what it said beats telling it not to repeat itself.
-    const alreadyReplied =
-      utteranceEventId != null && (await agentSpokeSince(callId, utteranceEventId).catch(() => false));
+    const [alreadyReplied, deliveredRows] = await Promise.all([
+      utteranceEventId != null ? agentSpokeSince(callId, utteranceEventId).catch(() => false) : Promise.resolve(false),
+      // The call's ledger: what has already been said, and how often.
+      getDeliveredHandlers(callId).catch(() => [] as { handler_id: string; count: number }[]),
+    ]);
     const spokenSince =
       alreadyReplied && utteranceEventId != null
         ? await agentWordsSince(callId, utteranceEventId).catch(() => null)
         : null;
+    // Anti-repeat ledger: delivering the same line twice is the #1 quality
+    // sin. A repeated answer is downgraded to a briefing with an explicit
+    // "shorter, different words" instruction; the covered list keeps the
+    // agent from re-opening finished topics on its own.
+    const priorRepeats = deliveredRows.find((r) => r.handler_id === handler.id)?.count ?? 0;
+    const coveredNames = deliveredRows
+      .filter((r) => r.handler_id !== handler.id)
+      .map((r) => handlers.find((h) => h.id === r.handler_id)?.name)
+      .filter((n): n is string => !!n)
+      .slice(0, 4);
+    const coveredLine = coveredNames.length
+      ? ` (Earlier in this call you already covered: ${coveredNames.join("; ")} — don't re-open those unless asked.)`
+      : "";
+    const repeatLine =
+      priorRepeats > 0
+        ? ` (You already gave this answer ${priorRepeats === 1 ? "once" : `${priorRepeats} times`} this call — do NOT repeat it; one short confirmation in completely different words.)`
+        : "";
     // Ground the briefing in the customer's actual words so the reply connects
     // to the conversation instead of reading like a recital.
     const brief = (t: string) =>
-      alreadyReplied
+      (alreadyReplied
         ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
-        : `The customer just said: "${turnText.slice(0, 160)}" — react to that naturally in your own words, then: ${t}`;
+        : `The customer just said: "${turnText.slice(0, 160)}" — react to that naturally in your own words, then: ${t}`) +
+      repeatLine +
+      coveredLine;
     // Multi-part replies ("how much is it — and where did you get my number?"):
     // fold every additional matched answer into the SAME briefing so the agent
     // gives ONE short reply instead of answering piece by piece.
@@ -786,9 +809,10 @@ async function handleTranscript(
       injectResult = await injectStaffNote(controlUrl, brief(injectedText), settings.trigger_response);
     } else {
       // answer / give_offer — a verbatim say after the agent's own reply
-      // would restate/re-ask on top of it, so it becomes a continuation note.
+      // would restate/re-ask on top of it, and a repeated line must never be
+      // spoken word-for-word again: both become continuation notes.
       injectResult =
-        verbatim && !alreadyReplied
+        verbatim && !alreadyReplied && priorRepeats === 0
           ? await injectSay(controlUrl, injectedText, false)
           : await injectStaffNote(controlUrl, brief(injectedText), settings.trigger_response);
     }
@@ -811,6 +835,8 @@ async function handleTranscript(
         controlOk: injectResult.ok,
         delivery: handler.delivery,
         mode: alreadyReplied ? "continue_after_reply" : "fresh",
+        repeated: priorRepeats,
+        covered: coveredNames.length,
       },
     });
   } catch (e) {
@@ -870,10 +896,10 @@ async function runScriptFlow(
   }
 
   // Side effects are queued and flushed only when the flow consumes the turn.
-  type PendingLog = { content: string; targetId: string; targetLabel: string; ct: string; edgeCond: unknown; scenarioId: string | null; mode?: string };
+  type PendingLog = { content: string; targetId: string; targetLabel: string; ct: string; edgeCond: unknown; scenarioId: string | null; mode?: string; extra?: Record<string, unknown> };
   const pending: PendingLog[] = [];
-  const note = (content: string, target: { id: string; label: string }, ct: string, edgeCond: unknown, scenarioId: string | null, mode?: string) =>
-    pending.push({ content, targetId: target.id, targetLabel: target.label, ct, edgeCond, scenarioId, mode });
+  const note = (content: string, target: { id: string; label: string }, ct: string, edgeCond: unknown, scenarioId: string | null, mode?: string, extra?: Record<string, unknown>) =>
+    pending.push({ content, targetId: target.id, targetLabel: target.label, ct, edgeCond, scenarioId, mode, extra });
 
   // Commit the walk. False = another concurrent turn (split final transcripts)
   // already advanced this call — drop everything; the customer must not hear
@@ -906,7 +932,7 @@ async function runScriptFlow(
         classified_at: new Date(classifiedAt).toISOString(),
         injected_at: new Date(ms).toISOString(),
         latency_ms: ms - utteranceAt.getTime(),
-        meta: { flow: true, toNode: p.targetId, nodeType: p.ct, edgeCondition: p.edgeCond, ...(p.mode ? { mode: p.mode } : {}) },
+        meta: { flow: true, toNode: p.targetId, nodeType: p.ct, edgeCondition: p.edgeCond, ...(p.mode ? { mode: p.mode } : {}), ...(p.extra ?? {}) },
       });
     }
     return true;
@@ -1183,18 +1209,37 @@ async function runScriptFlow(
     // while this step was in flight, the line continues that reply instead of
     // starting a second one — quoting its own words back so it can't restart
     // ("This is Tom with Lucky's. I'm Tom with Lucky Seven, and…").
-    const alreadyReplied =
-      utteranceEventId != null && (await agentSpokeSince(callId, utteranceEventId).catch(() => false));
+    const [alreadyReplied, deliveredRows] = await Promise.all([
+      utteranceEventId != null ? agentSpokeSince(callId, utteranceEventId).catch(() => false) : Promise.resolve(false),
+      getDeliveredHandlers(callId).catch(() => [] as { handler_id: string; count: number }[]),
+    ]);
     const spokenSince =
       alreadyReplied && utteranceEventId != null
         ? await agentWordsSince(callId, utteranceEventId).catch(() => null)
         : null;
+    // Anti-repeat ledger: loop-backs and re-visited stages must rephrase, and
+    // finished topics stay closed unless the customer re-opens them.
+    const priorRepeats = scenario ? (deliveredRows.find((r) => r.handler_id === scenario.id)?.count ?? 0) : 0;
+    const coveredNames = deliveredRows
+      .filter((r) => r.handler_id !== scenario?.id)
+      .map((r) => allHandlers.find((h) => h.id === r.handler_id)?.name)
+      .filter((n): n is string => !!n)
+      .slice(0, 4);
+    const coveredLine = coveredNames.length
+      ? ` (Earlier in this call you already covered: ${coveredNames.join("; ")} — don't re-open those unless asked.)`
+      : "";
+    const repeatLine =
+      priorRepeats > 0
+        ? ` (You already said this ${priorRepeats === 1 ? "once" : `${priorRepeats} times`} this call — much shorter this time, completely different words.)`
+        : "";
     // Ground briefings in the customer's actual words — the step should feel
     // like a reply to them, not a recital of the next script line.
     const brief = (t: string) =>
-      alreadyReplied
+      (alreadyReplied
         ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
-        : `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`;
+        : `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`) +
+      repeatLine +
+      coveredLine;
     let injectedText = "";
     if (ct === "send_sms") {
       injectedText = scenario?.response_template || "The SMS with the details is on its way. Confirm that to the customer.";
@@ -1232,7 +1277,10 @@ async function runScriptFlow(
       }
     }
 
-    note(injectedText, target, ct, edgeCond, scenario?.id ?? null, alreadyReplied ? "continue_after_reply" : "fresh");
+    note(injectedText, target, ct, edgeCond, scenario?.id ?? null, alreadyReplied ? "continue_after_reply" : "fresh", {
+      repeated: priorRepeats,
+      covered: coveredNames.length,
+    });
     if (!(await flush())) return true; // lost the race — say nothing
     if (ct === "send_sms") {
       // Honesty in the timeline: no SMS provider is wired yet — the send is
@@ -1257,8 +1305,9 @@ async function runScriptFlow(
         await injectStaffNote(controlUrl, brief(injectedText), true);
       } else if (scenario) {
         // A verbatim say after the agent's own reply would restate/re-ask on
-        // top of it — deliver it as a continuation note instead.
-        scenario.delivery === "verbatim" && !alreadyReplied
+        // top of it, and a repeated line must never be spoken word-for-word
+        // again — both become continuation notes.
+        scenario.delivery === "verbatim" && !alreadyReplied && priorRepeats === 0
           ? await injectSay(controlUrl, injectedText, false)
           : await injectStaffNote(controlUrl, brief(injectedText), true);
       }

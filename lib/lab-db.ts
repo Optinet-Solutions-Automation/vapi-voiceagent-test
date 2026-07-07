@@ -406,6 +406,23 @@ export async function recentUnansweredFragment(
   return (prev.content ?? "").trim() || null;
 }
 
+/** The call's memory of what has already been SAID: how many times each
+ *  scenario was delivered so far (anti-repeat ledger). Insertion order =
+ *  delivery order, so the first topics covered come first. */
+export async function getDeliveredHandlers(callId: string): Promise<{ handler_id: string; count: number }[]> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("handler_id")
+    .eq("call_id", callId)
+    .eq("event_type", "injected")
+    .not("handler_id", "is", null)
+    .limit(300);
+  if (error) throw new Error(error.message);
+  const counts = new Map<string, number>();
+  for (const r of data ?? []) counts.set(r.handler_id as string, (counts.get(r.handler_id as string) ?? 0) + 1);
+  return [...counts].map(([handler_id, count]) => ({ handler_id, count }));
+}
+
 /** A persisted speculative classification for exactly this text, if fresh.
  *  The in-memory speculation map dies at the serverless instance boundary —
  *  the partial and the final rarely land on the same instance — so speculate()

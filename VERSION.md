@@ -11,6 +11,18 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 
 ## v2.2 — current
 
+- **Call-quality round: the anti-repeat ledger + campaign keyterms.** The
+  webhook now keeps a per-call ledger of every line already delivered.
+  Repeating an answer is the #1 quality sin: a second delivery of the same
+  scenario is never spoken verbatim again — it downgrades to a briefing with
+  an explicit "much shorter, completely different words" instruction (this
+  also makes loop-backs rephrase instead of recite). Every briefing carries
+  a covered-topics line ("Earlier in this call you already covered: … —
+  don't re-open those unless asked"), the first slice of the observer
+  design's Layer-1 memory. And configure-assistant now sets Deepgram
+  keyterm boosting (SMS, free spins, deposit, bonus, claim, Lucky Seven…)
+  on every lab assistant, preserving custom keyterms — ambiguous audio
+  resolves to campaign words ("sure", not "store").
 - **Unified replies everywhere — routing no longer drops the side question.**
   A reply that routes down a connector AND raises something else ("sure,
   text me — but what's the catch?") now folds every other matched Playbook

@@ -77,8 +77,29 @@ export async function POST(req: Request) {
   // wasted roundtrips. Without a script, the classic tool loop still works.
   const tools = settings?.active_script_id ? [] : LAB_TOOLS;
 
+  // STT accuracy: bias the transcriber toward campaign vocabulary so
+  // ambiguous audio resolves to domain words ("sure" not "store", "spins"
+  // not "since"). Custom keyterms already on the assistant are preserved.
+  const BASE_KEYTERMS = [
+    "SMS", "text message", "free spins", "spins", "deposit", "bonus",
+    "promotion", "promo", "claim", "account", "casino", "log in", "website",
+    "Lucky Seven",
+  ];
+  const tr = (assistant.transcriber ?? {}) as Record<string, unknown>;
+  const transcriber =
+    ((tr.provider as string) ?? "deepgram") === "deepgram"
+      ? {
+          ...tr,
+          provider: (tr.provider as string) ?? "deepgram",
+          model: (tr.model as string) ?? "flux-general-en",
+          language: (tr.language as string) ?? "en",
+          keyterm: [...new Set([...(Array.isArray(tr.keyterm) ? (tr.keyterm as string[]) : []), ...BASE_KEYTERMS])],
+        }
+      : undefined;
+
   const patchBody = {
     model: { ...model, messages, tools },
+    ...(transcriber ? { transcriber } : {}),
     server: { url: webhookUrl, timeoutSeconds: 20 },
     serverMessages: [
       "tool-calls",
