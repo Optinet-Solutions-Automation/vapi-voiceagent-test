@@ -115,13 +115,18 @@ function sourceHandlesFor(
 }
 
 // ── Custom node ───────────────────────────────────────────────
-function FlowNode({ data, selected }: NodeProps) {
+// The canvas node lives outside the component tree that owns state, so the
+// "+ connector" click is routed through this module-scope holder.
+const addConnectorRef: { fn: (nodeId: string) => void } = { fn: () => {} };
+
+function FlowNode({ id, data, selected }: NodeProps) {
   const d = data as NodeData;
   const isStart = d.kind === "start";
   const content = (d.config.contentType as Content) ?? "scenario";
   const meta = isStart ? { label: "Start call", color: "border-emerald-500 bg-emerald-500/10" } : CONTENT_META[content];
   const handles = sourceHandlesFor(isStart, content, connectorsOf(d.config));
   const labelled = handles.some((h) => h.label);
+  const canAddConnector = isStart || (!CONTENT_META[content].terminal && content !== "ifelse" && content !== "loop");
   return (
     <div
       className={`max-w-[420px] rounded-lg border-2 px-3 ${labelled ? "pb-5 pt-2" : "py-2"} text-left shadow ${meta.color} ${
@@ -161,6 +166,18 @@ function FlowNode({ data, selected }: NodeProps) {
           </span>
         );
       })}
+      {canAddConnector && (
+        <button
+          className="nodrag nopan absolute -bottom-3 -right-3 flex h-6 w-6 items-center justify-center rounded-full border border-gray-600 bg-gray-800 text-sm font-bold leading-none text-gray-300 shadow transition hover:border-emerald-400 hover:bg-gray-700 hover:text-emerald-300"
+          title="Add a reply connector — a green dot for one predicted customer reply"
+          onClick={(e) => {
+            e.stopPropagation();
+            addConnectorRef.fn(id);
+          }}
+        >
+          +
+        </button>
+      )}
     </div>
   );
 }
@@ -599,6 +616,15 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     const cur = connectorsOf((n.data as NodeData).config);
     patchConfig(nodeId, { connectors: [...cur, { id: "c:" + crypto.randomUUID(), intentKey: "" }] });
   }
+  // The + button on a canvas box adds a connector and opens the box's panel
+  // so the reply can be picked right away.
+  useEffect(() => {
+    addConnectorRef.fn = (nodeId: string) => {
+      addConnector(nodeId);
+      setSelNodeId(nodeId);
+      setSelEdgeId(null);
+    };
+  });
   function setConnectorIntent(nodeId: string, connId: string, intentKey: string) {
     const n = nodes.find((x) => x.id === nodeId);
     if (!n) return;
@@ -1101,9 +1127,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
             ))}
           </div>
           <p className="shrink-0 border-t border-gray-800 p-2 text-[10px] text-gray-600">
-            Drag a box onto the canvas, then click it to configure. Add <span className="text-emerald-400">reply
-            connectors</span> to a box to route by what the customer says — each green dot is one predicted reply.
-            Draw an arrow back up to an earlier box to repeat it.
+            Drag a box onto the canvas, then click it to configure. Click the <span className="text-emerald-400">+</span> on
+            a box to add a reply connector — each green dot is one predicted customer reply; drag its arrow to the next
+            box, or back up to an earlier box to repeat it.
           </p>
         </div>
 
@@ -1203,11 +1229,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                   </>
                 )}
 
-                {/* Reply connectors — extra output dots that route by the reply */}
-                {selNode && (sd.kind === "start" || !["ifelse", "loop", "transfer", "return", "end"].includes(content)) && (
+                {/* Reply connectors — added with the + button on the box itself */}
+                {selNode && connectorsOf(sd.config).length > 0 && (
                   <div>
                     <label className="mb-1 block text-xs text-gray-400">
-                      Reply connectors <span className="text-gray-600">(route by what the customer says)</span>
+                      Reply connectors <span className="text-gray-600">(the + on the box adds one)</span>
                     </label>
                     {connectorsOf(sd.config).map((c) => (
                       <div key={c.id} className="mb-1.5 flex items-center gap-1.5">
@@ -1240,12 +1266,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                         </button>
                       </div>
                     ))}
-                    <button
-                      onClick={() => addConnector(selNode.id)}
-                      className="rounded-md border border-dashed border-gray-600 px-2 py-1 text-[11px] text-gray-400 transition hover:border-emerald-500 hover:text-emerald-300"
-                    >
-                      + Add reply connector
-                    </button>
                     <p className="mt-1.5 rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
                       Each green dot fires when the reply matches its scenario — draw its arrow to the next box, or
                       back <strong>up</strong> to an earlier box to repeat it. Replies that match no connector follow
@@ -1739,28 +1759,63 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               </>
             )}
 
-            {/* Edge config — arrows are plain connectors; branching lives in If/Else & Loop boxes */}
-            {selEdge && (
-              <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[11px] text-gray-400">
-                {(() => {
-                  const c = (selEdge.data as { condition?: { handle?: string; value?: string } } | undefined)?.condition;
-                  const h = c?.handle;
-                  if (isConnectorHandle(h)) {
-                    const scn = scenarios.find((s) => s.intent_key === c?.value);
-                    return scn
-                      ? `Fires when the reply matches “${scn.name}”${scn.description ? ` — ${snip(scn.description, 90)}` : ""}`
-                      : "A reply connector — pick its reply on the box it leaves from.";
-                  }
-                  if (h === "then") return "This is the Then path of an If/Else box.";
-                  if (h === "else") return "This is the Else (fallback) path of an If/Else box.";
-                  if (h === "loop") return "This is the Repeat path of a Loop box.";
-                  if (h === "exit") return "This is the Exit path of a Loop box.";
-                  return "The default path — replies that match no reply connector continue here.";
-                })()}
-                <br />
-                <span className="text-gray-600">Use Delete above to remove it.</span>
-              </p>
-            )}
+            {/* Edge config — a connector arrow carries its reply; others are plain */}
+            {selEdge &&
+              (() => {
+                const c = (selEdge.data as { condition?: { handle?: string; value?: string } } | undefined)?.condition;
+                const h = c?.handle;
+                if (isConnectorHandle(h)) {
+                  const scn = scenarios.find((s) => s.intent_key === c?.value);
+                  return (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-400">This arrow fires when the reply is…</label>
+                        <select
+                          className={inputCls + " [color-scheme:dark]"}
+                          value={c?.value ?? ""}
+                          onChange={(e) => selEdge.source && setConnectorIntent(selEdge.source, h, e.target.value)}
+                        >
+                          <option value="">(pick the reply…)</option>
+                          <optgroup label="Expected replies">
+                            {scenarios.filter((s) => s.action_type === "ignore").map((s) => (
+                              <option key={s.id} value={s.intent_key}>{s.name}</option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="All scenarios (matched by their description)">
+                            {scenarios
+                              .filter((s) => s.action_type !== "ignore" && !["first_message", "identity"].includes(s.intent_key))
+                              .map((s) => (
+                                <option key={s.id} value={s.intent_key}>{s.name}</option>
+                              ))}
+                          </optgroup>
+                        </select>
+                        {scn?.description && (
+                          <p className="mt-1 rounded-md bg-gray-900/60 p-1.5 text-[10px] italic text-gray-500">{snip(scn.description, 110)}</p>
+                        )}
+                      </div>
+                      <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
+                        Point it at any box — even one further up, to repeat that step. Use Delete above to remove the
+                        arrow (the green dot stays on the box).
+                      </p>
+                    </>
+                  );
+                }
+                return (
+                  <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[11px] text-gray-400">
+                    {h === "then"
+                      ? "This is the Then path of an If/Else box."
+                      : h === "else"
+                        ? "This is the Else (fallback) path of an If/Else box."
+                        : h === "loop"
+                          ? "This is the Repeat path of a Loop box."
+                          : h === "exit"
+                            ? "This is the Exit path of a Loop box."
+                            : "The default path — replies that match no reply connector continue here."}
+                    <br />
+                    <span className="text-gray-600">Use Delete above to remove it.</span>
+                  </p>
+                );
+              })()}
           </div>
         )}
       </div>
