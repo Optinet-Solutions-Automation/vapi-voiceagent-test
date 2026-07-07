@@ -11,6 +11,21 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 
 ## v2.2 — current
 
+- **The observer navigates: position-aware speculation + repeats that
+  improve.** The observer knows the script and the call's position, so at
+  every step it computes the EXPECTED replies (the current box's reply
+  connectors + its collection members) and feeds them to the router as
+  priors — expected handlers lead the prompt and an explicit "these are
+  expected next" instruction steers ambiguous replies. Both the speculative
+  pass (on partials, while the customer is still talking) and the fresh
+  classify carry the priors, so by the time the reply ends the answer is
+  usually pre-validated — right guesses deliver instantly, wrong guesses
+  re-analyze while the agent's filler buys the beat. The dock's Thinking
+  column shows "step expects: …" live. And the anti-repeat guidance grew up:
+  instead of "don't repeat", the agent is told it already said this and how
+  to IMPROVE it — new emphasis or one new detail (a second self-introduction
+  stresses the company, not the name), since a repeat request usually means
+  clarification, not deafness.
 - **Call-quality round: the anti-repeat ledger + campaign keyterms.** The
   webhook now keeps a per-call ledger of every line already delivered.
   Repeating an answer is the #1 quality sin: a second delivery of the same

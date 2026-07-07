@@ -128,6 +128,38 @@ function selfCovered(line: string, spoken: string | null): boolean {
   return hit / need.size >= 0.7;
 }
 
+// ── Observer navigation: what replies does the CURRENT script step expect? ──
+// The observer knows the script and the call's position, so the expected set
+// at any moment = the current box's outgoing reply connectors + the members
+// of its collection. Fed to the router as priors: speculation pre-validates
+// against what the step is waiting for instead of guessing blind.
+async function expectedIntentKeys(
+  callId: string,
+  handlers: ListenerHandler[],
+  activeScriptId: string | null
+): Promise<string[]> {
+  if (!activeScriptId) return [];
+  const state = await getFlowState(callId).catch(() => null);
+  const scriptId = state?.script_id ?? activeScriptId;
+  const graph = await getScriptGraph(scriptId).catch(() => ({ nodes: [], edges: [] }));
+  if (graph.nodes.length === 0) return [];
+  let nodeId: string | null = state?.current_node_id ?? null;
+  if (!nodeId || !graph.nodes.find((n) => n.id === nodeId)) nodeId = findEntryNode(graph.nodes, graph.edges)?.id ?? null;
+  if (!nodeId) return [];
+  const keys: string[] = [];
+  for (const e of graph.edges.filter((x) => x.source_node_id === nodeId)) {
+    const c = (e.condition ?? {}) as Record<string, unknown>;
+    if (((c.by as string) ?? (c.kind as string)) === "intent" && c.value) keys.push(c.value as string);
+  }
+  const node = graph.nodes.find((n) => n.id === nodeId);
+  const cfg = (node?.config ?? {}) as Record<string, unknown>;
+  if (node && contentTypeOf(node) === "collection" && cfg.collectionId) {
+    const ids = await getCollectionHandlerIds(cfg.collectionId as string).catch(() => [] as string[]);
+    for (const h of handlers) if (ids.includes(h.id)) keys.push(h.intent_key);
+  }
+  return [...new Set(keys)];
+}
+
 // ── Anticipatory classification ───────────────────────────────
 // Start the router on the customer's LAST partial transcript while they're
 // still speaking. The final transcript very often equals the last partial, so
@@ -142,7 +174,7 @@ function speculate(callId: string, text: string): Promise<void> | undefined {
   if (text.split(/\s+/).length < 4) return; // too short to be worth a router call
   const cur = speculativeCls.get(callId);
   if (cur && (cur.text === text || now - cur.at < 1000)) return; // throttle
-  const promise = (async () => {
+  const work = (async () => {
     const [settings, hs, turns] = await Promise.all([
       getLabSettings(),
       listHandlers(),
@@ -152,20 +184,23 @@ function speculate(callId: string, text: string): Promise<void> | undefined {
       (h) => h.enabled && !SPECIAL_INTENTS.has(h.intent_key) && (h.mode === "listener" || h.mode === "both")
     );
     scoped = await scopeToActiveCollection(scoped, settings?.active_collection_id);
-    return classifyUtterance(text, turns, scoped, settings?.router_model ?? "gpt-5.4-mini");
+    const expected = await expectedIntentKeys(callId, scoped, settings?.active_script_id ?? null).catch(() => [] as string[]);
+    const cls = await classifyUtterance(text, turns, scoped, settings?.router_model ?? "gpt-5.4-mini", expected);
+    return { cls, expected };
   })();
+  const promise = work.then((w) => w.cls);
   promise.catch(() => {}); // never an unhandled rejection
   speculativeCls.set(callId, { text, promise, at: now });
   // The map dies at the serverless instance boundary — the partial and the
   // final rarely land on the same instance, so also persist the result; the
   // final's handler reads it back when the map misses.
-  return promise
-    .then(async (cls) => {
+  return work
+    .then(async ({ cls, expected }) => {
       await log({
         call_id: callId,
         event_type: "speculated",
         content: text,
-        meta: { cls: cls as unknown as Record<string, unknown> },
+        meta: { cls: cls as unknown as Record<string, unknown>, expected: expected.slice(0, 6) },
       });
     })
     .catch(() => {});
@@ -479,6 +514,12 @@ async function handleTranscript(
     return;
   }
 
+  // Observer navigation priors for the fresh-classify fallback — started now
+  // so the flow-position lookup runs while the speculative checks happen.
+  const expectedPromise = expectedIntentKeys(callId, handlers, settings.active_script_id ?? null).catch(
+    () => [] as string[]
+  );
+
   // Classify — reusing the speculative run from the partial transcripts when
   // the final matches it (the router's answer is then already in flight).
   let cls;
@@ -507,7 +548,7 @@ async function handleTranscript(
   }
   if (!cls) {
     try {
-      cls = await classifyUtterance(turnText, recentTurns, handlers, settings.router_model);
+      cls = await classifyUtterance(turnText, recentTurns, handlers, settings.router_model, await expectedPromise);
     } catch (e) {
       await log({
         call_id: callId,
@@ -738,7 +779,7 @@ async function handleTranscript(
       : "";
     const repeatLine =
       priorRepeats > 0
-        ? ` (You already gave this answer ${priorRepeats === 1 ? "once" : `${priorRepeats} times`} this call — do NOT repeat it; one short confirmation in completely different words.)`
+        ? ` (You've already answered this ${priorRepeats === 1 ? "once" : `${priorRepeats} times`} this call — likely a clarification. Do NOT restate the same sentence: shift the emphasis or add ONE new concrete detail. E.g. a second self-introduction stresses the COMPANY you represent, not your name again.)`
         : "";
     // Ground the briefing in the customer's actual words so the reply connects
     // to the conversation instead of reading like a recital.
@@ -1230,7 +1271,7 @@ async function runScriptFlow(
       : "";
     const repeatLine =
       priorRepeats > 0
-        ? ` (You already said this ${priorRepeats === 1 ? "once" : `${priorRepeats} times`} this call — much shorter this time, completely different words.)`
+        ? ` (You've already said this ${priorRepeats === 1 ? "once" : `${priorRepeats} times`} this call — don't recite it again: much shorter, new emphasis or one new detail. E.g. a second self-introduction stresses the COMPANY, not your name.)`
         : "";
     // Ground briefings in the customer's actual words — the step should feel
     // like a reply to them, not a recital of the next script line.

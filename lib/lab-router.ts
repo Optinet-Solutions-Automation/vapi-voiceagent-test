@@ -19,19 +19,31 @@ export async function classifyUtterance(
   utterance: string,
   recentTurns: string[],
   handlers: ListenerHandler[],
-  routerModel: string
+  routerModel: string,
+  /** Observer's navigation hint: at the current script step, these replies
+   *  are the ones the flow is waiting for — listed first and preferred when
+   *  the utterance plausibly fits one. */
+  expectedKeys: string[] = []
 ): Promise<Classification> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  const handlerLines = handlers
+  // Expected-next handlers lead the list — position in the prompt is weight.
+  const expected = new Set(expectedKeys);
+  const ordered = expected.size
+    ? [...handlers.filter((h) => expected.has(h.intent_key)), ...handlers.filter((h) => !expected.has(h.intent_key))]
+    : handlers;
+  const handlerLines = ordered
     .map((h) => `- intent_key: ${h.intent_key} — ${h.description || h.name}`)
     .join("\n");
+  const expectedLine = expected.size
+    ? `\n- The script is at a step where these replies are EXPECTED next: ${expectedKeys.join(", ")}. When the utterance plausibly fits one of them, prefer it over other handlers; if it clearly matches something else, pick what truly matches.`
+    : "";
 
   const systemPrompt = `You route utterances from a live phone call to handlers. Handlers:
 ${handlerLines}
 - intent_key: none — anything that doesn't clearly need a handler.
 
-Rules:
+Rules:${expectedLine}
 - Back-channel and fillers ("okay", "k", "uh-huh", "right", "hmm", "I hear you", "whatever"), incomplete fragments, a mid-call "hello?", stutters, or background noise → none. These are acknowledgements, not requests.
 - Bare agreement ("yes", "sure", "okay") matches a consent/offer handler ONLY if the agent's last line in the recent turns asked exactly that question; otherwise → none.
 - Hedged or reluctant agreement still counts as agreement: "yeah I guess", "okay fine", "sure, whatever", a bare "okay" — if the agent's last line asked a yes/no question, map these to that question's handler (confidence around 0.8). Only a clear refusal or a new topic breaks the match.

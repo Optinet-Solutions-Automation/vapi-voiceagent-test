@@ -1723,9 +1723,14 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 const m = metaOf(e);
                 if (e.event_type === "speculated") {
                   const cls = m.cls as { intent?: string; confidence?: number } | undefined;
-                  return cls?.intent && cls.intent !== "none"
-                    ? `still talking… likely “${cls.intent}” (${Math.round((cls.confidence ?? 0) * 100)}%)`
-                    : "still talking… nothing actionable yet";
+                  const exp = Array.isArray(m.expected) && (m.expected as string[]).length
+                    ? ` — step expects: ${(m.expected as string[]).slice(0, 4).join(", ")}`
+                    : "";
+                  return (
+                    (cls?.intent && cls.intent !== "none"
+                      ? `still talking… likely “${cls.intent}” (${Math.round((cls.confidence ?? 0) * 100)}%)`
+                      : "still talking… nothing actionable yet") + exp
+                  );
                 }
                 if (e.event_type === "skipped") return REASON_TEXT[(m.reason as string) ?? ""] ?? `skipped (${(m.reason as string) ?? "?"})`;
                 const lb = nodeLabel(m.toNode);
