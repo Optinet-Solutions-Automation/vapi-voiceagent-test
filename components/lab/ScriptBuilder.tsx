@@ -13,6 +13,7 @@ import {
   reconnectEdge,
   useNodesState,
   useEdgesState,
+  useUpdateNodeInternals,
   type Node,
   type Edge,
   type Connection,
@@ -99,7 +100,7 @@ function sourceHandlesFor(
     label: c.label ? snip(c.label, 13) : "reply?",
     color: "#34d399",
   }));
-  if (isStart) return [{ id: "out", label: conns.length ? "other" : undefined }, ...conns];
+  if (isStart) return [{ id: "out" }, ...conns];
   if (CONTENT_META[content].terminal) return [];
   if (content === "ifelse")
     return [
@@ -111,7 +112,7 @@ function sourceHandlesFor(
       { id: "loop", label: "Repeat", color: "#f59e0b" },
       { id: "exit", label: "Exit", color: "#9ca3af" },
     ];
-  return [{ id: "out", label: conns.length ? "other" : undefined }, ...conns];
+  return [{ id: "out" }, ...conns];
 }
 
 // ── Custom node ───────────────────────────────────────────────
@@ -127,9 +128,17 @@ function FlowNode({ id, data, selected }: NodeProps) {
   const handles = sourceHandlesFor(isStart, content, connectorsOf(d.config));
   const labelled = handles.some((h) => h.label);
   const canAddConnector = isStart || (!CONTENT_META[content].terminal && content !== "ifelse" && content !== "loop");
+  // React Flow caches each node's handle layout — without this, a dot added
+  // to an already-wired box isn't connectable and existing arrows keep
+  // anchoring to the old positions.
+  const updateNodeInternals = useUpdateNodeInternals();
+  const handleKey = handles.map((h) => `${h.id}:${h.label ?? ""}`).join("|");
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, handleKey, updateNodeInternals]);
   return (
     <div
-      className={`max-w-[420px] rounded-lg border-2 px-3 ${labelled ? "pb-5 pt-2" : "py-2"} text-left shadow ${meta.color} ${
+      className={`max-w-[420px] rounded-lg border-2 px-3 ${labelled ? "pb-7 pt-2" : "py-2"} text-left shadow ${meta.color} ${
         selected ? "ring-2 ring-white/60" : ""
       }`}
       style={{ minWidth: Math.max(160, handles.length * 64) }}
@@ -157,7 +166,7 @@ function FlowNode({ id, data, selected }: NodeProps) {
             />
             {h.label && (
               <span
-                className="absolute bottom-1 max-w-[72px] -translate-x-1/2 truncate text-[8px] font-semibold text-gray-300"
+                className="absolute bottom-[18px] max-w-[72px] -translate-x-1/2 truncate text-[8px] font-semibold text-gray-300"
                 style={{ left }}
               >
                 {h.label}
