@@ -2196,11 +2196,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
             <div className="border-b border-gray-800 px-5 py-3">
               <p className="text-[10px] uppercase tracking-wider text-gray-500">Workflow check</p>
               <p className="text-sm font-bold text-white">
-                {qa.errors.length
-                  ? `${qa.errors.length} problem${qa.errors.length > 1 ? "s" : ""} block the test call`
-                  : qa.warnings.length
-                    ? "Ready, with a few things worth knowing"
-                    : "All checks passed"}
+                {qa.errors.length + qa.warnings.length > 0
+                  ? `${qa.errors.length + qa.warnings.length} issue${qa.errors.length + qa.warnings.length > 1 ? "s" : ""} to fix before the test call`
+                  : "All checks passed"}
               </p>
             </div>
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-5 py-3">
@@ -2237,9 +2235,13 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               </button>
               <button
                 onClick={startRun}
-                disabled={qa.errors.length > 0 || qaBusy}
+                disabled={qa.errors.length > 0 || qa.warnings.length > 0 || qaBusy}
                 className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-40"
-                title={qa.errors.length ? "Fix the problems above first" : "Start a live test call from the browser"}
+                title={
+                  qa.errors.length + qa.warnings.length > 0
+                    ? "Fix every issue above first — the call only starts on a clean check"
+                    : "Start a live test call from the browser"
+                }
               >
                 Start test call
               </button>
