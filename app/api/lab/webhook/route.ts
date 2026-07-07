@@ -973,6 +973,9 @@ async function runScriptFlow(
       return ok;
     }
     if (by === "tag") return !!c.value && intentTags.includes(c.value as string);
+    // An "any other reply" catch-all is an explicit author instruction: this
+    // arrow fires NO MATTER WHAT was said — it owns the turn, no deferring.
+    if (by === "any") return true;
     return false;
   }
 

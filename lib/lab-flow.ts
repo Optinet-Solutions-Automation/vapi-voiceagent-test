@@ -98,12 +98,13 @@ export function pickNextEdge(
 
   // Reply connectors: the condition lives on the edge itself (the connector
   // model; also the legacy pre-if/else shape). A connector whose reply
-  // matches wins; otherwise the default "out" connector. With reply
-  // connectors and NO default, stay parked (null) — the Playbook answers and
-  // the box re-checks its connectors on the next reply.
+  // matches wins; otherwise an "any other reply" catch-all connector fires;
+  // otherwise the default "out" connector. With reply connectors and NO
+  // catch-all or default, stay parked (null) — the Playbook answers and the
+  // box re-checks its connectors on the next reply.
   const conditional = outs.filter((e) => {
     const c = cond(e);
-    return c.kind === "intent" || c.kind === "tag" || c.kind === "branch";
+    return c.kind === "intent" || c.kind === "tag" || c.kind === "branch" || c.kind === "any";
   });
   if (conditional.length) {
     for (const e of conditional) {
@@ -113,7 +114,12 @@ export function pickNextEdge(
       if (by === "tag" && c.value && ctx.tags.includes(c.value)) return e;
       if (by === "result" && ctx.result && c.value === ctx.result) return e;
     }
-    return outs.find((e) => handleOf(e) === "else") ?? outs.find((e) => handleOf(e) === "out") ?? null;
+    return (
+      outs.find((e) => cond(e).kind === "any") ??
+      outs.find((e) => handleOf(e) === "else") ??
+      outs.find((e) => handleOf(e) === "out") ??
+      null
+    );
   }
 
   // Plain: first outgoing connector.

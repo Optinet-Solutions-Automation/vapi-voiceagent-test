@@ -90,9 +90,11 @@ const snip = (t: string, n: number) => {
 };
 
 // A reply connector: an extra output dot on a box whose arrow fires when the
-// customer's reply matches the picked scenario. Ids are "c:<uuid>" so they're
+// customer's reply matches the picked scenario — or, with `any`, on ANY reply
+// the other connectors didn't claim ("anything other than yes", "after this
+// box continue no matter what"). Ids are "c:<uuid>" so they're
 // distinguishable from the fixed handles (out/then/else/loop/exit) everywhere.
-type Connector = { id: string; intentKey: string; label?: string };
+type Connector = { id: string; intentKey: string; label?: string; any?: boolean };
 const isConnectorHandle = (h: string | null | undefined): h is string => !!h && h.startsWith("c:");
 const connectorsOf = (config: Record<string, unknown>): Connector[] =>
   Array.isArray(config.connectors) ? (config.connectors as Connector[]) : [];
@@ -107,7 +109,7 @@ function sourceHandlesFor(
   // arrows still render via a hidden anchor on the box — see FlowNode.)
   const conns = connectors.map((c) => ({
     id: c.id,
-    label: c.label ? snip(c.label, 13) : undefined,
+    label: c.any ? "anything else" : c.label ? snip(c.label, 13) : undefined,
     color: "#34d399",
   }));
   if (isStart) return conns;
@@ -428,8 +430,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     });
     const rfEdges: Edge[] = g.edges.map((e) => {
       const condRaw = (e.condition ?? {}) as Record<string, unknown>;
-      // Reply-connector arrows keep their stored intent condition verbatim.
+      // Reply-connector arrows keep their stored condition verbatim.
       if (isConnectorHandle(condRaw.handle as string)) {
+        const isAny = (condRaw.kind as string) === "any";
         const value = (condRaw.value as string) ?? "";
         const scn = scenarios.find((s) => s.intent_key === value);
         return {
@@ -437,8 +440,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           source: e.source_node_id,
           target: e.target_node_id,
           sourceHandle: condRaw.handle as string,
-          label: scn ? snip(scn.name, 18) : "",
-          style: { stroke: "#34d399" },
+          label: isAny ? "anything else" : scn ? snip(scn.name, 18) : "",
+          style: isAny ? { stroke: "#34d399", strokeDasharray: "3 3" } : { stroke: "#34d399" },
           data: { condition: condRaw },
           markerEnd: { type: MarkerType.ArrowClosed },
         };
@@ -520,6 +523,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       if (isConnectorHandle(h) && sourceId) {
         const src = nodes.find((n) => n.id === sourceId);
         const conn = src ? connectorsOf((src.data as NodeData).config).find((x) => x.id === h) : undefined;
+        if (conn?.any)
+          return {
+            condition: { kind: "any", handle: h },
+            visual: { label: "anything else", style: { stroke: "#34d399", strokeDasharray: "3 3" } },
+          };
         const scn = conn?.intentKey ? scenarios.find((s) => s.intent_key === conn.intentKey) : undefined;
         return {
           condition: { kind: "intent", by: "intent", value: conn?.intentKey ?? "", handle: h },
@@ -697,6 +705,28 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (!n) return;
     patchConfig(nodeId, { connectors: connectorsOf((n.data as NodeData).config).filter((c) => c.id !== connId) });
     setEdges((es) => es.filter((e) => !(e.source === nodeId && e.sourceHandle === connId)));
+  }
+
+  // Toggle a connector between a specific reply and "any other reply"
+  // (catch-all: fires when no other connector matched — 'no matter what').
+  function setConnectorAny(nodeId: string, connId: string, on: boolean) {
+    const n = nodes.find((x) => x.id === nodeId);
+    if (!n) return;
+    const cur = connectorsOf((n.data as NodeData).config);
+    patchConfig(nodeId, {
+      connectors: cur.map((c) =>
+        c.id === connId ? { ...c, any: on, intentKey: on ? "" : c.intentKey, label: on ? "anything else" : "" } : c
+      ),
+    });
+    setEdges((es) =>
+      es.map((e) =>
+        e.source === nodeId && e.sourceHandle === connId
+          ? on
+            ? { ...e, label: "anything else", style: { stroke: "#34d399", strokeDasharray: "3 3" }, data: { condition: { kind: "any", handle: connId } } }
+            : { ...e, label: "", style: { stroke: "#34d399" }, data: { condition: { kind: "intent", by: "intent", value: "", handle: connId } } }
+          : e
+      )
+    );
   }
 
   // The connector's rule is authored as plain language — same as creating a
@@ -912,6 +942,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         const cname = c.label ? `“${snip(c.label, 24)}”` : `#${i + 1}`;
         if (!outsOf(n.id).some((e) => e.sourceHandle === c.id))
           errors.push({ text: `“${lb}”: reply connector ${cname} has no arrow.`, suggestion: "Drag the green dot to the box this reply should lead to — or remove the dot from its arrow panel." });
+        if (c.any) return; // catch-all needs no rule
         if (!c.intentKey)
           errors.push({ text: `“${lb}”: reply connector ${cname} has no rule.`, suggestion: "Click its arrow and describe when the agent should use it." });
         else if (!scenarios.some((s) => s.intent_key === c.intentKey))
@@ -1143,11 +1174,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     for (const n of nodes) {
       const d = n.data as NodeData;
       const label = d.label || "Box";
-      // Reply connectors need both a picked reply and an arrow.
+      // Reply connectors need an arrow, and (unless catch-all) a picked reply.
       connectorsOf(d.config).forEach((c, i) => {
         const cname = c.label ? `“${snip(c.label, 24)}”` : `#${i + 1}`;
-        if (!c.intentKey) w.push(`“${label}” reply connector ${cname} has no reply picked.`);
-        else if (!outsOf(n.id).some((e) => (e.sourceHandle ?? handleOf(e)) === c.id))
+        if (!c.any && !c.intentKey) w.push(`“${label}” reply connector ${cname} has no reply picked.`);
+        if (!outsOf(n.id).some((e) => (e.sourceHandle ?? handleOf(e)) === c.id))
           w.push(`“${label}” reply connector ${cname} has no arrow.`);
       });
       if (d.kind === "start") continue;
@@ -1222,7 +1253,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         if (isConnectorHandle(handle)) {
           const src = nodes.find((n) => n.id === e.source);
           const conn = src ? connectorsOf((src.data as NodeData).config).find((x) => x.id === handle) : undefined;
-          condition = { kind: "intent", by: "intent", value: conn?.intentKey ?? (cond.value as string) ?? "", handle };
+          condition = conn?.any
+            ? { kind: "any", handle }
+            : { kind: "intent", by: "intent", value: conn?.intentKey ?? (cond.value as string) ?? "", handle };
         }
         return {
           id: e.id,
@@ -2309,9 +2342,25 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 const c = (selEdge.data as { condition?: { handle?: string; value?: string } } | undefined)?.condition;
                 const h = c?.handle;
                 if (isConnectorHandle(h)) {
+                  const isAny = (c as { kind?: string } | undefined)?.kind === "any";
                   const scn = scenarios.find((s) => s.intent_key === c?.value);
                   return (
                     <>
+                      <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-gray-700 bg-gray-900/50 p-2">
+                        <input
+                          type="checkbox"
+                          checked={isAny}
+                          onChange={(e) => selEdge.source && setConnectorAny(selEdge.source, h, e.target.checked)}
+                          className="mt-0.5 accent-emerald-500"
+                        />
+                        <span className="text-xs text-gray-300">
+                          Any other reply
+                          <span className="block text-[10px] text-gray-500">
+                            Fires no matter what was said, when no other connector on the box matched.
+                          </span>
+                        </span>
+                      </label>
+                      {!isAny && (
                       <div>
                         <label className="mb-1 block text-xs text-gray-400">When should the agent use this?</label>
                         <textarea
@@ -2326,6 +2375,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                           creating a scenario. Saved when you click away.
                         </p>
                       </div>
+                      )}
                       <button
                         onClick={() => {
                           if (selEdge.source) removeConnector(selEdge.source, h);
