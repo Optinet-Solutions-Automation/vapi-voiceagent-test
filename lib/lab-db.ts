@@ -197,25 +197,36 @@ type EdgeInput = {
   label: string;
 };
 
-/** Replace the whole graph for a script (delete-then-insert). */
+/** Replace the whole graph for a script (upsert-then-prune — a save that
+ *  fails mid-way must leave the stored graph intact; the old delete-then-
+ *  insert wiped every edge whenever one row was rejected). */
 export async function saveScriptGraph(
   scriptId: string,
   nodes: NodeInput[],
   edges: EdgeInput[]
 ): Promise<void> {
-  // Edges first (FK to nodes), then nodes.
-  await supabase.from("listener_script_edges").delete().eq("script_id", scriptId);
-  await supabase.from("listener_script_nodes").delete().eq("script_id", scriptId);
+  // Nodes before edges (edges reference nodes).
   if (nodes.length) {
-    const nrows = nodes.map((n) => ({ ...n, script_id: scriptId }));
-    const ni = await supabase.from("listener_script_nodes").insert(nrows);
+    const ni = await supabase
+      .from("listener_script_nodes")
+      .upsert(nodes.map((n) => ({ ...n, script_id: scriptId })));
     if (ni.error) throw new Error(ni.error.message);
   }
   if (edges.length) {
-    const erows = edges.map((e) => ({ ...e, script_id: scriptId }));
-    const ei = await supabase.from("listener_script_edges").insert(erows);
+    const ei = await supabase
+      .from("listener_script_edges")
+      .upsert(edges.map((e) => ({ ...e, script_id: scriptId })));
     if (ei.error) throw new Error(ei.error.message);
   }
+  // Prune rows dropped from the graph — edges first (FK to nodes).
+  let de = supabase.from("listener_script_edges").delete().eq("script_id", scriptId);
+  if (edges.length) de = de.not("id", "in", `(${edges.map((e) => e.id).join(",")})`);
+  const der = await de;
+  if (der.error) throw new Error(der.error.message);
+  let dn = supabase.from("listener_script_nodes").delete().eq("script_id", scriptId);
+  if (nodes.length) dn = dn.not("id", "in", `(${nodes.map((n) => n.id).join(",")})`);
+  const dnr = await dn;
+  if (dnr.error) throw new Error(dnr.error.message);
   await supabase
     .from("listener_scripts")
     .update({ updated_at: new Date().toISOString() })

@@ -419,6 +419,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         addEdge(
           {
             ...c,
+            // Without an explicit id, xyflow names the edge "xy-edge__…" —
+            // the DB id column is uuid, so every save would be rejected.
+            id: crypto.randomUUID(),
             ...edgeVisualByHandle(c.sourceHandle ?? undefined),
             data: { condition: { kind: "plain", handle: c.sourceHandle ?? "out" } },
             markerEnd: { type: MarkerType.ArrowClosed },
@@ -700,7 +703,12 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           pos_y: n.position.y,
         };
       });
-      const edgeRows = edges.map((e) => {
+      // Arrows drawn before edges got explicit ids still carry xyflow's
+      // "xy-edge__…" name in canvas state — re-key those to real uuids.
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const keyedEdges = edges.map((e) => (UUID_RE.test(e.id) ? e : { ...e, id: crypto.randomUUID() }));
+      if (keyedEdges.some((e, i) => e !== edges[i])) setEdges(keyedEdges);
+      const edgeRows = keyedEdges.map((e) => {
         const cond = ((e.data as { condition?: Record<string, unknown> })?.condition ?? { kind: "plain" }) as Record<string, unknown>;
         return {
           id: e.id,
