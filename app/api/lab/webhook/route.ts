@@ -188,10 +188,11 @@ function speculate(callId: string, text: string): Promise<void> | undefined {
       listHandlers(),
       getRecentTurns(callId, 6).catch(() => []),
     ]);
-    let scoped = hs.filter(
+    const eligible = hs.filter(
       (h) => h.enabled && !SPECIAL_INTENTS.has(h.intent_key) && (h.mode === "listener" || h.mode === "both")
     );
-    scoped = await scopeToActiveCollection(scoped, settings?.active_collection_id);
+    let scoped = await scopeToActiveCollection(eligible, settings?.active_collection_id);
+    scoped = await withScriptVocabulary(scoped, eligible, settings?.active_script_id);
     const expected = await expectedIntentKeys(callId, scoped, settings?.active_script_id ?? null).catch(() => [] as string[]);
     const cls = await classifyUtterance(text, turns, scoped, settings?.router_model ?? "gpt-5.4-mini", expected);
     return { cls, expected };
@@ -212,6 +213,44 @@ function speculate(callId: string, text: string): Promise<void> | undefined {
       });
     })
     .catch(() => {});
+}
+
+/** The active script's OWN vocabulary is always routable — connector
+ *  conditions, legacy branch values, box scenarios/candidates, and the
+ *  members of collections its boxes reference. A drawn condition IS the
+ *  author saying "listen for this here"; it must never depend on campaign
+ *  collection membership (conditions are plumbing, not Playbook content). */
+async function withScriptVocabulary(
+  scoped: ListenerHandler[],
+  base: ListenerHandler[],
+  activeScriptId: string | null | undefined
+): Promise<ListenerHandler[]> {
+  if (!activeScriptId || scoped.length === base.length) return scoped;
+  try {
+    const graph = await getScriptGraph(activeScriptId);
+    const keys = new Set<string>();
+    const wantIds = new Set<string>();
+    for (const e of graph.edges) {
+      const c = (e.condition ?? {}) as Record<string, unknown>;
+      if (((c.by as string) ?? (c.kind as string)) === "intent" && c.value) keys.add(c.value as string);
+    }
+    const colIds = new Set<string>();
+    for (const n of graph.nodes) {
+      const cfg = (n.config ?? {}) as Record<string, unknown>;
+      if (cfg.collectionId) colIds.add(cfg.collectionId as string);
+      if (n.scenario_id) wantIds.add(n.scenario_id);
+      for (const cid of (cfg.candidateScenarioIds as string[]) ?? []) wantIds.add(cid);
+      if (((cfg.condBy as string) ?? "intent") === "intent" && cfg.condValue) keys.add(cfg.condValue as string);
+      for (const conn of (cfg.connectors as { intentKey?: string }[]) ?? []) if (conn?.intentKey) keys.add(conn.intentKey);
+    }
+    for (const cid of colIds)
+      for (const id of await getCollectionHandlerIds(cid).catch(() => [] as string[])) wantIds.add(id);
+    const have = new Set(scoped.map((h) => h.id));
+    const extra = base.filter((h) => !have.has(h.id) && (keys.has(h.intent_key) || wantIds.has(h.id)));
+    return extra.length ? [...scoped, ...extra] : scoped;
+  } catch {
+    return scoped;
+  }
 }
 
 /** Restrict handlers to the active collection (if one is set and non-empty). */
@@ -495,13 +534,14 @@ async function handleTranscript(
   let handlers: ListenerHandler[] = [];
   try {
     settings = await settingsP;
-    handlers = (await handlersP).filter(
+    const eligible = (await handlersP).filter(
       (h) =>
         h.enabled &&
         !SPECIAL_INTENTS.has(h.intent_key) && // special (opening/identity): never routed
         (h.mode === "listener" || h.mode === "both")
     );
-    handlers = await scopeToActiveCollection(handlers, settings?.active_collection_id);
+    handlers = await scopeToActiveCollection(eligible, settings?.active_collection_id);
+    handlers = await withScriptVocabulary(handlers, eligible, settings?.active_script_id);
   } catch (e) {
     await log({
       call_id: callId,

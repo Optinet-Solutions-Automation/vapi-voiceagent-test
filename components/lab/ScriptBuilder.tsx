@@ -32,7 +32,6 @@ import {
   updateHandler,
   listCollections,
   getCollectionHandlerIds,
-  setCollectionHandlers,
   getLabSettings,
   saveLabSettings,
   getFlowState,
@@ -772,10 +771,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         priority: 100,
         enabled: true,
       });
-      if (activeCollectionId) {
-        const ids = await getCollectionHandlerIds(activeCollectionId).catch(() => null);
-        if (ids && !ids.includes(h.id)) await setCollectionHandlers(activeCollectionId, [...ids, h.id]);
-      }
+      // Matchers are routing plumbing, NOT Playbook content — never added to
+      // any collection; the runtime always routes the active script's own
+      // conditions regardless of campaign collection scope.
       setScenarios((ss) => [h, ...ss]);
       setConnectorIntent(sourceId, handle, key, h.name);
     } catch (err) {
@@ -896,7 +894,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
 
   // ── Run mode: live test call with "you are here" on the canvas ──
   type QaIssue = { text: string; suggestion?: string };
-  type QaResult = { errors: QaIssue[]; warnings: QaIssue[]; missingFromCampaign: { id: string; name: string }[] };
+  type QaResult = { errors: QaIssue[]; warnings: QaIssue[] };
   type RunStatus = "idle" | "connecting" | "live" | "ended";
   const [run, setRun] = useState<{ callId: string | null; status: RunStatus; currentNodeId: string | null; visited: string[]; lastLine: string | null }>({
     callId: null,
@@ -973,7 +971,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   async function preflight(): Promise<QaResult> {
     const errors: QaIssue[] = [];
     const warnings: QaIssue[] = [];
-    const missing: { id: string; name: string }[] = [];
     const outsOf = (id: string) => edges.filter((e) => e.source === id);
     const dataOf = (n: Node) => n.data as NodeData;
     const ctOf = (n: Node) => (dataOf(n).kind === "start" ? "start" : ((dataOf(n).config.contentType as Content) ?? "scenario"));
@@ -1047,56 +1044,22 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     else if (start && !terminals.some((t) => reach.has(t.id)))
       warnings.push({ text: "No End call (or Transfer) box is reachable from Start.", suggestion: "Route at least one chain of connectors all the way to an End call box." });
 
-    // The router only matches replies inside the ACTIVE campaign collection —
-    // anything this script uses that isn't in it will never fire on a call.
-    const campaignIds = activeCollectionId ? await getCollectionHandlerIds(activeCollectionId).catch(() => null) : null;
-    const campaignSet = campaignIds ? new Set(campaignIds) : null;
+    // NOTE: no campaign-collection membership check — the runtime always
+    // routes the active script's own vocabulary (connector conditions and
+    // referenced collections' members), regardless of collection scope.
     for (const n of nodes) {
       const d = dataOf(n);
       if (ctOf(n) !== "collection" || !d.config.collectionId) continue;
       const ids = await getCollectionHandlerIds(d.config.collectionId as string).catch(() => [] as string[]);
       if (!ids.length) warnings.push({ text: `“${labelOf(n)}” points at an empty collection.`, suggestion: "Add reply scenarios to it in the Playbook." });
-      const offMembers = scenarios.filter((s) => ids.includes(s.id) && !s.enabled);
+      const offMembers = scenarios.filter((s) => ids.includes(s.id) && !s.enabled && s.action_type !== "ignore");
       if (offMembers.length)
         warnings.push({
           text: `“${labelOf(n)}”: ${offMembers.length} repl${offMembers.length > 1 ? "ies" : "y"} in its collection ${offMembers.length > 1 ? "are" : "is"} toggled OFF and won't be matched: ${offMembers.map((s) => `“${snip(s.name, 24)}”`).join(", ")}.`,
           suggestion: "Toggle them on in the Playbook, or remove them from the collection.",
         });
-      if (campaignSet)
-        for (const id of ids)
-          if (!campaignSet.has(id)) {
-            const s = scenarios.find((x) => x.id === id);
-            if (s && !missing.some((m) => m.id === id)) missing.push({ id, name: s.name });
-          }
     }
-    if (campaignSet) {
-      for (const n of nodes)
-        for (const c of connectorsOf(dataOf(n).config)) {
-          if (!c.intentKey) continue;
-          const s = scenarios.find((x) => x.intent_key === c.intentKey);
-          if (s && !campaignSet.has(s.id) && !missing.some((m) => m.id === s.id)) missing.push({ id: s.id, name: s.name });
-        }
-      if (missing.length)
-        errors.push({
-          text: `${missing.length} repl${missing.length > 1 ? "ies" : "y"} used by this script ${missing.length > 1 ? "are" : "is"} missing from the campaign collection — the router can never match ${missing.length > 1 ? "them" : "it"}: ${missing.map((m) => `“${snip(m.name, 28)}”`).join(", ")}.`,
-          suggestion: "Use “Fix automatically” below to add them to the campaign collection.",
-        });
-    }
-    return { errors, warnings, missingFromCampaign: missing };
-  }
-
-  async function fixMissingFromCampaign(missing: { id: string; name: string }[]) {
-    if (!activeCollectionId || !missing.length) return;
-    setQaBusy(true);
-    try {
-      const ids = await getCollectionHandlerIds(activeCollectionId).catch(() => null);
-      if (ids) await setCollectionHandlers(activeCollectionId, [...new Set([...ids, ...missing.map((m) => m.id)])]);
-      setQa(await preflight());
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to fix the collection");
-    } finally {
-      setQaBusy(false);
-    }
+    return { errors, warnings };
   }
 
   // Run button: save → QA → (if clean) the Start button appears in the panel.
@@ -1463,6 +1426,23 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     const posY = new Map(nodes.map((n) => [n.id, n.position.y]));
     const walkedPairs = new Set<string>();
     for (let i = 0; i + 1 < run.visited.length; i++) walkedPairs.add(run.visited[i] + ">" + run.visited[i + 1]);
+    // While the customer is still talking, glow the connector the live
+    // speculation points at (or the catch-all when nothing specific fits) —
+    // the chosen path lights up before the turn even ends.
+    let specIntent: string | null = null;
+    if (run.status === "live") {
+      for (let i = runEvents.length - 1; i >= 0; i--) {
+        const ev = runEvents[i];
+        if (ev.event_type === "classified" || ev.event_type === "injected") break; // turn already resolved
+        if (ev.event_type === "speculated") {
+          specIntent = ((ev.meta as Record<string, unknown> | null)?.cls as { intent?: string } | undefined)?.intent ?? null;
+          break;
+        }
+      }
+    }
+    const condOf = (e: Edge) => ((e.data as { condition?: Record<string, unknown> })?.condition ?? {}) as Record<string, unknown>;
+    const specMatched =
+      !!specIntent && edges.some((e) => e.source === run.currentNodeId && condOf(e).value === specIntent);
     return edges.map((e) => {
       const up = (posY.get(e.target) ?? 0) < (posY.get(e.source) ?? 0);
       let out = up ? { ...e, style: { ...(e.style ?? {}), strokeDasharray: "7 5" } } : e;
@@ -1475,10 +1455,21 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
             animated: intoCurrent,
             style: { ...(out.style ?? {}), stroke: "#34d399", strokeWidth: 2.5 },
           };
+        const c = condOf(e);
+        const anticipated =
+          specIntent !== null &&
+          e.source === run.currentNodeId &&
+          (c.value === specIntent || (!specMatched && c.kind === "any"));
+        if (anticipated)
+          out = {
+            ...out,
+            animated: true,
+            style: { ...(out.style ?? {}), stroke: "#6ee7b7", strokeWidth: 3.5 },
+          };
       }
       return out;
     });
-  }, [edges, nodes, run]);
+  }, [edges, nodes, run, runEvents]);
 
   // Members of the collection a selected Collection box points at — shown as
   // a plain list in the drawer so the builder never has to leave the canvas.
@@ -2316,7 +2307,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             if (!cid) return <p className="text-[11px] text-gray-600">Pick a collection to see its replies.</p>;
                             const ids = colMembers[cid];
                             if (!ids) return <p className="text-[11px] text-gray-600">Loading…</p>;
-                            const members = scenarios.filter((s) => ids.includes(s.id));
+                            // Reply-detector matchers are routing plumbing, not content — hidden.
+                            const members = scenarios.filter((s) => ids.includes(s.id) && s.action_type !== "ignore");
                             if (!members.length) return <p className="text-[11px] text-gray-600">This collection is empty — add scenarios to it in the Playbook.</p>;
                             return (
                               <ul className="space-y-1">
@@ -2773,15 +2765,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               )}
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-gray-800 px-5 py-3">
-              {qa.missingFromCampaign.length > 0 && activeCollectionId && (
-                <button
-                  onClick={() => fixMissingFromCampaign(qa.missingFromCampaign)}
-                  disabled={qaBusy}
-                  className="rounded-lg border border-amber-500/50 px-3 py-1.5 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/10 disabled:opacity-40"
-                >
-                  {qaBusy ? "Fixing…" : `Fix automatically (${qa.missingFromCampaign.length})`}
-                </button>
-              )}
               <button onClick={() => setQa(null)} className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">
                 Close
               </button>
