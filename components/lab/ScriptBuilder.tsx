@@ -95,12 +95,14 @@ function sourceHandlesFor(
   content: Content,
   connectors: Connector[]
 ): { id: string; label?: string; color?: string }[] {
+  // No default path: reply connectors are the ONLY outputs. (Legacy plain
+  // arrows still render via a hidden anchor on the box — see FlowNode.)
   const conns = connectors.map((c) => ({
     id: c.id,
     label: c.label ? snip(c.label, 13) : "reply?",
     color: "#34d399",
   }));
-  if (isStart) return [{ id: "out" }, ...conns];
+  if (isStart) return conns;
   if (CONTENT_META[content].terminal) return [];
   if (content === "ifelse")
     return [
@@ -112,7 +114,7 @@ function sourceHandlesFor(
       { id: "loop", label: "Repeat", color: "#f59e0b" },
       { id: "exit", label: "Exit", color: "#9ca3af" },
     ];
-  return [{ id: "out" }, ...conns];
+  return conns;
 }
 
 // ── Custom node ───────────────────────────────────────────────
@@ -176,16 +178,27 @@ function FlowNode({ id, data, selected }: NodeProps) {
         );
       })}
       {canAddConnector && (
-        <button
-          className="nodrag nopan absolute -bottom-3 -right-3 flex h-6 w-6 items-center justify-center rounded-full border border-gray-600 bg-gray-800 text-sm font-bold leading-none text-gray-300 shadow transition hover:border-emerald-400 hover:bg-gray-700 hover:text-emerald-300"
-          title="Add a reply connector — a green dot for one predicted customer reply"
-          onClick={(e) => {
-            e.stopPropagation();
-            addConnectorRef.fn(id);
-          }}
-        >
-          +
-        </button>
+        <>
+          {/* Hidden anchor: legacy plain arrows (old scripts' default paths)
+              still render from here, but no new one can be started. */}
+          <Handle
+            id="out"
+            type="source"
+            position={Position.Bottom}
+            isConnectableStart={false}
+            style={{ left: "50%", width: 1, height: 1, minWidth: 1, minHeight: 1, bottom: 0, opacity: 0, pointerEvents: "none", border: "none" }}
+          />
+          <button
+            className="nodrag nopan absolute -bottom-3 -right-3 flex h-6 w-6 items-center justify-center rounded-full border border-gray-600 bg-gray-800 text-sm font-bold leading-none text-gray-300 shadow transition hover:border-emerald-400 hover:bg-gray-700 hover:text-emerald-300"
+            title="Add a reply connector — a green dot for one predicted customer reply"
+            onClick={(e) => {
+              e.stopPropagation();
+              addConnectorRef.fn(id);
+            }}
+          >
+            +
+          </button>
+        </>
       )}
     </div>
   );
@@ -1804,7 +1817,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                           ? "This is the Repeat path of a Loop box."
                           : h === "exit"
                             ? "This is the Exit path of a Loop box."
-                            : "The default path — replies that match no reply connector continue here."}
+                            : "A legacy default arrow from an older script — new boxes route only through reply connectors. Delete it and draw a connector instead."}
                     <br />
                     <span className="text-gray-600">Use Delete above to remove it.</span>
                   </p>
