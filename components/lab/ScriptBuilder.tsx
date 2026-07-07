@@ -35,7 +35,11 @@ import {
   setCollectionHandlers,
   getLabSettings,
   saveLabSettings,
+  getFlowState,
+  listLabCallEvents,
+  insertLabEvent,
 } from "@/lib/lab-db";
+import { getVapi, vapiErrorText } from "@/lib/vapi";
 import type { ListenerScript, ListenerHandler, ListenerCollection } from "@/lib/database.types";
 
 // ── Content types a Step box can hold ─────────────────────────
@@ -76,6 +80,8 @@ type NodeData = {
   // display helpers (not persisted directly)
   subtitle?: string | null;
   note?: string | null;
+  // live-run marker: where the current test call is / has been
+  runState?: "current" | "visited" | null;
 };
 
 const snip = (t: string, n: number) => {
@@ -140,11 +146,17 @@ function FlowNode({ id, data, selected }: NodeProps) {
   useEffect(() => {
     updateNodeInternals(id);
   }, [id, handleKey, updateNodeInternals]);
+  const ring =
+    d.runState === "current"
+      ? "ring-4 ring-emerald-400 shadow-[0_0_22px_rgba(52,211,153,0.65)]"
+      : d.runState === "visited"
+        ? "ring-2 ring-emerald-600/50"
+        : selected
+          ? "ring-2 ring-white/60"
+          : "";
   return (
     <div
-      className={`max-w-[420px] rounded-lg border-2 px-3 ${labelled ? "pb-7 pt-2" : "py-2"} text-left shadow ${meta.color} ${
-        selected ? "ring-2 ring-white/60" : ""
-      }`}
+      className={`max-w-[420px] rounded-lg border-2 px-3 ${labelled ? "pb-7 pt-2" : "py-2"} text-left shadow ${meta.color} ${ring}`}
       style={{ minWidth: Math.max(160, handles.length * 64) }}
     >
       {!isStart && (
@@ -845,6 +857,266 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     return { created, replies };
   }
 
+  // ── Run mode: live test call with "you are here" on the canvas ──
+  type QaIssue = { text: string; suggestion?: string };
+  type QaResult = { errors: QaIssue[]; warnings: QaIssue[]; missingFromCampaign: { id: string; name: string }[] };
+  type RunStatus = "idle" | "connecting" | "live" | "ended";
+  const [run, setRun] = useState<{ callId: string | null; status: RunStatus; currentNodeId: string | null; visited: string[]; lastLine: string | null }>({
+    callId: null,
+    status: "idle",
+    currentNodeId: null,
+    visited: [],
+    lastLine: null,
+  });
+  const [qa, setQa] = useState<QaResult | null>(null);
+  const [qaBusy, setQaBusy] = useState(false);
+  const lastRunEvId = useRef(0);
+
+  // Built-in QA: everything that would keep a call from being a full
+  // conversation — broken connections, dead ends, no way to finish, and
+  // replies the campaign's router can't even see.
+  async function preflight(): Promise<QaResult> {
+    const errors: QaIssue[] = [];
+    const warnings: QaIssue[] = [];
+    const missing: { id: string; name: string }[] = [];
+    const outsOf = (id: string) => edges.filter((e) => e.source === id);
+    const dataOf = (n: Node) => n.data as NodeData;
+    const ctOf = (n: Node) => (dataOf(n).kind === "start" ? "start" : ((dataOf(n).config.contentType as Content) ?? "scenario"));
+    const labelOf = (n: Node) => dataOf(n).label || "Box";
+    const isTerminal = (n: Node) => ["end", "transfer", "return"].includes(ctOf(n));
+
+    const start = nodes.find((n) => dataOf(n).kind === "start");
+    if (!start) errors.push({ text: "There is no Start call box.", suggestion: "Drag a Start call box from the palette — the call has nowhere to begin." });
+
+    // What can the call actually reach from Start?
+    const reach = new Set<string>();
+    if (start) {
+      const q = [start.id];
+      while (q.length) {
+        const id = q.shift()!;
+        if (reach.has(id)) continue;
+        reach.add(id);
+        for (const e of outsOf(id)) q.push(e.target);
+      }
+    }
+
+    for (const n of nodes) {
+      const d = dataOf(n);
+      const ct = ctOf(n);
+      const lb = labelOf(n);
+      connectorsOf(d.config).forEach((c, i) => {
+        const cname = c.label ? `“${snip(c.label, 24)}”` : `#${i + 1}`;
+        if (!outsOf(n.id).some((e) => e.sourceHandle === c.id))
+          errors.push({ text: `“${lb}”: reply connector ${cname} has no arrow.`, suggestion: "Drag the green dot to the box this reply should lead to — or remove the dot from its arrow panel." });
+        if (!c.intentKey)
+          errors.push({ text: `“${lb}”: reply connector ${cname} has no rule.`, suggestion: "Click its arrow and describe when the agent should use it." });
+        else if (!scenarios.some((s) => s.intent_key === c.intentKey))
+          errors.push({ text: `“${lb}”: connector ${cname} points at a reply that no longer exists.`, suggestion: "Click the arrow and write its rule again." });
+      });
+      if (ct === "start") {
+        if (outsOf(n.id).length === 0)
+          errors.push({ text: "Start call has no arrows out — the call can never move past the opening.", suggestion: "Click + on Start and add a connector for each reply you expect after the opening." });
+        continue;
+      }
+      if (!reach.has(n.id)) warnings.push({ text: `“${lb}” can never be reached from Start.`, suggestion: "Connect an arrow to it, or delete it." });
+      if (ct === "scenario" && !d.scenarioId && !(lineDrafts[n.id]?.text ?? "").trim())
+        errors.push({ text: `“${lb}” has no line to speak.`, suggestion: "Click the box and type what the agent should say there." });
+      if (ct === "collection" && !d.config.collectionId)
+        errors.push({ text: `“${lb}” has no collection picked.`, suggestion: "Click the box and pick the collection of replies it should answer." });
+      if (ct === "subworkflow" && !d.config.subworkflowId) errors.push({ text: `“${lb}” has no workflow picked.` });
+      if (ct === "transfer" && !((d.config.number as string) ?? "").trim()) warnings.push({ text: `“${lb}” has no phone number.` });
+      if (!isTerminal(n) && ct !== "ifelse" && ct !== "loop" && reach.has(n.id) && outsOf(n.id).length === 0)
+        warnings.push({ text: `“${lb}” is a dead end — the call parks there until the customer hangs up.`, suggestion: "Add a reply connector (e.g. the customer says okay / goodbye) leading onward or to an End call box." });
+    }
+
+    const terminals = nodes.filter((n) => isTerminal(n));
+    if (!terminals.length)
+      warnings.push({ text: "There is no End call box — the agent can never close the call itself.", suggestion: "Add an End call box with a goodbye line and route a reply connector to it." });
+    else if (start && !terminals.some((t) => reach.has(t.id)))
+      warnings.push({ text: "No End call (or Transfer) box is reachable from Start.", suggestion: "Route at least one chain of connectors all the way to an End call box." });
+
+    // The router only matches replies inside the ACTIVE campaign collection —
+    // anything this script uses that isn't in it will never fire on a call.
+    const campaignIds = activeCollectionId ? await getCollectionHandlerIds(activeCollectionId).catch(() => null) : null;
+    const campaignSet = campaignIds ? new Set(campaignIds) : null;
+    for (const n of nodes) {
+      const d = dataOf(n);
+      if (ctOf(n) !== "collection" || !d.config.collectionId) continue;
+      const ids = await getCollectionHandlerIds(d.config.collectionId as string).catch(() => []);
+      if (!ids.length) warnings.push({ text: `“${labelOf(n)}” points at an empty collection.`, suggestion: "Add reply scenarios to it in the Playbook." });
+      if (campaignSet)
+        for (const id of ids)
+          if (!campaignSet.has(id)) {
+            const s = scenarios.find((x) => x.id === id);
+            if (s && !missing.some((m) => m.id === id)) missing.push({ id, name: s.name });
+          }
+    }
+    if (campaignSet) {
+      for (const n of nodes)
+        for (const c of connectorsOf(dataOf(n).config)) {
+          if (!c.intentKey) continue;
+          const s = scenarios.find((x) => x.intent_key === c.intentKey);
+          if (s && !campaignSet.has(s.id) && !missing.some((m) => m.id === s.id)) missing.push({ id: s.id, name: s.name });
+        }
+      if (missing.length)
+        errors.push({
+          text: `${missing.length} repl${missing.length > 1 ? "ies" : "y"} used by this script ${missing.length > 1 ? "are" : "is"} missing from the campaign collection — the router can never match ${missing.length > 1 ? "them" : "it"}: ${missing.map((m) => `“${snip(m.name, 28)}”`).join(", ")}.`,
+          suggestion: "Use “Fix automatically” below to add them to the campaign collection.",
+        });
+    }
+    return { errors, warnings, missingFromCampaign: missing };
+  }
+
+  async function fixMissingFromCampaign(missing: { id: string; name: string }[]) {
+    if (!activeCollectionId || !missing.length) return;
+    setQaBusy(true);
+    try {
+      const ids = await getCollectionHandlerIds(activeCollectionId).catch(() => null);
+      if (ids) await setCollectionHandlers(activeCollectionId, [...new Set([...ids, ...missing.map((m) => m.id)])]);
+      setQa(await preflight());
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to fix the collection");
+    } finally {
+      setQaBusy(false);
+    }
+  }
+
+  // Run button: save → QA → (if clean) the Start button appears in the panel.
+  async function handleRunClick() {
+    if (run.status === "live" || run.status === "connecting") {
+      stopRun();
+      return;
+    }
+    if (run.status === "ended") {
+      setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null });
+      return;
+    }
+    if (!scriptId) return;
+    setQaBusy(true);
+    try {
+      await handleSave(); // the runtime walks the DB, not the canvas
+      setQa(await preflight());
+    } finally {
+      setQaBusy(false);
+    }
+  }
+
+  async function startRun() {
+    setQa(null);
+    setError(null);
+    try {
+      // The webhook walks the ACTIVE script — make this one active first.
+      if (activeScriptId !== scriptId && scriptId) {
+        await saveLabSettings({ active_script_id: scriptId });
+        setActiveScriptId(scriptId);
+      }
+      const settings = await getLabSettings().catch(() => null);
+      const aid = (settings as unknown as { lab_assistant_id?: string } | null)?.lab_assistant_id;
+      if (!aid) {
+        setError("No lab assistant configured — pick one in the Listener Lab first.");
+        return;
+      }
+      lastRunEvId.current = 0;
+      setRun({ callId: null, status: "connecting", currentNodeId: null, visited: [], lastLine: null });
+      // Push webhook/persona config before dialing, same as the Lab's panel.
+      await fetch("/api/lab/configure-assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assistantId: aid }),
+      }).catch(() => {});
+      const startNode = nodes.find((n) => (n.data as NodeData).kind === "start");
+      const opening = ((((startNode?.data as NodeData) ?? {}).config?.opening as string) ?? "").trim();
+      const vapi = getVapi();
+      const call = await vapi.start(
+        aid,
+        opening
+          ? { firstMessage: opening.replace(/\{\{\s*name\s*\}\}/gi, "there").replace(/\s{2,}/g, " "), firstMessageMode: "assistant-speaks-first" }
+          : undefined
+      );
+      if (call?.id) {
+        setRun((r) => ({ ...r, callId: call.id, status: "live" }));
+        if (opening)
+          insertLabEvent({ call_id: call.id, event_type: "injected", role: "assistant", content: opening, action_type: "opening", meta: { opening: true } }).catch(() => {});
+      } else {
+        setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null });
+      }
+    } catch (err: unknown) {
+      setError(vapiErrorText(err, "Failed to start the test call"));
+      setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null });
+    }
+  }
+
+  function stopRun() {
+    try {
+      getVapi().stop();
+    } catch {
+      /* already stopped */
+    }
+    setRun((r) => (r.callId ? { ...r, status: "ended" } : { callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null }));
+  }
+
+  // While the call runs, follow it: flow state says WHERE we are, the event
+  // log says what was last spoken and when the call ends.
+  useEffect(() => {
+    if (!run.callId || (run.status !== "live" && run.status !== "connecting")) return;
+    const callId = run.callId;
+    const timer = setInterval(async () => {
+      try {
+        const [state, evs] = await Promise.all([
+          getFlowState(callId).catch(() => null),
+          listLabCallEvents(callId, lastRunEvId.current).catch(() => []),
+        ]);
+        if (evs.length) {
+          lastRunEvId.current = evs[evs.length - 1].id;
+          const spoken = [...evs].reverse().find((e) => e.event_type === "injected" || e.event_type === "agent_said");
+          const ended = evs.some((e) => e.event_type === "status" && ["ended", "end-of-call-report"].includes((e.content ?? "").trim()));
+          const flowNodes = evs.map((e) => (e.meta as Record<string, unknown> | null)?.toNode as string | undefined).filter((x): x is string => !!x);
+          setRun((r) => ({
+            ...r,
+            lastLine: spoken?.content ?? r.lastLine,
+            status: ended ? "ended" : r.status,
+            visited: [...new Set([...r.visited, ...flowNodes])],
+          }));
+        }
+        const nid = state?.current_node_id ?? null;
+        if (nid)
+          setRun((r) =>
+            r.currentNodeId === nid ? r : { ...r, currentNodeId: nid, visited: r.visited.includes(nid) ? r.visited : [...r.visited, nid] }
+          );
+      } catch {
+        /* transient poll errors are fine */
+      }
+    }, 1200);
+    return () => clearInterval(timer);
+  }, [run.callId, run.status]);
+
+  // Closing the builder mid-call must not leave a headless call running.
+  const runRef = useRef(run);
+  runRef.current = run;
+  useEffect(
+    () => () => {
+      if (runRef.current.status === "live" || runRef.current.status === "connecting") {
+        try {
+          getVapi().stop();
+        } catch {
+          /* already stopped */
+        }
+      }
+    },
+    []
+  );
+
+  // Paint the call's position onto the canvas (display-only).
+  const displayNodes = useMemo(() => {
+    if (run.status === "idle") return nodes;
+    return nodes.map((n) => {
+      const cur = n.id === run.currentNodeId;
+      const seen = run.visited.includes(n.id);
+      if (!cur && !seen) return n;
+      return { ...n, data: { ...(n.data as NodeData), runState: cur ? ("current" as const) : ("visited" as const) } };
+    });
+  }, [nodes, run]);
+
   // Non-blocking sanity checks a CRM user would otherwise discover mid-call.
   function validateGraph(): string[] {
     const w: string[] = [];
@@ -1170,6 +1442,30 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
             </button>
           </label>
 
+          {/* Run: save → QA → live test call with the canvas as the monitor */}
+          <button
+            onClick={handleRunClick}
+            disabled={!scriptId || busy || qaBusy}
+            title={
+              run.status === "live" || run.status === "connecting"
+                ? "End the test call"
+                : run.status === "ended"
+                  ? "Clear the finished run"
+                  : "Check the workflow and run a test call"
+            }
+            className={`rounded-lg p-2 text-white transition disabled:opacity-40 ${
+              run.status === "live" || run.status === "connecting" ? "bg-red-600 hover:bg-red-500" : "bg-emerald-600 hover:bg-emerald-500"
+            }`}
+          >
+            {qaBusy ? (
+              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" strokeDasharray="42" strokeLinecap="round" /></svg>
+            ) : run.status === "live" || run.status === "connecting" ? (
+              <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
+            ) : (
+              <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5.14v13.72c0 .84.93 1.35 1.64.9l10.02-6.86a1.06 1.06 0 000-1.8L9.64 4.24A1.06 1.06 0 008 5.14z" /></svg>
+            )}
+          </button>
+
           {/* Save */}
           <button onClick={handleSave} disabled={!scriptId || busy} title="Save" className="rounded-lg bg-indigo-600 p-2 text-white transition hover:bg-indigo-500 disabled:opacity-40">
             {busy ? (
@@ -1242,10 +1538,47 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         </div>
 
         {/* Canvas */}
-        <div className="min-w-0 flex-1" onDrop={onDrop} onDragOver={onDragOver}>
+        <div className="relative min-w-0 flex-1" onDrop={onDrop} onDragOver={onDragOver}>
+          {/* Live-run strip: where the call is right now */}
+          {run.status !== "idle" && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center">
+              <div className="pointer-events-auto flex max-w-[90%] items-center gap-3 rounded-full border border-gray-700 bg-gray-900/95 px-4 py-2 shadow-2xl">
+                <span
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                    run.status === "live" ? "animate-pulse bg-emerald-400" : run.status === "connecting" ? "animate-pulse bg-amber-400" : "bg-gray-500"
+                  }`}
+                />
+                <span className="shrink-0 text-xs font-semibold text-white">
+                  {run.status === "connecting"
+                    ? "Connecting…"
+                    : run.status === "ended"
+                      ? "Call ended"
+                      : run.currentNodeId
+                        ? `In: ${(nodes.find((n) => n.id === run.currentNodeId)?.data as NodeData | undefined)?.label ?? "…"}`
+                        : "Live — waiting for the first reply"}
+                </span>
+                {run.lastLine && <span className="min-w-0 truncate text-[11px] italic text-gray-500">“{snip(run.lastLine, 90)}”</span>}
+                {run.status === "ended" ? (
+                  <button
+                    onClick={() => setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null })}
+                    className="shrink-0 rounded-full border border-gray-600 px-2.5 py-0.5 text-[11px] text-gray-300 hover:bg-gray-800"
+                  >
+                    Dismiss
+                  </button>
+                ) : (
+                  <button
+                    onClick={stopRun}
+                    className="shrink-0 rounded-full bg-red-600 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-red-500"
+                  >
+                    End call
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {scriptId ? (
             <ReactFlow
-              nodes={nodes}
+              nodes={displayNodes}
               edges={displayEdges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
@@ -1851,6 +2184,69 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           </div>
         )}
       </div>
+
+      {/* Pre-flight QA results — gate before a test call can start */}
+      {qa && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6" onClick={() => setQa(null)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-950 shadow-2xl"
+          >
+            <div className="border-b border-gray-800 px-5 py-3">
+              <p className="text-[10px] uppercase tracking-wider text-gray-500">Workflow check</p>
+              <p className="text-sm font-bold text-white">
+                {qa.errors.length
+                  ? `${qa.errors.length} problem${qa.errors.length > 1 ? "s" : ""} block the test call`
+                  : qa.warnings.length
+                    ? "Ready, with a few things worth knowing"
+                    : "All checks passed"}
+              </p>
+            </div>
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-5 py-3">
+              {qa.errors.map((i, k) => (
+                <div key={"e" + k} className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2">
+                  <p className="text-xs text-rose-300">{i.text}</p>
+                  {i.suggestion && <p className="mt-0.5 text-[11px] text-rose-400/70">→ {i.suggestion}</p>}
+                </div>
+              ))}
+              {qa.warnings.map((i, k) => (
+                <div key={"w" + k} className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                  <p className="text-xs text-amber-300">{i.text}</p>
+                  {i.suggestion && <p className="mt-0.5 text-[11px] text-amber-400/70">→ {i.suggestion}</p>}
+                </div>
+              ))}
+              {!qa.errors.length && !qa.warnings.length && (
+                <p className="py-4 text-center text-sm text-gray-400">
+                  Every box has a line, every connector has a rule and an arrow, and the call can reach the end. 🎉
+                </p>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-gray-800 px-5 py-3">
+              {qa.missingFromCampaign.length > 0 && activeCollectionId && (
+                <button
+                  onClick={() => fixMissingFromCampaign(qa.missingFromCampaign)}
+                  disabled={qaBusy}
+                  className="rounded-lg border border-amber-500/50 px-3 py-1.5 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/10 disabled:opacity-40"
+                >
+                  {qaBusy ? "Fixing…" : `Fix automatically (${qa.missingFromCampaign.length})`}
+                </button>
+              )}
+              <button onClick={() => setQa(null)} className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">
+                Close
+              </button>
+              <button
+                onClick={startRun}
+                disabled={qa.errors.length > 0 || qaBusy}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-40"
+                title={qa.errors.length ? "Fix the problems above first" : "Start a live test call from the browser"}
+              >
+                Start test call
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sub-workflow preview (read-only) */}
       {preview && (

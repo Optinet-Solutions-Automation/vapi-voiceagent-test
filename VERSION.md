@@ -11,6 +11,17 @@ The client-facing user manual lives at **`Listener-Lab-User-Manual.pdf`**
 
 ## v2.2 — current
 
+- **Run workflow from the builder — the canvas IS the monitor.** A ▶ Run
+  button saves the script, runs a built-in QA, and (when clean) starts a
+  live browser test call. While the call runs, the box the call is
+  currently in glows on the canvas and visited boxes stay marked, with a
+  status strip showing the current box and the agent's last line, until
+  End Call. The QA gates the run and makes suggestions: no Start box /
+  Start with no arrows, connectors missing arrows or rules, boxes with no
+  line or no collection, unreachable boxes, dead ends that park the call
+  forever, no reachable End Call — and the invisible killer: replies used
+  by the script that aren't in the campaign collection (the router can
+  never match them), with a one-click "Fix automatically" that adds them.
 - **Reply connectors — routing moves onto the boxes** (user-requested
   redesign). If/Else and Loop are gone from the palette. Instead, every box
   (including Start) can grow green "reply connector" dots: pick a scenario
