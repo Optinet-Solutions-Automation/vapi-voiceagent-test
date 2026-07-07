@@ -1106,6 +1106,14 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     []
   );
 
+  // The box palette collapses to a slim rail — and gets out of the way by
+  // itself while a test call is running, so the canvas is the monitor.
+  const [paletteOpen, setPaletteOpen] = useState(true);
+  useEffect(() => {
+    if (run.status === "connecting" || run.status === "live") setPaletteOpen(false);
+    else if (run.status === "idle") setPaletteOpen(true);
+  }, [run.status]);
+
   // Paint the call's position onto the canvas (display-only).
   const displayNodes = useMemo(() => {
     if (run.status === "idle") return nodes;
@@ -1512,9 +1520,28 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       )}
 
       <div className="flex min-h-0 flex-1">
-        {/* Palette */}
+        {/* Palette (collapsible; auto-collapses while a test call runs) */}
+        {!paletteOpen ? (
+          <button
+            onClick={() => setPaletteOpen(true)}
+            title="Show the box palette"
+            className="flex w-7 shrink-0 flex-col items-center gap-2 border-r border-gray-800 py-3 text-gray-500 transition hover:bg-gray-900 hover:text-gray-300"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-gray-600 [writing-mode:vertical-rl]">Boxes</span>
+          </button>
+        ) : (
         <div className="flex w-44 shrink-0 flex-col border-r border-gray-800">
-          <p className="shrink-0 border-b border-gray-800 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500">Boxes</p>
+          <div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Boxes</p>
+            <button onClick={() => setPaletteOpen(false)} title="Collapse the palette" className="text-gray-500 transition hover:text-gray-300">
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          </div>
           <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
             {PALETTE.map((b) => (
               <button
@@ -1536,6 +1563,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
             box, or back up to an earlier box to repeat it.
           </p>
         </div>
+        )}
 
         {/* Canvas */}
         <div className="relative min-w-0 flex-1" onDrop={onDrop} onDragOver={onDragOver}>
