@@ -31,6 +31,7 @@ import {
   createHandler,
   updateHandler,
   listCollections,
+  getCollectionHandlerIds,
   getLabSettings,
   saveLabSettings,
 } from "@/lib/lab-db";
@@ -996,6 +997,22 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     });
   }, [edges, nodes]);
 
+  // Members of the collection a selected Collection box points at — shown as
+  // a plain list in the drawer so the builder never has to leave the canvas.
+  const [colMembers, setColMembers] = useState<Record<string, string[]>>({});
+  useEffect(() => {
+    const cid = sd && content === "collection" ? ((sd.config.collectionId as string) ?? null) : null;
+    if (!cid || cid in colMembers) return;
+    getCollectionHandlerIds(cid)
+      .then((ids) => setColMembers((m) => ({ ...m, [cid]: ids })))
+      .catch(() => setColMembers((m) => ({ ...m, [cid]: [] })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sd, content]);
+
+  // Drafts for the "when should the agent use this" rule on a connector arrow,
+  // keyed by scenario intent key; saved to the Playbook scenario on blur.
+  const [connDescDrafts, setConnDescDrafts] = useState<Record<string, string>>({});
+
   // If/Else on result: offer the results actually declared by the Return
   // boxes of whichever sub-workflow(s) feed this box, instead of free text.
   const [subResults, setSubResults] = useState<Record<string, string[]>>({});
@@ -1428,40 +1445,30 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                         </div>
                         <div>
                           <label className="mb-1 block text-xs text-gray-400">
-                            Default line <span className="text-gray-600">(when no member fits the reply)</span>
+                            Replies in this collection <span className="text-gray-600">(answered in place)</span>
                           </label>
-                          <select
-                            className={inputCls + " [color-scheme:dark]"}
-                            value={sd.scenarioId ?? ""}
-                            onChange={(e) => patchNodeData(selNode.id, { scenarioId: e.target.value || null })}
-                          >
-                            <option value="">(highest-priority member)</option>
-                            {scenarios.filter((s) => s.action_type !== "ignore").map((s) => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                          </select>
+                          {(() => {
+                            const cid = (sd.config.collectionId as string) ?? "";
+                            if (!cid) return <p className="text-[11px] text-gray-600">Pick a collection to see its replies.</p>;
+                            const ids = colMembers[cid];
+                            if (!ids) return <p className="text-[11px] text-gray-600">Loading…</p>;
+                            const members = scenarios.filter((s) => ids.includes(s.id));
+                            if (!members.length) return <p className="text-[11px] text-gray-600">This collection is empty — add scenarios to it in the Playbook.</p>;
+                            return (
+                              <ul className="space-y-1">
+                                {members.map((s) => (
+                                  <li key={s.id} className="rounded-md bg-gray-900/60 px-2 py-1.5">
+                                    <p className="text-[11px] font-medium text-gray-300">{s.name}</p>
+                                    {s.description && <p className="mt-0.5 text-[10px] text-gray-500">{snip(s.description, 84)}</p>}
+                                  </li>
+                                ))}
+                              </ul>
+                            );
+                          })()}
                         </div>
-                        {(() => {
-                          const def = sd.scenarioId ? scenarios.find((s) => s.id === sd.scenarioId) : undefined;
-                          return def?.response_template ? (
-                            <div>
-                              <label className="mb-1 block text-xs text-gray-400">
-                                What the agent might say <span className="text-gray-600">(tentative)</span>
-                              </label>
-                              <p className="rounded-md bg-gray-900/60 p-2 text-[11px] italic text-gray-400">
-                                “{def.response_template}”
-                              </p>
-                              <p className="mt-1 text-[10px] text-gray-600">
-                                Only the default — each member speaks its own line depending on the customer&rsquo;s
-                                reply. Edit the lines themselves in the Playbook.
-                              </p>
-                            </div>
-                          ) : null;
-                        })()}
                         <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
-                          A stage in one box: whichever member scenario matches the customer&rsquo;s reply is spoken;
-                          anything else gets the default line. Add reply connectors below to move on when a reply
-                          calls for the next stage.
+                          Whichever reply matches is answered on the spot and the box stays parked. Add reply
+                          connectors (the + on the box) for the replies that should move the call onward.
                         </p>
                       </>
                     )}
@@ -1731,27 +1738,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                       </>
                     )}
 
-                    {/* Tag scope for collection (scenario boxes have it under Advanced) */}
-                    {content === "collection" && (
-                      <div>
-                        <label className="mb-1 block text-xs text-gray-400">Active tags at this step <span className="text-gray-600">(blank = all)</span></label>
-                        <div className="flex flex-wrap gap-1.5">
-                          {allTags.map((t) => {
-                            const scope = (sd.config.scopeTags as string[]) ?? [];
-                            const on = scope.includes(t);
-                            return (
-                              <button
-                                key={t}
-                                onClick={() => patchConfig(selNode.id, { scopeTags: on ? scope.filter((x) => x !== t) : [...scope, t] })}
-                                className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition ${on ? "bg-purple-500/25 text-purple-200" : "border border-gray-700 text-gray-400"}`}
-                              >
-                                {t}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
                   </>
                 )}
               </>
@@ -1787,10 +1773,32 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                               ))}
                           </optgroup>
                         </select>
-                        {scn?.description && (
-                          <p className="mt-1 rounded-md bg-gray-900/60 p-1.5 text-[10px] italic text-gray-500">{snip(scn.description, 110)}</p>
-                        )}
                       </div>
+                      {scn && (
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">When should the agent use this?</label>
+                          <textarea
+                            className={inputCls + " min-h-[64px] resize-y"}
+                            value={connDescDrafts[scn.intent_key] ?? scn.description ?? ""}
+                            onChange={(e) => setConnDescDrafts((m) => ({ ...m, [scn.intent_key]: e.target.value }))}
+                            onBlur={async (e) => {
+                              const text = e.target.value.trim();
+                              if (text === (scn.description ?? "").trim()) return;
+                              try {
+                                await updateHandler(scn.id, { description: text });
+                                setScenarios((ss) => ss.map((x) => (x.id === scn.id ? { ...x, description: text } : x)));
+                              } catch (err) {
+                                setError(err instanceof Error ? err.message : "Failed to save the rule");
+                              }
+                            }}
+                            placeholder={'e.g. the customer agrees — "yes", "sure", "okay go ahead"'}
+                          />
+                          <p className="mt-1 text-[10px] text-gray-600">
+                            The route fires when the customer&rsquo;s reply matches this description. Saved to the
+                            scenario when you click away — it updates everywhere the scenario is used.
+                          </p>
+                        </div>
+                      )}
                       <button
                         onClick={() => {
                           if (selEdge.source) removeConnector(selEdge.source, h);
