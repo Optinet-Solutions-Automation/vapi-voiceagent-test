@@ -1147,28 +1147,22 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         body: JSON.stringify({ assistantId: aid }),
       }).catch(() => {});
       const startNode = nodes.find((n) => (n.data as NodeData).kind === "start");
-      let opening = ((((startNode?.data as NodeData) ?? {}).config?.opening as string) ?? "").trim();
-      // No opening on the Start box → the campaign's First Message scenario
-      // (same fallback as the Lab's call panel). A bare VAPI "Hello." asks no
-      // question, which also breaks bare-"yes" routing on the first reply.
-      if (!opening) {
-        const fm = scenarios.find((s) => s.intent_key === "first_message" && s.enabled);
-        opening = (fm?.response_template ?? "").trim();
-      }
+      // Empty opening is a deliberate author choice: no override, the VAPI
+      // assistant's own greeting plays.
+      const opening = ((((startNode?.data as NodeData) ?? {}).config?.opening as string) ?? "").trim();
+      const rendered = opening ? opening.replace(/\{\{\s*name\s*\}\}/gi, "there").replace(/\s{2,}/g, " ") : "";
       const vapi = getVapi();
       const call = await vapi.start(
         aid,
-        opening
-          ? { firstMessage: opening.replace(/\{\{\s*name\s*\}\}/gi, "there").replace(/\s{2,}/g, " "), firstMessageMode: "assistant-speaks-first" }
-          : undefined
+        rendered ? { firstMessage: rendered, firstMessageMode: "assistant-speaks-first" } : undefined
       );
       if (call?.id) {
         // The engine only persists its position after the first routed turn —
         // paint the Start box as "you are here" from second zero.
         const startId = startNode?.id ?? null;
         setRun((r) => ({ ...r, callId: call.id, status: "live", currentNodeId: startId, visited: startId ? [startId] : [] }));
-        if (opening)
-          insertLabEvent({ call_id: call.id, event_type: "injected", role: "assistant", content: opening, action_type: "opening", meta: { opening: true } }).catch(() => {});
+        if (rendered)
+          insertLabEvent({ call_id: call.id, event_type: "injected", role: "assistant", content: rendered, action_type: "opening", meta: { opening: true } }).catch(() => {});
       } else {
         setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null });
       }

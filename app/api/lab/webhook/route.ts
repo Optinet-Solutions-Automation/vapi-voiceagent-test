@@ -1202,6 +1202,9 @@ async function runScriptFlow(
     // folded into ONE briefing so the agent gives a single short reply.
     let mergedText: string | null = null;
     let mergedIds: string[] = [];
+    // What the entered collection handles — used to ground the agent when the
+    // box has nothing specific to say (no default line, no matching member).
+    let stageMemberNames: string[] = [];
 
     if (ct === "scenario") {
       const cands = [target.scenario_id, ...((cfg.candidateScenarioIds as string[]) ?? [])].filter(Boolean) as string[];
@@ -1238,10 +1241,12 @@ async function runScriptFlow(
       // highest-priority ENABLED member (a toggled-off scenario is never an
       // automatic pick — only an explicit box assignment may still speak it).
       scenario =
-        matches[0] ??
-        handlerById(target.scenario_id) ??
-        allHandlers.filter((h) => ids.includes(h.id) && h.enabled).sort((a, b) => a.priority - b.priority)[0] ??
-        null;
+        matches.length > 0
+          ? matches[0]
+          : handlerById(target.scenario_id) ??
+            allHandlers.filter((h) => ids.includes(h.id) && h.enabled).sort((a, b) => a.priority - b.priority)[0] ??
+            null;
+      stageMemberNames = allHandlers.filter((h) => ids.includes(h.id) && h.enabled).map((h) => h.name);
     } else {
       // send_sms / transfer
       scenario = handlerById(target.scenario_id);
@@ -1300,6 +1305,18 @@ async function runScriptFlow(
       injectedText = scenario.response_template ?? "";
     }
 
+    // A collection entered with nothing specific to say (no default line, no
+    // matching member) must NOT leave the agent to improvise — the model
+    // invents facts ("I can see you've been pretty active"). Ground it.
+    let stageGuidance = false;
+    if (!injectedText && ct === "collection") {
+      injectedText =
+        `You've just moved into the "${target.label || "next"}" part of the call` +
+        (stageMemberNames.length ? ` — it exists to handle: ${stageMemberNames.slice(0, 4).join("; ")}` : "") +
+        `. Bridge into it with ONE short, natural line that keeps the conversation moving. Never invent facts, activity, or offers.`;
+      stageGuidance = true;
+    }
+
     // The reply often carries MORE than the routed step expects ("sure, text
     // me — but what's the catch?"): fold every OTHER matched Playbook answer
     // into the same briefing so the agent gives ONE unified reply and no part
@@ -1349,8 +1366,8 @@ async function runScriptFlow(
         await injectStaffNote(controlUrl, brief(injectedText), true);
       } else if (ct === "transfer") {
         await injectSay(controlUrl, injectedText, false);
-      } else if (mergedText || sideMerged) {
-        // Merged multi-point reply is always a briefing — one paragraph out.
+      } else if (mergedText || sideMerged || stageGuidance) {
+        // Merged multi-point replies and stage guidance are always briefings.
         await injectStaffNote(controlUrl, brief(injectedText), true);
       } else if (scenario) {
         // A verbatim say after the agent's own reply would restate/re-ask on
