@@ -1235,11 +1235,12 @@ async function runScriptFlow(
         mergedIds = matches.map((m) => m.id);
       }
       // No member fits the reply → the box's default line; failing that, the
-      // highest-priority member (never an arbitrary row).
+      // highest-priority ENABLED member (a toggled-off scenario is never an
+      // automatic pick — only an explicit box assignment may still speak it).
       scenario =
         matches[0] ??
         handlerById(target.scenario_id) ??
-        allHandlers.filter((h) => ids.includes(h.id)).sort((a, b) => a.priority - b.priority)[0] ??
+        allHandlers.filter((h) => ids.includes(h.id) && h.enabled).sort((a, b) => a.priority - b.priority)[0] ??
         null;
     } else {
       // send_sms / transfer

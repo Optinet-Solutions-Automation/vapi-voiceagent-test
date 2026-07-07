@@ -1006,8 +1006,16 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         if (c.any) return; // catch-all needs no rule
         if (!c.intentKey)
           errors.push({ text: `“${lb}”: reply connector ${cname} has no rule.`, suggestion: "Click its arrow and describe when the agent should use it." });
-        else if (!scenarios.some((s) => s.intent_key === c.intentKey))
-          errors.push({ text: `“${lb}”: connector ${cname} points at a reply that no longer exists.`, suggestion: "Click the arrow and write its rule again." });
+        else {
+          const scn = scenarios.find((s) => s.intent_key === c.intentKey);
+          if (!scn)
+            errors.push({ text: `“${lb}”: connector ${cname} points at a reply that no longer exists.`, suggestion: "Click the arrow and write its rule again." });
+          else if (!scn.enabled)
+            errors.push({
+              text: `“${lb}”: connector ${cname} routes on “${snip(scn.name, 28)}” which is toggled OFF in the Playbook — the router can never match it.`,
+              suggestion: "Toggle the scenario on in the Playbook, or point the connector at a different reply.",
+            });
+        }
       });
       if (ct === "start") {
         if (outsOf(n.id).length === 0)
@@ -1017,6 +1025,14 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       if (!reach.has(n.id)) warnings.push({ text: `“${lb}” can never be reached from Start.`, suggestion: "Connect an arrow to it, or delete it." });
       if (ct === "scenario" && !d.scenarioId && !(lineDrafts[n.id]?.text ?? "").trim())
         errors.push({ text: `“${lb}” has no line to speak.`, suggestion: "Click the box and type what the agent should say there." });
+      if (d.scenarioId) {
+        const scn = scenarios.find((s) => s.id === d.scenarioId);
+        if (scn && !scn.enabled)
+          warnings.push({
+            text: `“${lb}” speaks “${snip(scn.name, 28)}” which is toggled OFF in the Playbook.`,
+            suggestion: "Toggle it on, or pick a different line — off usually means 'don't use this anymore'.",
+          });
+      }
       if (ct === "collection" && !d.config.collectionId)
         errors.push({ text: `“${lb}” has no collection picked.`, suggestion: "Click the box and pick the collection of replies it should answer." });
       if (ct === "subworkflow" && !d.config.subworkflowId) errors.push({ text: `“${lb}” has no workflow picked.` });
@@ -1038,8 +1054,14 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     for (const n of nodes) {
       const d = dataOf(n);
       if (ctOf(n) !== "collection" || !d.config.collectionId) continue;
-      const ids = await getCollectionHandlerIds(d.config.collectionId as string).catch(() => []);
+      const ids = await getCollectionHandlerIds(d.config.collectionId as string).catch(() => [] as string[]);
       if (!ids.length) warnings.push({ text: `“${labelOf(n)}” points at an empty collection.`, suggestion: "Add reply scenarios to it in the Playbook." });
+      const offMembers = scenarios.filter((s) => ids.includes(s.id) && !s.enabled);
+      if (offMembers.length)
+        warnings.push({
+          text: `“${labelOf(n)}”: ${offMembers.length} repl${offMembers.length > 1 ? "ies" : "y"} in its collection ${offMembers.length > 1 ? "are" : "is"} toggled OFF and won't be matched: ${offMembers.map((s) => `“${snip(s.name, 24)}”`).join(", ")}.`,
+          suggestion: "Toggle them on in the Playbook, or remove them from the collection.",
+        });
       if (campaignSet)
         for (const id of ids)
           if (!campaignSet.has(id)) {
@@ -2237,8 +2259,15 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             return (
                               <ul className="space-y-1">
                                 {members.map((s) => (
-                                  <li key={s.id} className="rounded-md bg-gray-900/60 px-2 py-1.5">
-                                    <p className="text-[11px] font-medium text-gray-300">{s.name}</p>
+                                  <li key={s.id} className={`rounded-md bg-gray-900/60 px-2 py-1.5 ${s.enabled ? "" : "opacity-50"}`}>
+                                    <p className="flex items-center gap-1.5 text-[11px] font-medium text-gray-300">
+                                      <span className="min-w-0 truncate">{s.name}</span>
+                                      {!s.enabled && (
+                                        <span className="shrink-0 rounded-full bg-gray-700 px-1.5 py-px text-[9px] font-semibold text-gray-400" title="Toggled off in the Playbook — won't be matched on calls">
+                                          off
+                                        </span>
+                                      )}
+                                    </p>
                                     {s.description && <p className="mt-0.5 text-[10px] text-gray-500">{snip(s.description, 84)}</p>}
                                   </li>
                                 ))}
