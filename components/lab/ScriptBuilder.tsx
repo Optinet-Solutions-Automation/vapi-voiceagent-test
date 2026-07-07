@@ -32,6 +32,7 @@ import {
   updateHandler,
   listCollections,
   getCollectionHandlerIds,
+  setCollectionHandlers,
   getLabSettings,
   saveLabSettings,
 } from "@/lib/lab-db";
@@ -100,7 +101,7 @@ function sourceHandlesFor(
   // arrows still render via a hidden anchor on the box — see FlowNode.)
   const conns = connectors.map((c) => ({
     id: c.id,
-    label: c.label ? snip(c.label, 13) : "reply?",
+    label: c.label ? snip(c.label, 13) : undefined,
     color: "#34d399",
   }));
   if (isStart) return conns;
@@ -254,6 +255,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [scenarios, setScenarios] = useState<ListenerHandler[]>([]);
   const [collections, setCollections] = useState<ListenerCollection[]>([]);
   const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
+  const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -377,6 +379,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         setScenarios(hs);
         setCollections(cols);
         setActiveScriptId(settings?.active_script_id ?? null);
+        setActiveCollectionId(settings?.active_collection_id ?? null);
         if (initialScriptId) loadScript(initialScriptId);
         else if (scs.length && !scriptId) loadScript(scs[0].id);
       } catch (e: unknown) {
@@ -422,7 +425,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           source: e.source_node_id,
           target: e.target_node_id,
           sourceHandle: condRaw.handle as string,
-          label: scn ? snip(scn.name, 18) : value || "reply?",
+          label: scn ? snip(scn.name, 18) : "",
           style: { stroke: "#34d399" },
           data: { condition: condRaw },
           markerEnd: { type: MarkerType.ArrowClosed },
@@ -508,7 +511,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         const scn = conn?.intentKey ? scenarios.find((s) => s.intent_key === conn.intentKey) : undefined;
         return {
           condition: { kind: "intent", by: "intent", value: conn?.intentKey ?? "", handle: h },
-          visual: { label: scn ? snip(scn.name, 18) : "reply?", style: { stroke: "#34d399" } },
+          visual: { label: scn ? snip(scn.name, 18) : "", style: { stroke: "#34d399" } },
         };
       }
       return { condition: { kind: "plain", handle: h }, visual: edgeVisualByHandle(h) };
@@ -656,21 +659,21 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       setSelEdgeId(null);
     };
   });
-  function setConnectorIntent(nodeId: string, connId: string, intentKey: string) {
+  function setConnectorIntent(nodeId: string, connId: string, intentKey: string, scnName?: string) {
     const n = nodes.find((x) => x.id === nodeId);
     if (!n) return;
-    const scn = scenarios.find((s) => s.intent_key === intentKey);
+    const nm = scnName ?? scenarios.find((s) => s.intent_key === intentKey)?.name ?? intentKey;
     const cur = connectorsOf((n.data as NodeData).config);
     patchConfig(nodeId, {
-      connectors: cur.map((c) => (c.id === connId ? { ...c, intentKey, label: scn?.name ?? intentKey } : c)),
+      connectors: cur.map((c) => (c.id === connId ? { ...c, intentKey, label: nm } : c)),
     });
-    // Arrows already drawn from this dot follow the new pick.
+    // Arrows already drawn from this dot follow the new rule.
     setEdges((es) =>
       es.map((e) =>
         e.source === nodeId && e.sourceHandle === connId
           ? {
               ...e,
-              label: scn ? snip(scn.name, 18) : "reply?",
+              label: snip(nm, 18),
               data: { condition: { kind: "intent", by: "intent", value: intentKey, handle: connId } },
             }
           : e
@@ -682,6 +685,53 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (!n) return;
     patchConfig(nodeId, { connectors: connectorsOf((n.data as NodeData).config).filter((c) => c.id !== connId) });
     setEdges((es) => es.filter((e) => !(e.source === nodeId && e.sourceHandle === connId)));
+  }
+
+  // The connector's rule is authored as plain language — same as creating a
+  // scenario. A connector already bound to a scenario updates its
+  // description; a fresh connector gets a matcher scenario created
+  // (speak-nothing, action=ignore), added to the ACTIVE campaign collection
+  // (the scoped router can't match what isn't in it), and bound to the dot.
+  async function saveConnectorRule(sourceId: string, handle: string, text: string) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const node = nodes.find((n) => n.id === sourceId);
+    const conn = node ? connectorsOf((node.data as NodeData).config).find((c) => c.id === handle) : undefined;
+    const existing = conn?.intentKey ? scenarios.find((s) => s.intent_key === conn.intentKey) : undefined;
+    try {
+      if (existing) {
+        if (trimmed === (existing.description ?? "").trim()) return;
+        await updateHandler(existing.id, { description: trimmed });
+        setScenarios((ss) => ss.map((x) => (x.id === existing.id ? { ...x, description: trimmed } : x)));
+        return;
+      }
+      const scriptNm = (scripts.find((s) => s.id === scriptId)?.name ?? name).trim() || "Script";
+      const label = snip(trimmed, 40);
+      const taken = new Set(scenarios.map((s) => s.intent_key));
+      const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "reply";
+      let key = base;
+      for (let i = 2; taken.has(key); i++) key = `${base}_${i}`;
+      const h = await createHandler({
+        name: label,
+        intent_key: key,
+        description: trimmed,
+        response_template: "", // matcher only — never spoken
+        action_type: "ignore",
+        delivery: "verbatim",
+        tags: [scriptNm, "Reply detector"],
+        mode: "listener",
+        priority: 100,
+        enabled: true,
+      });
+      if (activeCollectionId) {
+        const ids = await getCollectionHandlerIds(activeCollectionId).catch(() => null);
+        if (ids && !ids.includes(h.id)) await setCollectionHandlers(activeCollectionId, [...ids, h.id]);
+      }
+      setScenarios((ss) => [h, ...ss]);
+      setConnectorIntent(sourceId, handle, key, h.name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save the rule");
+    }
   }
 
   function deleteSelected() {
@@ -1753,52 +1803,19 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                   return (
                     <>
                       <div>
-                        <label className="mb-1 block text-xs text-gray-400">This arrow fires when the reply is…</label>
-                        <select
-                          className={inputCls + " [color-scheme:dark]"}
-                          value={c?.value ?? ""}
-                          onChange={(e) => selEdge.source && setConnectorIntent(selEdge.source, h, e.target.value)}
-                        >
-                          <option value="">(pick the reply…)</option>
-                          <optgroup label="Expected replies">
-                            {scenarios.filter((s) => s.action_type === "ignore").map((s) => (
-                              <option key={s.id} value={s.intent_key}>{s.name}</option>
-                            ))}
-                          </optgroup>
-                          <optgroup label="All scenarios (matched by their description)">
-                            {scenarios
-                              .filter((s) => s.action_type !== "ignore" && !["first_message", "identity"].includes(s.intent_key))
-                              .map((s) => (
-                                <option key={s.id} value={s.intent_key}>{s.name}</option>
-                              ))}
-                          </optgroup>
-                        </select>
+                        <label className="mb-1 block text-xs text-gray-400">When should the agent use this?</label>
+                        <textarea
+                          className={inputCls + " min-h-[80px] resize-y"}
+                          value={connDescDrafts[h] ?? scn?.description ?? ""}
+                          onChange={(e) => setConnDescDrafts((m) => ({ ...m, [h]: e.target.value }))}
+                          onBlur={(e) => selEdge.source && saveConnectorRule(selEdge.source, h, e.target.value)}
+                          placeholder={'e.g. the customer agrees — "yes", "sure", "okay go ahead"'}
+                        />
+                        <p className="mt-1 text-[10px] text-gray-600">
+                          Describe the customer reply that should send the call down this arrow — same as when
+                          creating a scenario. Saved when you click away.
+                        </p>
                       </div>
-                      {scn && (
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">When should the agent use this?</label>
-                          <textarea
-                            className={inputCls + " min-h-[64px] resize-y"}
-                            value={connDescDrafts[scn.intent_key] ?? scn.description ?? ""}
-                            onChange={(e) => setConnDescDrafts((m) => ({ ...m, [scn.intent_key]: e.target.value }))}
-                            onBlur={async (e) => {
-                              const text = e.target.value.trim();
-                              if (text === (scn.description ?? "").trim()) return;
-                              try {
-                                await updateHandler(scn.id, { description: text });
-                                setScenarios((ss) => ss.map((x) => (x.id === scn.id ? { ...x, description: text } : x)));
-                              } catch (err) {
-                                setError(err instanceof Error ? err.message : "Failed to save the rule");
-                              }
-                            }}
-                            placeholder={'e.g. the customer agrees — "yes", "sure", "okay go ahead"'}
-                          />
-                          <p className="mt-1 text-[10px] text-gray-600">
-                            The route fires when the customer&rsquo;s reply matches this description. Saved to the
-                            scenario when you click away — it updates everywhere the scenario is used.
-                          </p>
-                        </div>
-                      )}
                       <button
                         onClick={() => {
                           if (selEdge.source) removeConnector(selEdge.source, h);
