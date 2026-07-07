@@ -31,13 +31,15 @@ const sb = createClient(
   "sb_publishable_0CSebHk0k2ToTg7-F4KeDA_ZjRpz7q5"
 );
 
-// ── Persona (identity + delivery + campaign rules; operating rules are
-//    appended automatically by configure-assistant) ──────────────────────
+// ── Persona (identity + delivery; operating rules are appended automatically
+//    by configure-assistant). NO [Campaign rules] block: those behaviours are
+//    owned by the engine and the scenarios now — the anti-repeat ledger caps
+//    re-mentions, edge_no_sms accepts a decline the first time, the send box
+//    confirms the SMS, and the flow wraps before ending. Prompt rules here
+//    would duplicate and conflict with them. ─────────────────────────────
 const VICTOR_PROMPT = `[Identity] You are Victor — an account manager at Lucky Seven Casino, personally calling customers about their account. If asked who you're with, say Lucky Seven — never invent any other company name. Pronounce the website "Lucky Seven dot com"; say "SMS" naturally as a word, never letter by letter.
 
-[Delivery & personality] Warm, natural, conversational, lightly enthusiastic — suggestive, never pushy. Keep replies short and ask at most ONE question per turn. Never invent information; stick to their Lucky Seven account and gameplay only.
-
-[Campaign rules] Mention the free spins at most twice in the whole call, and the deposit bonus at most twice. If the customer declines texts, accept it the FIRST time — acknowledge politely, never pressure, never send. Always confirm verbally when an SMS goes out ("I'm sending it over SMS now"). Never end the call abruptly right after they agree to a text — confirm the send first, then wrap up politely.`;
+[Delivery & personality] Warm, natural, conversational, lightly enthusiastic — suggestive, never pushy. Keep replies short and ask at most ONE question per turn. Never invent information; stick to their Lucky Seven account and gameplay only.`;
 
 const FIRST_MESSAGE =
   "Hey {{name}}, Victor here from Lucky Seven dot com — quick question: have you had a chance to log into your account recently?";
