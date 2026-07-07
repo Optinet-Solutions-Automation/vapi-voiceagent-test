@@ -406,6 +406,23 @@ export async function recentUnansweredFragment(
   return (prev.content ?? "").trim() || null;
 }
 
+/** Recent runs (calls) of a script, newest first — the builder's run history.
+ *  Every call that walked this script has a flow-state row, whether it was
+ *  started from the builder, the Lab, or production. */
+export async function listScriptRuns(
+  scriptId: string,
+  limit = 20
+): Promise<{ call_id: string; current_node_id: string | null; updated_at: string }[]> {
+  const { data, error } = await supabase
+    .from("lab_call_flow_state")
+    .select("call_id, current_node_id, updated_at")
+    .eq("script_id", scriptId)
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as { call_id: string; current_node_id: string | null; updated_at: string }[];
+}
+
 /** The call's memory of what has already been SAID: how many times each
  *  scenario was delivered so far (anti-repeat ledger). Insertion order =
  *  delivery order, so the first topics covered come first. */

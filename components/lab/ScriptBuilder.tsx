@@ -37,6 +37,7 @@ import {
   saveLabSettings,
   getFlowState,
   listLabCallEvents,
+  listScriptRuns,
   insertLabEvent,
 } from "@/lib/lab-db";
 import { getVapi, vapiErrorText } from "@/lib/vapi";
@@ -905,6 +906,44 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   // views (transcript / listener / thinking).
   const [runEvents, setRunEvents] = useState<LabCallEvent[]>([]);
   const [runPanelOpen, setRunPanelOpen] = useState(true);
+  // Run history: past calls of this script (null = closed).
+  const [history, setHistory] = useState<{ call_id: string; current_node_id: string | null; updated_at: string }[] | null>(null);
+  const [histBusy, setHistBusy] = useState(false);
+
+  async function openHistory() {
+    if (!scriptId) return;
+    setHistBusy(true);
+    setHistory([]);
+    try {
+      setHistory(await listScriptRuns(scriptId, 25));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load run history");
+      setHistory(null);
+    } finally {
+      setHistBusy(false);
+    }
+  }
+
+  // Replay a past run: load its events into the dock and paint its path on
+  // the canvas — the exact same views as a live run, in "ended" state.
+  async function viewRun(row: { call_id: string; current_node_id: string | null }) {
+    try {
+      const evs = await listLabCallEvents(row.call_id, 0);
+      const flowNodes = evs
+        .map((e) => (e.meta as Record<string, unknown> | null)?.toNode as string | undefined)
+        .filter((x): x is string => !!x);
+      const startId = nodes.find((n) => (n.data as NodeData).kind === "start")?.id;
+      const visited = [...new Set([...(startId ? [startId] : []), ...flowNodes])];
+      const spoken = [...evs].reverse().find((e) => e.event_type === "injected" || e.event_type === "agent_said");
+      lastRunEvId.current = evs.length ? evs[evs.length - 1].id : 0;
+      setRunEvents(evs);
+      setRunPanelOpen(true);
+      setRun({ callId: row.call_id, status: "ended", currentNodeId: row.current_node_id, visited, lastLine: spoken?.content ?? null });
+      setHistory(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load the run");
+    }
+  }
 
   // Built-in QA: everything that would keep a call from being a full
   // conversation — broken connections, dead ends, no way to finish, and
@@ -1517,6 +1556,18 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${activeScriptId === scriptId ? "left-[18px]" : "left-0.5"}`} />
             </button>
           </label>
+
+          {/* Run history: replay past calls of this script */}
+          <button
+            onClick={openHistory}
+            disabled={!scriptId || run.status === "live" || run.status === "connecting"}
+            title="Run history — replay past calls of this script"
+            className="rounded-lg border border-gray-700 p-2 text-gray-300 transition hover:bg-gray-800 disabled:opacity-40"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
 
           {/* Run: save → QA → live test call with the canvas as the monitor */}
           <button
@@ -2441,6 +2492,53 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           </div>
         )}
       </div>
+
+      {/* Run history — pick a past call to replay in the dock + on the canvas */}
+      {history !== null && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6" onClick={() => setHistory(null)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative flex max-h-[75vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-950 shadow-2xl"
+          >
+            <div className="border-b border-gray-800 px-5 py-3">
+              <p className="text-[10px] uppercase tracking-wider text-gray-500">Run history</p>
+              <p className="text-sm font-bold text-white">{scripts.find((s) => s.id === scriptId)?.name ?? "Script"}</p>
+            </div>
+            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-5 py-3">
+              {histBusy && <p className="py-4 text-center text-xs text-gray-500">Loading…</p>}
+              {!histBusy && history.length === 0 && (
+                <p className="py-4 text-center text-xs text-gray-500">No runs yet — hit ▶ Run to make the first one.</p>
+              )}
+              {history.map((r) => {
+                const endedAt = (nodes.find((n) => n.id === r.current_node_id)?.data as NodeData | undefined)?.label;
+                return (
+                  <button
+                    key={r.call_id}
+                    onClick={() => viewRun(r)}
+                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/50 px-3 py-2 text-left transition hover:border-gray-600 hover:bg-gray-900"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium text-gray-200">
+                        {new Date(r.updated_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                      <span className="block truncate text-[10px] text-gray-500">
+                        {endedAt ? `reached “${endedAt}”` : "position unknown (boxes changed since)"} · {r.call_id.slice(0, 8)}…
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-[11px] font-semibold text-emerald-400">Replay →</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex justify-end border-t border-gray-800 px-5 py-3">
+              <button onClick={() => setHistory(null)} className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Pre-flight QA results — gate before a test call can start */}
       {qa && (
