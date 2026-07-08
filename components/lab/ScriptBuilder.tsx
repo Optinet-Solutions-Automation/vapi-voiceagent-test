@@ -930,12 +930,22 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   type QaIssue = { text: string; suggestion?: string };
   type QaResult = { errors: QaIssue[]; warnings: QaIssue[] };
   type RunStatus = "idle" | "connecting" | "live" | "ended";
-  const [run, setRun] = useState<{ callId: string | null; status: RunStatus; currentNodeId: string | null; visited: string[]; lastLine: string | null }>({
+  const [run, setRun] = useState<{
+    callId: string | null;
+    status: RunStatus;
+    currentNodeId: string | null;
+    visited: string[];
+    lastLine: string | null;
+    /** The most recent box-to-box transition — INCLUDING self-hops (a
+     *  collection answering in place), which visited-dedup would hide. */
+    lastHop: { from: string; to: string } | null;
+  }>({
     callId: null,
     status: "idle",
     currentNodeId: null,
     visited: [],
     lastLine: null,
+    lastHop: null,
   });
   const [qa, setQa] = useState<QaResult | null>(null);
   const [qaBusy, setQaBusy] = useState(false);
@@ -992,7 +1002,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       lastRunEvId.current = evs.length ? evs[evs.length - 1].id : 0;
       setRunEvents(evs);
       setRunPanelOpen(true);
-      setRun({ callId: row.call_id, status: "ended", currentNodeId: row.current_node_id, visited, lastLine: spoken?.content ?? null });
+      setRun({ callId: row.call_id, status: "ended", currentNodeId: row.current_node_id, visited, lastLine: spoken?.content ?? null, lastHop: null });
       setHistory(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load the run");
@@ -1103,7 +1113,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       return;
     }
     if (run.status === "ended") {
-      setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null });
+      setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null, lastHop: null });
       setRunEvents([]);
       return;
     }
@@ -1136,7 +1146,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       lastRunEvId.current = 0;
       setRunEvents([]);
       setRunPanelOpen(true);
-      setRun({ callId: null, status: "connecting", currentNodeId: null, visited: [], lastLine: null });
+      setRun({ callId: null, status: "connecting", currentNodeId: null, visited: [], lastLine: null, lastHop: null });
       // Push webhook/persona config before dialing, same as the Lab's panel.
       await fetch("/api/lab/configure-assistant", {
         method: "POST",
@@ -1161,11 +1171,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         if (rendered)
           insertLabEvent({ call_id: call.id, event_type: "injected", role: "assistant", content: rendered, action_type: "opening", meta: { opening: true } }).catch(() => {});
       } else {
-        setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null });
+        setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null, lastHop: null });
       }
     } catch (err: unknown) {
       setError(vapiErrorText(err, "Failed to start the test call"));
-      setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null });
+      setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null, lastHop: null });
     }
   }
 
@@ -1175,7 +1185,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     } catch {
       /* already stopped */
     }
-    setRun((r) => (r.callId ? { ...r, status: "ended" } : { callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null }));
+    setRun((r) => (r.callId ? { ...r, status: "ended" } : { callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null, lastHop: null }));
   }
 
   // While the call runs, follow it: flow state says WHERE we are, the event
@@ -1195,12 +1205,24 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           const spoken = [...evs].reverse().find((e) => e.event_type === "injected" || e.event_type === "agent_said");
           const ended = evs.some((e) => e.event_type === "status" && ["ended", "end-of-call-report"].includes((e.content ?? "").trim()));
           const flowNodes = evs.map((e) => (e.meta as Record<string, unknown> | null)?.toNode as string | undefined).filter((x): x is string => !!x);
-          setRun((r) => ({
-            ...r,
-            lastLine: spoken?.content ?? r.lastLine,
-            status: ended ? "ended" : r.status,
-            visited: [...new Set([...r.visited, ...flowNodes])],
-          }));
+          setRun((r) => {
+            // Walk the hops in order so self-hops (a box answering in place)
+            // register too — that's the only visual signal for those turns.
+            let cur = r.currentNodeId;
+            let lastHop = r.lastHop;
+            for (const t of flowNodes) {
+              lastHop = { from: cur ?? t, to: t };
+              cur = t;
+            }
+            return {
+              ...r,
+              lastLine: spoken?.content ?? r.lastLine,
+              status: ended ? "ended" : r.status,
+              visited: [...new Set([...r.visited, ...flowNodes])],
+              currentNodeId: cur,
+              lastHop,
+            };
+          });
         }
         const nid = state?.current_node_id ?? null;
         if (nid)
@@ -1500,7 +1522,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           specIntent !== null &&
           e.source === run.currentNodeId &&
           (c.value === specIntent || (!specMatched && c.kind === "any"));
-        if (anticipated)
+        // The most recent hop pulses — including a self-loop answering in
+        // place, which the visited-pair trail can't show.
+        const justWalked = run.lastHop && e.source === run.lastHop.from && e.target === run.lastHop.to;
+        if (anticipated || justWalked)
           out = {
             ...out,
             animated: true,
@@ -1958,7 +1983,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                     {run.status === "ended" ? (
                       <button
                         onClick={() => {
-                          setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null });
+                          setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null, lastHop: null });
                           setRunEvents([]);
                         }}
                         className="shrink-0 rounded-full border border-gray-600 px-2.5 py-0.5 text-[11px] text-gray-300 hover:bg-gray-800"
