@@ -371,7 +371,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [scenarios, setScenarios] = useState<ListenerHandler[]>([]);
   const [collections, setCollections] = useState<ListenerCollection[]>([]);
   const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
-  const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
   // The VAPI assistant test calls dial — same setting the Listener Lab uses.
   const [labAssistantId, setLabAssistantId] = useState<string>("");
   // The full Lab configuration, opened via the cog into the right drawer.
@@ -499,7 +498,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         setScenarios(hs);
         setCollections(cols);
         setActiveScriptId(settings?.active_script_id ?? null);
-        setActiveCollectionId(settings?.active_collection_id ?? null);
         setLabAssistantId(((settings as unknown as { lab_assistant_id?: string } | null)?.lab_assistant_id ?? "") as string);
         if (initialScriptId) loadScript(initialScriptId);
         else if (scs.length && !scriptId) loadScript(scs[0].id);
@@ -575,6 +573,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setSelEdgeId(null);
     setLineDrafts({});
     setReplyDrafts({});
+    setConnDescDrafts({});
     setWarnings([]);
     try {
       const { rfNodes, rfEdges } = graphToFlow(await getScriptGraph(id));
@@ -933,19 +932,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
 
   function deleteSelected() {
     if (selNodeId) {
-      setNodes((ns) => ns.filter((n) => n.id !== selNodeId));
-      setEdges((es) => es.filter((e) => e.source !== selNodeId && e.target !== selNodeId));
-      setLineDrafts((m) => {
-        const next = { ...m };
-        delete next[selNodeId];
-        return next;
-      });
-      setReplyDrafts((m) => {
-        const next = { ...m };
-        delete next[selNodeId];
-        return next;
-      });
-      setSelNodeId(null);
+      deleteNode(selNodeId);
     } else if (selEdgeId) {
       setEdges((es) => es.filter((e) => e.id !== selEdgeId));
       setSelEdgeId(null);
@@ -1393,7 +1380,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (run.status === "idle") return;
     const t = setTimeout(() => rf?.fitView({ padding: 0.2, duration: 400 }), 350);
     return () => clearTimeout(t);
-  }, [run.status, runPanelOpen, dockFull, rf]);
+  }, [run.status, runPanelOpen, dockFull, paletteOpen, rf]);
 
   // Paint the call's position onto the canvas (display-only).
   const displayNodes = useMemo(() => {
