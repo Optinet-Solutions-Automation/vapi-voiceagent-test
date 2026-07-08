@@ -1366,7 +1366,7 @@ async function runScriptFlow(
       injectedText =
         `You've just moved into the "${target.label || "next"}" part of the call` +
         (stageMemberNames.length ? ` — it exists to handle: ${stageMemberNames.slice(0, 4).join("; ")}` : "") +
-        `. Bridge into it with ONE short, natural line that keeps the conversation moving. Never invent facts, activity, or offers.`;
+        `. Bridge into it with ONE short, neutral sentence. Never invent facts, activity, or offers, and ask nothing.`;
       stageGuidance = true;
     }
 
