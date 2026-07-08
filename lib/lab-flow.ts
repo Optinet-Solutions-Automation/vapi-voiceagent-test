@@ -107,10 +107,19 @@ export function pickNextEdge(
     return c.kind === "intent" || c.kind === "tag" || c.kind === "branch" || c.kind === "any";
   });
   if (conditional.length) {
+    // When a multi-part reply matches SEVERAL connectors, the customer's
+    // PRIMARY point routes: intents are checked in the router's importance
+    // order — never edge-creation order, which made the winner depend on
+    // which arrow happened to be drawn first.
+    for (const key of ctx.intents ?? [ctx.intent]) {
+      for (const e of conditional) {
+        const c = cond(e);
+        if ((c.by ?? c.kind) === "intent" && c.value === key) return e;
+      }
+    }
     for (const e of conditional) {
       const c = cond(e);
       const by = c.by ?? c.kind;
-      if (by === "intent" && c.value && (ctx.intents ?? [ctx.intent]).includes(c.value)) return e;
       if (by === "tag" && c.value && ctx.tags.includes(c.value)) return e;
       if (by === "result" && ctx.result && c.value === ctx.result) return e;
     }
