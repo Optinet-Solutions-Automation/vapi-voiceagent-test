@@ -14,6 +14,8 @@ import {
   assistantSpeaking,
   recentUnansweredFragment,
   getDeliveredHandlers,
+  agentSaidAfter,
+  latestEventId,
   getLastInjectedEvent,
   getRecentTurns,
   getCollectionHandlerIds,
@@ -1452,20 +1454,52 @@ async function runScriptFlow(
     }
     const controlUrl = await ctl();
     if (controlUrl) {
+      let deliveredAsNote = false;
+      const anchorId = await latestEventId(callId).catch(() => 0);
       if (ct === "send_sms") {
         await injectStaffNote(controlUrl, brief(injectedText), true);
+        deliveredAsNote = true;
       } else if (ct === "transfer") {
         await injectSay(controlUrl, injectedText, false);
       } else if (mergedText || sideMerged || stageGuidance) {
         // Merged multi-point replies and stage guidance are always briefings.
         await injectStaffNote(controlUrl, brief(injectedText), true);
+        deliveredAsNote = true;
       } else if (scenario) {
         // A verbatim say after the agent's own reply would restate/re-ask on
         // top of it, and a repeated line must never be spoken word-for-word
         // again — both become continuation notes.
-        scenario.delivery === "verbatim" && !alreadyReplied && priorRepeats === 0
-          ? await injectSay(controlUrl, injectedText, false)
-          : await injectStaffNote(controlUrl, brief(injectedText), true);
+        if (scenario.delivery === "verbatim" && !alreadyReplied && priorRepeats === 0) {
+          await injectSay(controlUrl, injectedText, false);
+        } else {
+          await injectStaffNote(controlUrl, brief(injectedText), true);
+          deliveredAsNote = true;
+        }
+      }
+      // Delivery watchdog: a triggered briefing can race the agent's own
+      // filler ("Perfect.") and get silently swallowed by the platform — the
+      // line is never voiced and the call stalls into idle nudges. Verify
+      // substantial speech follows; re-trigger the briefing ONCE if not.
+      if (deliveredAsNote) {
+        const watchdogBrief = brief(injectedText);
+        after(async () => {
+          await new Promise((r) => setTimeout(r, 5000));
+          try {
+            if (utteranceEventId != null && (await hasNewerUtterance(callId, utteranceEventId))) return;
+            if (await assistantSpeaking(callId)) return; // delivery in progress
+            if (await agentSaidAfter(callId, anchorId, 20)) return;
+            await log({
+              call_id: callId,
+              event_type: "skipped",
+              content: "briefing produced no speech — re-triggering once",
+              intent_key: intent,
+              meta: { flow: true, reason: "retrigger" },
+            });
+            await injectStaffNote(controlUrl, watchdogBrief, true);
+          } catch {
+            /* best effort */
+          }
+        });
       }
     }
     return true;

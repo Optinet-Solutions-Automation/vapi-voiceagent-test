@@ -465,6 +465,35 @@ export async function getSpeculated(
   return (cls as Record<string, unknown> | undefined) ?? null;
 }
 
+/** Newest event id for a call — a clock-free anchor for "did X happen after
+ *  this point" checks (server and DB clocks drift; row ids never lie). */
+export async function latestEventId(callId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("id")
+    .eq("call_id", callId)
+    .order("id", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return (data ?? [])[0]?.id ?? 0;
+}
+
+/** Did the agent say something SUBSTANTIAL after this anchor? Powers the
+ *  delivery watchdog: a triggered briefing can race the agent's own filler
+ *  ("Perfect.") and get swallowed — a short filler must not count as the
+ *  line having been voiced, so a minimum length filters it out. */
+export async function agentSaidAfter(callId: string, afterId: number, minLen = 0): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("content")
+    .eq("call_id", callId)
+    .eq("event_type", "agent_said")
+    .gt("id", afterId)
+    .limit(25);
+  if (error) throw new Error(error.message);
+  return (data ?? []).some((e) => (e.content ?? "").trim().length >= minLen);
+}
+
 /** Is the assistant speaking RIGHT NOW? True when its latest speech-update
  *  status event is a "started" without a later "stopped". Powers the speaking
  *  lock: a response-triggering injection over a mid-sentence agent produces

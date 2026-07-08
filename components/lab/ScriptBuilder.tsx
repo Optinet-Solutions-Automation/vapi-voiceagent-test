@@ -1954,6 +1954,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 no_settings: "no matching reply — ignored",
                 handler_ignore: "recognized, deliberately not answered",
                 flow_owns_action: "the flow owns this action — reactive stood down",
+                retrigger: "the line didn't get voiced — nudging the agent again",
               };
               // agent_said covers everything actually spoken (VAPI transcribes
               // the firstMessage too) — including our logged opening would
@@ -1987,11 +1988,14 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                   );
                 }
                 if (e.event_type === "classified") {
-                  const exp = (Array.isArray(m.expected) ? (m.expected as string[]) : []).slice(0, 3);
+                  // Verdict against the FULL expected set — displaying only the
+                  // first three once mislabelled a legit member as off-plan.
+                  const expFull = Array.isArray(m.expected) ? (m.expected as string[]) : [];
+                  const exp = expFull.slice(0, 3);
                   const heard = e.intent_key ?? "none";
-                  if (!exp.length) return `heard “${heard}” — no step expectations here`;
-                  return `step expected: ${exp.join(", ")} — heard “${heard}”${
-                    exp.includes(heard) ? " ✓ as planned" : heard === "none" ? " (just noise — holding position)" : " — off-plan, rerouting"
+                  if (!expFull.length) return `heard “${heard}” — no step expectations here`;
+                  return `step expected: ${exp.join(", ")}${expFull.length > 3 ? ", …" : ""} — heard “${heard}”${
+                    expFull.includes(heard) ? " ✓ as planned" : heard === "none" ? " (just noise — holding position)" : " — off-plan, rerouting"
                   }`;
                 }
                 if (e.event_type === "skipped") return REASON_TEXT[(m.reason as string) ?? ""] ?? `skipped (${(m.reason as string) ?? "?"})`;
