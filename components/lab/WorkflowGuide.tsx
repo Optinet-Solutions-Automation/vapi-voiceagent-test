@@ -174,7 +174,7 @@ export default function WorkflowGuide({ onOpenConfig, onOpenLogs }: Props) {
               </li>
             ))}
           </ol>
-          {step.tip && <p className="mt-3 max-w-3xl text-[11px] text-gray-500">💡 {step.tip}</p>}
+          {step.tip && <p className="mt-3 max-w-3xl text-[11px] text-gray-500">Tip: {step.tip}</p>}
           {step.action && (
             <div className="mt-3">
               {step.action.href ? (

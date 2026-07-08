@@ -2760,7 +2760,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               ))}
               {!qa.errors.length && !qa.warnings.length && (
                 <p className="py-4 text-center text-sm text-gray-400">
-                  Every box has a line, every connector has a rule and an arrow, and the call can reach the end. 🎉
+                  Every box has a line, every connector has a rule and an arrow, and the call can reach the end.
                 </p>
               )}
             </div>
