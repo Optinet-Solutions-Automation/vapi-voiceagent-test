@@ -32,7 +32,10 @@ const COLLECTION = "Sample — Discovery Q&A";
 const SCENARIOS = [
   // Basic
   { name: "Sample — customer agrees", intent_key: "sample_basic_yes", tags: [BASIC, "Reply detector"], description: "The customer agrees or confirms — yes, yeah, sure, okay, sounds good, go ahead.", response_template: "", action_type: "ignore", delivery: "verbatim", mode: "listener", priority: 100 },
-  { name: "Sample — the pitch", intent_key: "sample_basic_pitch", tags: [BASIC], description: "SPEAK-ONLY: the sample pitch line, delivered by the script. Not a customer reply.", response_template: "Great — quick heads up: there's a welcome discount already sitting on your account this week. You just log in and it's applied automatically, nothing to pay.", action_type: "answer", delivery: "reword", mode: "both", priority: 100 },
+  // Lines never START with an acknowledgement ("Great —") — the agent adds
+  // its own approved filler, and an ack-prefixed line stacks into "Nice.
+  // Love to hear it. Great." triple-acks.
+  { name: "Sample — the pitch", intent_key: "sample_basic_pitch", tags: [BASIC], description: "SPEAK-ONLY: the sample pitch line, delivered by the script. Not a customer reply.", response_template: "Quick heads up: there's a welcome discount already sitting on your account this week. You just log in and it's applied automatically, nothing to pay.", action_type: "answer", delivery: "reword", mode: "both", priority: 100 },
   { name: "Sample — goodbye", intent_key: "sample_goodbye", tags: [BASIC, ADV], description: "SPEAK-ONLY: the sample goodbye line. Not a customer reply.", response_template: "Thanks for your time today — have a great one. Goodbye!", action_type: "answer", delivery: "verbatim", mode: "both", priority: 100 },
   // Advanced — matchers
   { name: "Sample — shows interest", intent_key: "sample_adv_interested", tags: [ADV, "Reply detector"], description: "The customer agrees, confirms, or sounds open to hearing more — yes, sure, okay, go on, tell me more.", response_template: "", action_type: "ignore", delivery: "verbatim", mode: "listener", priority: 100 },
@@ -45,7 +48,7 @@ const SCENARIOS = [
   { name: "Sample — is this legit?", intent_key: "sample_qa_legit", tags: [ADV, "Q&A"], description: "Customer is suspicious — asks if this is real, a scam, or too good to be true.", response_template: "Totally fair to check — I'm not asking for any payment or card details. You can log in directly yourself, without any link from me, and see it on your account.", action_type: "answer", delivery: "reword", mode: "both", priority: 22 },
   // Advanced — else line + SMS confirmation
   { name: "Sample — discovery else line", intent_key: "sample_adv_else", tags: [ADV], description: "SPEAK-ONLY: spoken at the discovery stage when no Q&A member fits the reply. Not a customer reply.", response_template: "Quick version: your account has a welcome discount waiting this week. I can text you the direct link — want me to send it over?", action_type: "answer", delivery: "reword", mode: "both", priority: 100 },
-  { name: "Sample — SMS confirmation", intent_key: "sample_adv_sms", tags: [ADV], description: "SPEAK-ONLY: the dispatch confirmation spoken as the sample SMS goes out. Not a customer reply.", response_template: "Perfect — the text with your link is going out right now. It'll be from us, arriving in a few seconds.", action_type: "send_sms", delivery: "verbatim", mode: "both", priority: 100 },
+  { name: "Sample — SMS confirmation", intent_key: "sample_adv_sms", tags: [ADV], description: "SPEAK-ONLY: the dispatch confirmation spoken as the sample SMS goes out. Not a customer reply.", response_template: "The text with your link is going out right now — it'll be from us, arriving in a few seconds.", action_type: "send_sms", delivery: "verbatim", mode: "both", priority: 100 },
 ];
 
 // ── Wipe previous copies (scripts, their nodes/edges, sample rows) ──

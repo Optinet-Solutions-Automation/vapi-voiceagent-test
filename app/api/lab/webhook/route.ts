@@ -842,10 +842,13 @@ async function handleTranscript(
     const scriptClamp = settings.active_script_id
       ? " Deliver ONLY that, then stop — no added follow-up question of your own; the script decides what comes next."
       : "";
+    const reactPhrase = settings.active_script_id
+      ? "open with at most ONE filler from your approved list (or none), then deliver:"
+      : "react to that naturally in your own words, then:";
     const brief = (t: string) =>
       (alreadyReplied
         ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
-        : `The customer just said: "${turnText.slice(0, 160)}" — react to that naturally in your own words, then: ${t}`) +
+        : `The customer just said: "${turnText.slice(0, 160)}" — ${reactPhrase} ${t}`) +
       scriptClamp +
       repeatLine +
       coveredLine;
@@ -1343,7 +1346,7 @@ async function runScriptFlow(
     const brief = (t: string) =>
       (alreadyReplied
         ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
-        : `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`) +
+        : `The customer just said: "${utterance.slice(0, 140)}" — open with at most ONE filler from your approved list (or none), then deliver: ${t}`) +
       " Deliver ONLY that, then stop — no added follow-up question of your own; the script decides what comes next." +
       repeatLine +
       coveredLine;
