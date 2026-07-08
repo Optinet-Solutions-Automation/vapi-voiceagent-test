@@ -62,7 +62,13 @@ export async function POST(req: Request) {
     identityScenario?.response_template?.trim() || settings?.short_prompt?.trim() || DEFAULT_SHORT_PROMPT;
   // The wait-phrase ban is bookended: first line of the prompt AND inside the
   // hard rules — it kept leaking from an end-only position.
-  const prompt = `ABSOLUTE RULE — never say "hold on", "hold on a sec", "one moment", "just a sec", "just a moment", "give me a second", "please hold" or any wait-phrase, in any situation, ever. If you need a beat: one tiny casual filler ("mm-hmm", "okay so—") or silence.\n\n${persona}\n\n${LAB_OPERATING_RULES}`;
+  // Script mode: the flow owns the conversation's direction. Without this,
+  // the model fills injection latency by inventing whole topics ("How's
+  // everything been going on the site lately?") that aren't in the script.
+  const scriptRule = settings?.active_script_id
+    ? `\n8. This call follows a script — the SYSTEM chooses every next move, never you. After a short customer reply ("yes", "no", "okay", a nod), give at most ONE tiny acknowledgement ("perfect.", "got it.") and WAIT for the supplied line. Do not start topics, do not ask your own questions — the only question you may ask on your own is a clarification of something the customer just said.`
+    : "";
+  const prompt = `ABSOLUTE RULE — never say "hold on", "hold on a sec", "one moment", "just a sec", "just a moment", "give me a second", "please hold" or any wait-phrase, in any situation, ever. If you need a beat: one tiny casual filler ("mm-hmm", "okay so—") or silence.\n\n${persona}\n\n${LAB_OPERATING_RULES}${scriptRule}`;
 
   const model = assistant.model ?? {};
   let messages: Array<{ role: string; content: string }> = model.messages ?? [];
