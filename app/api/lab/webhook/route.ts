@@ -1180,6 +1180,14 @@ async function runScriptFlow(
     const ct = contentTypeOf(target);
     const cfg = target.config as Record<string, unknown>;
 
+    // A deactivated box never speaks or acts — the walk passes through it and
+    // its outgoing connectors route the same turn.
+    if (cfg.disabled === true) {
+      currentNodeId = target.id;
+      note("", target, ct, edgeCond, null, "disabled_skipped");
+      continue;
+    }
+
     // ── Control / pass-through boxes: advance on the same turn ──
     if (ct === "noop" || ct === "ifelse" || ct === "loop") {
       currentNodeId = target.id;
@@ -1239,7 +1247,8 @@ async function runScriptFlow(
       if (await staleNow()) return true;
       await waitForAgentSilence(callId); // speaking lock
       if (await staleNow()) return true;
-      const text = scn?.response_template || "Thanks for your time today. Goodbye!";
+      const goodbyeStatements = (((cfg.statements as string[]) ?? []).map((s) => (s ?? "").trim()).filter(Boolean));
+      const text = [scn?.response_template || "Thanks for your time today. Goodbye!", ...goodbyeStatements].join(" ");
       // Goodbye delivery honours the scenario: exact line → spoken verbatim
       // with the hangup attached; reword → briefed, hangup follows shortly.
       const rewordGoodbye = scn?.delivery === "reword" && !!scn?.response_template;
@@ -1377,6 +1386,13 @@ async function runScriptFlow(
       injectedText = mergedText;
     } else if (scenario) {
       injectedText = scenario.response_template ?? "";
+    }
+
+    // Additional statements: author-attached lines that ALWAYS ride along
+    // with this box's response — appended in order, same single reply.
+    const extraStatements = ((cfg.statements as string[]) ?? []).map((s) => (s ?? "").trim()).filter(Boolean);
+    if (extraStatements.length) {
+      injectedText = [injectedText, ...extraStatements].filter(Boolean).join(" ");
     }
 
     // A collection entered with nothing specific to say (no default line, no

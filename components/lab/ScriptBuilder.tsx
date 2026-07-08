@@ -135,6 +135,8 @@ function sourceHandlesFor(
 // The canvas node lives outside the component tree that owns state, so the
 // "+ connector" click is routed through this module-scope holder.
 const addConnectorRef: { fn: (nodeId: string) => void } = { fn: () => {} };
+// Hover-toolbar actions (duplicate / toggle active / delete), same pattern.
+const nodeActionRef: { fn: (nodeId: string, action: "duplicate" | "toggle" | "delete") => void } = { fn: () => {} };
 
 function FlowNode({ id, data, selected }: NodeProps) {
   const d = data as NodeData;
@@ -160,11 +162,57 @@ function FlowNode({ id, data, selected }: NodeProps) {
         : selected
           ? "ring-2 ring-white/60"
           : "";
+  const nodeDisabled = d.config.disabled === true;
   return (
     <div
-      className={`max-w-[420px] rounded-lg border-2 px-3 ${labelled ? "pb-7 pt-2" : "py-2"} text-left shadow ${meta.color} ${ring}`}
+      className={`group max-w-[420px] rounded-lg border-2 px-3 ${labelled ? "pb-7 pt-2" : "py-2"} text-left shadow ${meta.color} ${ring} ${nodeDisabled ? "opacity-50" : ""}`}
       style={{ minWidth: Math.max(160, handles.length * 64) }}
     >
+      {/* Hover toolbar: duplicate / activate-deactivate / delete */}
+      <div className="pointer-events-none absolute -top-3.5 right-1 z-10 hidden gap-1 group-hover:flex">
+        {!isStart && (
+          <button
+            title="Duplicate this box"
+            onClick={(e) => {
+              e.stopPropagation();
+              nodeActionRef.fn(id, "duplicate");
+            }}
+            className="nodrag nopan pointer-events-auto flex h-5 w-5 items-center justify-center rounded border border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white"
+          >
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          </button>
+        )}
+        {!isStart && (
+          <button
+            title={nodeDisabled ? "Activate this box" : "Deactivate — the call passes through it without speaking"}
+            onClick={(e) => {
+              e.stopPropagation();
+              nodeActionRef.fn(id, "toggle");
+            }}
+            className={`nodrag nopan pointer-events-auto flex h-5 w-5 items-center justify-center rounded border bg-gray-800 hover:bg-gray-700 ${
+              nodeDisabled ? "border-amber-500/60 text-amber-300" : "border-gray-600 text-gray-300 hover:text-white"
+            }`}
+          >
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </button>
+        )}
+        <button
+          title="Delete this box"
+          onClick={(e) => {
+            e.stopPropagation();
+            nodeActionRef.fn(id, "delete");
+          }}
+          className="nodrag nopan pointer-events-auto flex h-5 w-5 items-center justify-center rounded border border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-rose-400"
+        >
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
+      </div>
       {!isStart && (
         <Handle
           type="target"
@@ -172,7 +220,10 @@ function FlowNode({ id, data, selected }: NodeProps) {
           style={{ width: 13, height: 13, top: 4, background: "#94a3b8", border: "2px solid #0f172a" }}
         />
       )}
-      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-300">{meta.label}</p>
+      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-300">
+        {meta.label}
+        {nodeDisabled && <span className="rounded-full bg-gray-700 px-1.5 py-px text-[9px] font-semibold normal-case text-gray-400">inactive</span>}
+      </p>
       <p className="truncate text-sm font-medium text-white">{d.label || meta.label}</p>
       {d.subtitle && <p className="mt-0.5 truncate text-[11px] text-gray-400">{d.subtitle}</p>}
       {d.note && <p className="mt-0.5 line-clamp-2 text-[10px] italic text-gray-500">{d.note}</p>}
@@ -718,7 +769,55 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       setSelNodeId(nodeId);
       setSelEdgeId(null);
     };
+    nodeActionRef.fn = (nodeId: string, action: "duplicate" | "toggle" | "delete") => {
+      if (action === "delete") deleteNode(nodeId);
+      else if (action === "duplicate") duplicateNode(nodeId);
+      else {
+        const n = nodes.find((x) => x.id === nodeId);
+        if (n) patchConfig(nodeId, { disabled: !((n.data as NodeData).config.disabled === true) });
+      }
+    };
   });
+
+  function deleteNode(nodeId: string) {
+    setNodes((ns) => ns.filter((n) => n.id !== nodeId));
+    setEdges((es) => es.filter((e) => e.source !== nodeId && e.target !== nodeId));
+    setLineDrafts((m) => {
+      const next = { ...m };
+      delete next[nodeId];
+      return next;
+    });
+    setReplyDrafts((m) => {
+      const next = { ...m };
+      delete next[nodeId];
+      return next;
+    });
+    if (selNodeId === nodeId) setSelNodeId(null);
+  }
+
+  // Duplicate = same content and config, FRESH connector ids (edges reference
+  // connector ids, and the copy's dots must not adopt the original's arrows).
+  function duplicateNode(nodeId: string) {
+    const n = nodes.find((x) => x.id === nodeId);
+    if (!n || (n.data as NodeData).kind === "start") return;
+    const d = n.data as NodeData;
+    const config = {
+      ...d.config,
+      connectors: connectorsOf(d.config).map((c) => ({ ...c, id: "c:" + crypto.randomUUID() })),
+    };
+    const id = crypto.randomUUID();
+    setNodes((ns) => [
+      ...ns,
+      {
+        id,
+        type: "lab",
+        position: { x: n.position.x + 48, y: n.position.y + 48 },
+        data: annotate({ ...d, label: `${d.label || "Box"} (copy)`, config }),
+      },
+    ]);
+    setSelNodeId(id);
+    setSelEdgeId(null);
+  }
   function setConnectorIntent(nodeId: string, connId: string, intentKey: string, scnName?: string) {
     const n = nodes.find((x) => x.id === nodeId);
     if (!n) return;
@@ -1883,6 +1982,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                   return `advised: this was already said ${m.repeated}× — rephrase with new emphasis, don't recite`;
                 const lb = nodeLabel(m.toNode);
                 if (m.mode === "skipped_ahead") return `passed through ${lb ? `“${lb}”` : "a box"} — the reply answered past it`;
+                if (m.mode === "disabled_skipped") return `passed through ${lb ? `“${lb}”` : "a box"} — it's deactivated`;
                 return `moved to ${lb ? `“${lb}”` : "the next box"}`;
               };
               // Pinned observer line: what the current box is waiting for —
@@ -2245,6 +2345,47 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
 
                 {sd.kind === "step" && (
                   <>
+                    {["scenario", "collection", "send_sms", "end", "transfer"].includes(content) &&
+                      (() => {
+                        const stmts = (sd.config.statements as string[]) ?? [];
+                        const setStmts = (arr: string[]) => patchConfig(selNode.id, { statements: arr });
+                        return (
+                          <div>
+                            <label className="mb-1 block text-xs text-gray-400">
+                              Additional statements <span className="text-gray-600">(always added to this box&rsquo;s reply)</span>
+                            </label>
+                            {stmts.map((s, i) => (
+                              <div key={i} className="mb-1.5 flex items-start gap-1.5">
+                                <textarea
+                                  className={inputCls + " min-h-[44px] resize-y"}
+                                  value={s}
+                                  onChange={(e) => setStmts(stmts.map((x, j) => (j === i ? e.target.value : x)))}
+                                  placeholder="e.g. Also — this offer expires Sunday."
+                                />
+                                <button
+                                  onClick={() => setStmts(stmts.filter((_, j) => j !== i))}
+                                  className="mt-1 shrink-0 text-sm text-gray-500 hover:text-rose-400"
+                                  title="Remove statement"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                            <button
+                              onClick={() => setStmts([...stmts, ""])}
+                              className="rounded-md border border-dashed border-gray-600 px-2 py-1 text-[11px] text-gray-400 transition hover:border-indigo-500 hover:text-indigo-300"
+                            >
+                              + Add statement
+                            </button>
+                            {stmts.length > 0 && (
+                              <p className="mt-1 text-[10px] text-gray-600">
+                                Spoken with the box&rsquo;s line, in order, inside the SAME single reply.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                     {content === "scenario" && draft && (
                       <>
                         <div>
