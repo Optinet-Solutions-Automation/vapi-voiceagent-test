@@ -66,7 +66,7 @@ export async function POST(req: Request) {
   // the model fills injection latency by inventing whole topics ("How's
   // everything been going on the site lately?") that aren't in the script.
   const scriptRule = settings?.active_script_id
-    ? `\n8. This call follows a script — the SYSTEM chooses every next move, never you. After a short customer reply ("yes", "no", "okay", a nod), give at most ONE tiny acknowledgement ("perfect.", "got it.") and WAIT for the supplied line. Waiting means SILENCE: say nothing more, never repeat one of your earlier lines as filler, never ask a question of your own. When a supplied line arrives, deliver it and STOP — no added follow-up question; the system decides what comes next.`
+    ? `\n8. This call follows a script — the SYSTEM chooses every next move and supplies every answer, never you. After EVERY customer turn — a yes, a no, an objection, even a direct question — give at most ONE tiny acknowledgement or bridge ("perfect.", "fair question—") and WAIT for the supplied line. Never answer a question yourself, never re-introduce yourself, never pitch, never ask your own question: the answer is already on its way, and answering twice ruins the call. Waiting means SILENCE after the acknowledgement — no repeating earlier lines as filler. When a supplied line arrives, deliver it and STOP.`
     : "";
   const prompt = `ABSOLUTE RULE — never say "hold on", "hold on a sec", "one moment", "just a sec", "just a moment", "give me a second", "please hold" or any wait-phrase, in any situation, ever. If you need a beat: one tiny casual filler ("mm-hmm", "okay so—") or silence.\n\n${persona}\n\n${LAB_OPERATING_RULES}${scriptRule}`;
 
