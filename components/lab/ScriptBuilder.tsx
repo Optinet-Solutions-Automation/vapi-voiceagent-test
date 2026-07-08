@@ -40,6 +40,7 @@ import {
   getFlowState,
   listLabCallEvents,
   listScriptRuns,
+  utteranceCounts,
   insertLabEvent,
 } from "@/lib/lab-db";
 import { getVapi, vapiErrorText } from "@/lib/vapi";
@@ -52,8 +53,6 @@ type Content =
   | "collection"
   | "subworkflow"
   | "wait"
-  | "ifelse"
-  | "loop"
   | "noop"
   | "send_sms"
   | "transfer"
@@ -65,8 +64,6 @@ const CONTENT_META: Record<Content, { label: string; color: string; terminal?: b
   collection: { label: "Collection", color: "border-fuchsia-500 bg-fuchsia-500/10" },
   subworkflow: { label: "Sub-workflow", color: "border-teal-500 bg-teal-500/10" },
   wait: { label: "Wait", color: "border-sky-500 bg-sky-500/10" },
-  ifelse: { label: "If / Else", color: "border-yellow-500 bg-yellow-500/10" },
-  loop: { label: "Loop", color: "border-amber-500 bg-amber-500/10" },
   noop: { label: "No-op", color: "border-gray-500 bg-gray-500/10" },
   send_sms: { label: "Send SMS", color: "border-amber-500 bg-amber-500/10" },
   transfer: { label: "Transfer", color: "border-orange-500 bg-orange-500/10", terminal: true },
@@ -98,7 +95,7 @@ const snip = (t: string, n: number) => {
 // the other connectors didn't claim ("anything other than yes", "after this
 // box continue no matter what"). Ids are "c:<uuid>" so they're
 // distinguishable from the fixed handles (out/then/else/loop/exit) everywhere.
-type Connector = { id: string; intentKey: string; label?: string; any?: boolean };
+type Connector = { id: string; intentKey: string; label?: string; any?: boolean; quickWords?: string };
 const isConnectorHandle = (h: string | null | undefined): h is string => !!h && h.startsWith("c:");
 const connectorsOf = (config: Record<string, unknown>): Connector[] =>
   Array.isArray(config.connectors) ? (config.connectors as Connector[]) : [];
@@ -118,16 +115,6 @@ function sourceHandlesFor(
   }));
   if (isStart) return conns;
   if (CONTENT_META[content].terminal) return [];
-  if (content === "ifelse")
-    return [
-      { id: "then", label: "Then", color: "#34d399" },
-      { id: "else", label: "Else", color: "#f87171" },
-    ];
-  if (content === "loop")
-    return [
-      { id: "loop", label: "Repeat", color: "#f59e0b" },
-      { id: "exit", label: "Exit", color: "#9ca3af" },
-    ];
   return conns;
 }
 
@@ -145,7 +132,7 @@ function FlowNode({ id, data, selected }: NodeProps) {
   const meta = isStart ? { label: "Start call", color: "border-emerald-500 bg-emerald-500/10" } : CONTENT_META[content];
   const handles = sourceHandlesFor(isStart, content, connectorsOf(d.config));
   const labelled = handles.some((h) => h.label);
-  const canAddConnector = isStart || (!CONTENT_META[content].terminal && content !== "ifelse" && content !== "loop");
+  const canAddConnector = isStart || !CONTENT_META[content].terminal;
   // React Flow caches each node's handle layout — without this, a dot added
   // to an already-wired box isn't connectable and existing arrows keep
   // anchoring to the old positions.
@@ -243,7 +230,9 @@ function FlowNode({ id, data, selected }: NodeProps) {
             />
             {h.label && (
               <span
-                className="absolute bottom-[18px] max-w-[72px] -translate-x-1/2 truncate text-[8px] font-semibold text-gray-300"
+                className={`absolute bottom-[18px] max-w-[72px] -translate-x-1/2 truncate text-[8px] font-semibold text-gray-300 ${
+                  selected || d.runState === "current" ? "" : "hidden group-hover:block"
+                }`}
                 style={{ left }}
               >
                 {h.label}
@@ -345,16 +334,7 @@ function legacyToContent(type: string): Content | null {
   }
 }
 
-type EdgeCond = { kind: "plain" | "branch" | "loop"; by?: string; value?: string; maxLoops?: number };
-function normalizeCondition(c: Record<string, unknown> | undefined): EdgeCond {
-  const k = (c?.kind as string) ?? "plain";
-  if (k === "plain" || k === "branch" || k === "loop") return c as EdgeCond;
-  if (k === "always") return { kind: "plain" };
-  if (k === "intent") return { kind: "branch", by: "intent", value: c?.value as string };
-  if (k === "tag") return { kind: "branch", by: "tag", value: c?.value as string };
-  if (k === "else") return { kind: "branch", by: "else" };
-  return { kind: "plain" };
-}
+
 
 type Props = { onClose: () => void; initialScriptId?: string | null };
 
@@ -387,8 +367,88 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lineDrafts, setLineDrafts] = useState<Record<string, LineDraft>>({});
-  // Plain-language "expected reply" drafts for If/Else boxes, keyed by node id.
-  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+
+  // ── Dirty tracking + undo/redo ──────────────────────────────
+  // Every canvas mutation snapshots the graph first (coalesced for typing),
+  // marks the script dirty (Save enables, leaving warns), and Ctrl+Z walks
+  // back through up to 50 steps.
+  const [dirty, setDirty] = useState(false);
+  const undoStack = useRef<Array<{ nodes: Node[]; edges: Edge[] }>>([]);
+  const redoStack = useRef<Array<{ nodes: Node[]; edges: Edge[] }>>([]);
+  const lastSnapAt = useRef(0);
+  const nodesRef = useRef<Node[]>([]);
+  const edgesRef = useRef<Edge[]>([]);
+  nodesRef.current = nodes;
+  edgesRef.current = edges;
+  const cloneGraph = () => JSON.parse(JSON.stringify({ nodes: nodesRef.current, edges: edgesRef.current })) as { nodes: Node[]; edges: Edge[] };
+  function snapshot(coalesceMs = 0) {
+    setDirty(true);
+    const now = Date.now();
+    if (coalesceMs && now - lastSnapAt.current < coalesceMs) return;
+    lastSnapAt.current = now;
+    undoStack.current.push(cloneGraph());
+    if (undoStack.current.length > 50) undoStack.current.shift();
+    redoStack.current = [];
+  }
+  function undo() {
+    const prev = undoStack.current.pop();
+    if (!prev) return;
+    redoStack.current.push(cloneGraph());
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+    setDirty(true);
+  }
+  function redo() {
+    const nxt = redoStack.current.pop();
+    if (!nxt) return;
+    undoStack.current.push(cloneGraph());
+    setNodes(nxt.nodes);
+    setEdges(nxt.edges);
+    setDirty(true);
+  }
+  function confirmDiscard(): boolean {
+    return !dirty || window.confirm("You have unsaved changes. Discard them?");
+  }
+  // Drag moves snapshot once per drag, not per pixel.
+  const dragSnapped = useRef(false);
+  const handleNodesChange: typeof onNodesChange = (changes) => {
+    const dragging = changes.some((c) => c.type === "position" && (c as { dragging?: boolean }).dragging === true);
+    const dropped = changes.some((c) => c.type === "position" && (c as { dragging?: boolean }).dragging === false);
+    if (dragging && !dragSnapped.current) {
+      snapshot();
+      dragSnapped.current = true;
+    }
+    if (dropped) dragSnapped.current = false;
+    onNodesChange(changes);
+  };
+  // Keyboard: Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, and Delete routed through OUR
+  // delete (React Flow's default skips the draft cleanup).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+      if (typing) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selNodeId || selEdgeId) {
+          e.preventDefault();
+          deleteSelected();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   // Non-blocking issues found at save time.
   const [warnings, setWarnings] = useState<string[]>([]);
 
@@ -451,15 +511,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (c === "send_sms") return scenarioLine(d.scenarioId) ? `“${scenarioLine(d.scenarioId)}”` : "(click to write the confirmation)";
     if (c === "transfer") return (d.config.number as string) || "(phone number)";
     if (c === "return") return `↩ ${(d.config.resultName as string) || "result"}`;
-    if (c === "ifelse") {
-      const by = (d.config.condBy as string) ?? "intent";
-      const val = (d.config.condValue as string) ?? "";
-      if (by === "result") return `if result = ${val || "?"}`;
-      if (by === "tag") return `if reply tagged ${val || "?"}`;
-      const scn = scenarios.find((s) => s.intent_key === val);
-      return `if reply ≈ ${scn ? snip(scn.name, 30) : val || "?"}`;
-    }
-    if (c === "loop") return `up to ${(d.config.maxLoops as number) ?? 3}×`;
     if (c === "wait") return "wait for caller";
     if (c === "end") return scenarioLine(d.scenarioId) ? `“${scenarioLine(d.scenarioId)}”` : null;
     return null;
@@ -469,11 +520,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   function noteFor(d: NodeData): string | null {
     if (d.kind !== "step") return null;
     const c = (d.config.contentType as Content) ?? "scenario";
-    if (c === "ifelse") {
-      if (((d.config.condBy as string) ?? "intent") !== "intent") return null;
-      const scn = scenarios.find((s) => s.intent_key === ((d.config.condValue as string) ?? ""));
-      return scn?.description ? snip(`Then when: ${scn.description}`, 72) : null;
-    }
     if (!LINE_CONTENT.includes(c)) return null;
     const s = d.scenarioId ? scenarios.find((x) => x.id === d.scenarioId) : undefined;
     const t = c === "transfer" ? (s?.response_template ?? "").trim() : (s?.description ?? "").trim();
@@ -552,15 +598,14 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           markerEnd: { type: MarkerType.ArrowClosed },
         };
       }
-      const cond = normalizeCondition(condRaw);
-      const handle = (condRaw.handle as string | undefined) ?? legacyHandle(cond);
+      const handle = (condRaw.handle as string | undefined) ?? "out";
       return {
         id: e.id,
         source: e.source_node_id,
         target: e.target_node_id,
-        sourceHandle: handle && handle !== "out" ? handle : undefined,
-        ...edgeVisualByHandle(handle),
-        data: { condition: { ...cond, handle } },
+        sourceHandle: handle !== "out" ? handle : undefined,
+        ...plainEdgeVisual(),
+        data: { condition: { ...condRaw, handle } },
         markerEnd: { type: MarkerType.ArrowClosed },
       };
     });
@@ -572,9 +617,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setSelNodeId(null);
     setSelEdgeId(null);
     setLineDrafts({});
-    setReplyDrafts({});
     setConnDescDrafts({});
     setWarnings([]);
+    setDirty(false);
+    undoStack.current = [];
+    redoStack.current = [];
     try {
       const { rfNodes, rfEdges } = graphToFlow(await getScriptGraph(id));
       setNodes(rfNodes);
@@ -601,25 +648,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     }
   }
 
-  // Legacy condition edges → a handle name so old graphs still render sensibly.
-  function legacyHandle(c: EdgeCond): string {
-    if (c.kind === "loop") return "loop";
-    if (c.kind === "branch") return c.by === "else" ? "else" : "then";
-    return "out";
-  }
-  function edgeVisualByHandle(handle?: string): Partial<Edge> {
-    switch (handle) {
-      case "then":
-        return { label: "Then", style: { stroke: "#34d399" } };
-      case "else":
-        return { label: "Else", style: { stroke: "#f87171" } };
-      case "loop":
-        return { label: "Repeat", animated: true, style: { stroke: "#f59e0b", strokeDasharray: "5 4" } };
-      case "exit":
-        return { label: "Exit", style: { stroke: "#9ca3af" } };
-      default:
-        return { label: "", style: { stroke: "#6b7280" } };
-    }
+  function plainEdgeVisual(): Partial<Edge> {
+    return { label: "", style: { stroke: "#6b7280" } };
   }
 
   // Condition + visual for an arrow leaving a given handle: a reply connector
@@ -641,7 +671,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           visual: { label: scn ? snip(scn.name, 18) : "", style: { stroke: "#34d399" } },
         };
       }
-      return { condition: { kind: "plain", handle: h }, visual: edgeVisualByHandle(h) };
+      return { condition: { kind: "plain", handle: h }, visual: plainEdgeVisual() };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [nodes, scenarios]
@@ -649,6 +679,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
 
   const onConnect = useCallback(
     (c: Connection) => {
+      snapshot();
       const bits = edgeBitsForHandle(c.source, c.sourceHandle);
       // Without an explicit id, xyflow names the edge "xy-edge__…" — the DB
       // id column is uuid, so every save would be rejected.
@@ -682,6 +713,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     reconnectOk.current = false;
   }
   function onReconnect(oldEdge: Edge, c: Connection) {
+    snapshot();
     reconnectOk.current = true;
     const bits = edgeBitsForHandle(c.source, c.sourceHandle);
     setEdges((els) =>
@@ -703,6 +735,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
 
   // ── Add / drag nodes ──
   function dropNode(data: NodeData, position?: { x: number; y: number }) {
+    snapshot();
     const id = crypto.randomUUID();
     annotate(data);
     setNodes((ns) => [...ns, { id, type: "lab", position: position ?? { x: 140 + ns.length * 30, y: 80 + ns.length * 30 }, data }]);
@@ -718,7 +751,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     const content = payload as Content;
     if (!CONTENT_META[content]) return;
     const config: Record<string, unknown> = { contentType: content };
-    if (content === "ifelse") config.condBy = "intent"; // default: branch on the customer's reply
     dropNode({ kind: "step", label: CONTENT_META[content].label, scenarioId: null, config }, position);
   }
   function onDragStartPalette(e: React.DragEvent, payload: string) {
@@ -752,6 +784,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   ];
 
   function patchNodeData(id: string, patch: Partial<NodeData>) {
+    snapshot(800);
     setNodes((ns) =>
       ns.map((n) => {
         if (n.id !== id) return n;
@@ -761,6 +794,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     );
   }
   function patchConfig(id: string, patch: Record<string, unknown>) {
+    snapshot(800);
     setNodes((ns) =>
       ns.map((n) => {
         if (n.id !== id) return n;
@@ -796,14 +830,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   });
 
   function deleteNode(nodeId: string) {
+    snapshot();
     setNodes((ns) => ns.filter((n) => n.id !== nodeId));
     setEdges((es) => es.filter((e) => e.source !== nodeId && e.target !== nodeId));
     setLineDrafts((m) => {
-      const next = { ...m };
-      delete next[nodeId];
-      return next;
-    });
-    setReplyDrafts((m) => {
       const next = { ...m };
       delete next[nodeId];
       return next;
@@ -816,6 +846,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   function duplicateNode(nodeId: string) {
     const n = nodes.find((x) => x.id === nodeId);
     if (!n || (n.data as NodeData).kind === "start") return;
+    snapshot();
     const d = n.data as NodeData;
     const config = {
       ...d.config,
@@ -860,6 +891,17 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (!n) return;
     patchConfig(nodeId, { connectors: connectorsOf((n.data as NodeData).config).filter((c) => c.id !== connId) });
     setEdges((es) => es.filter((e) => !(e.source === nodeId && e.sourceHandle === connId)));
+  }
+
+  // Quick match words: exact short replies made only of these words route
+  // instantly — zero router latency (the webhook's quickMatch fast path).
+  function setConnectorQuick(nodeId: string, connId: string, quickWords: string) {
+    const n = nodes.find((x) => x.id === nodeId);
+    if (!n) return;
+    snapshot(800);
+    patchConfig(nodeId, {
+      connectors: connectorsOf((n.data as NodeData).config).map((c) => (c.id === connId ? { ...c, quickWords } : c)),
+    });
   }
 
   // Toggle a connector between a specific reply and "any other reply"
@@ -934,6 +976,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (selNodeId) {
       deleteNode(selNodeId);
     } else if (selEdgeId) {
+      snapshot();
       setEdges((es) => es.filter((e) => e.id !== selEdgeId));
       setSelEdgeId(null);
     }
@@ -943,9 +986,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   // spoken lines on Scenario/End boxes, and "expected reply" matchers on
   // If/Else boxes (speak-nothing scenarios the router classifies against).
   // Returns nodeId → new scenario id (lines) and nodeId → intent key (replies).
-  async function persistInlineLines(): Promise<{ created: Map<string, string>; replies: Map<string, string> }> {
+  async function persistInlineLines(): Promise<{ created: Map<string, string> }> {
     const created = new Map<string, string>();
-    const replies = new Map<string, string>();
     const scriptNm = (scripts.find((s) => s.id === scriptId)?.name ?? name).trim() || "Script";
     const takenKeys = new Set(scenarios.map((s) => s.intent_key));
     const makeKey = (label: string) => {
@@ -959,39 +1001,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       const d = n.data as NodeData;
       const ct = (d.config.contentType as Content) ?? "scenario";
       if (d.kind !== "step") continue;
-
-      if (ct === "ifelse") {
-        if (((d.config.condBy as string) ?? "intent") === "result") continue;
-        const draft = replyDrafts[n.id];
-        if (draft === undefined) continue; // untouched box
-        const desc = draft.trim();
-        if (!desc) continue;
-        const cur = scenarios.find((s) => s.intent_key === ((d.config.condValue as string) ?? ""));
-        if (cur) {
-          // Only expected-reply entries are editable from here; real scenarios
-          // keep their description (edit it in the Playbook or its own box).
-          if (cur.action_type === "ignore" && desc !== (cur.description ?? "").trim()) {
-            await updateHandler(cur.id, { description: desc });
-          }
-        } else {
-          const label = d.label.trim() || snip(desc, 40);
-          const key = makeKey(label);
-          await createHandler({
-            name: label,
-            intent_key: key,
-            description: desc,
-            response_template: "", // matcher only — never spoken
-            action_type: "ignore",
-            delivery: "verbatim",
-            tags: [scriptNm, "Reply detector"],
-            mode: "listener",
-            priority: 100,
-            enabled: true,
-          });
-          replies.set(n.id, key);
-        }
-        continue;
-      }
 
       if (!LINE_CONTENT.includes(ct) && ct !== "collection") continue; // collection: the Else line
       const draft = lineDrafts[n.id];
@@ -1028,7 +1037,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         created.set(n.id, h.id);
       }
     }
-    return { created, replies };
+    return { created };
   }
 
   // ── Run mode: live test call with "you are here" on the canvas ──
@@ -1060,7 +1069,20 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   const [runEvents, setRunEvents] = useState<LabCallEvent[]>([]);
   const [runPanelOpen, setRunPanelOpen] = useState(true);
   // Dock sizing: drag the top edge to resize, or toggle fullscreen.
-  const [dockH, setDockH] = useState(240);
+  const [dockH, setDockH] = useState(() => {
+    try {
+      return Number(window.localStorage.getItem("lab_dock_h")) || 240;
+    } catch {
+      return 240;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("lab_dock_h", String(dockH));
+    } catch {
+      /* private mode */
+    }
+  }, [dockH]);
   const [dockFull, setDockFull] = useState(false);
   function startDockDrag(e: React.MouseEvent) {
     e.preventDefault();
@@ -1076,7 +1098,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     window.addEventListener("mouseup", up);
   }
   // Run history: past calls of this script (null = closed).
-  const [history, setHistory] = useState<{ call_id: string; current_node_id: string | null; updated_at: string }[] | null>(null);
+  const [history, setHistory] = useState<{ call_id: string; current_node_id: string | null; updated_at: string; turns?: number }[] | null>(null);
   const [histBusy, setHistBusy] = useState(false);
 
   async function openHistory() {
@@ -1084,7 +1106,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setHistBusy(true);
     setHistory([]);
     try {
-      setHistory(await listScriptRuns(scriptId, 25));
+      const rows = await listScriptRuns(scriptId, 25);
+      const counts = await utteranceCounts(rows.map((r) => r.call_id)).catch(() => ({}) as Record<string, number>);
+      setHistory(rows.map((r) => ({ ...r, turns: counts[r.call_id] ?? 0 })));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load run history");
       setHistory(null);
@@ -1183,7 +1207,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         errors.push({ text: `“${lb}” has no collection picked.`, suggestion: "Click the box and pick the collection of replies it should answer." });
       if (ct === "subworkflow" && !d.config.subworkflowId) errors.push({ text: `“${lb}” has no workflow picked.` });
       if (ct === "transfer" && !((d.config.number as string) ?? "").trim()) warnings.push({ text: `“${lb}” has no phone number.` });
-      if (!isTerminal(n) && ct !== "ifelse" && ct !== "loop" && reach.has(n.id) && outsOf(n.id).length === 0)
+      if (!isTerminal(n) && reach.has(n.id) && outsOf(n.id).length === 0)
         warnings.push({ text: `“${lb}” is a dead end — the call parks there until the customer hangs up.`, suggestion: "Add a reply connector (e.g. the customer says okay / goodbye) leading onward or to an End call box." });
     }
 
@@ -1225,7 +1249,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (!scriptId) return;
     setQaBusy(true);
     try {
-      await handleSave(); // the runtime walks the DB, not the canvas
+      if (dirty) await handleSave(); // auto-save before running — the runtime walks the DB
       setQa(await preflight());
     } finally {
       setQaBusy(false);
@@ -1417,20 +1441,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       if (ct === "subworkflow" && !d.config.subworkflowId) w.push(`“${label}” has no workflow picked.`);
       if (ct === "transfer" && !((d.config.number as string) ?? "").trim()) w.push(`“${label}” has no phone number.`);
       if (ct === "collection" && !d.config.collectionId) w.push(`“${label}” has no collection picked.`);
-      if (ct === "ifelse") {
-        const outs = outsOf(n.id);
-        if (!outs.some((e) => handleOf(e) === "then")) w.push(`“${label}” has no Then arrow.`);
-        if (!outs.some((e) => handleOf(e) === "else")) w.push(`“${label}” has no Else arrow — unmatched replies would stall there.`);
-        const by = (d.config.condBy as string) ?? "intent";
-        const val = ((d.config.condValue as string) ?? "").trim();
-        if (by === "result" && !val) w.push(`“${label}” has no result value set.`);
-        if (by !== "result" && !val && !(replyDrafts[n.id] ?? "").trim()) w.push(`“${label}” has no expected reply set.`);
-      }
-      if (ct === "loop") {
-        const outs = outsOf(n.id);
-        if (!outs.some((e) => handleOf(e) === "loop")) w.push(`“${label}” has no Repeat arrow.`);
-        if (!outs.some((e) => handleOf(e) === "exit")) w.push(`“${label}” has no Exit arrow.`);
-      }
     }
     // Exactly one entry point is expected: the Start box, or (in a phase
     // sub-workflow without one) a single unconnected first box.
@@ -1447,12 +1457,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setNotice(null);
     setError(null);
     try {
-      const { created, replies } = await persistInlineLines();
+      const { created } = await persistInlineLines();
       const scenarioIdFor = (n: Node) => created.get(n.id) ?? (n.data as NodeData).scenarioId;
-      const configFor = (n: Node) => {
-        const d = n.data as NodeData;
-        return replies.has(n.id) ? { ...d.config, condBy: "intent", condValue: replies.get(n.id) } : d.config ?? {};
-      };
+      const configFor = (n: Node) => (n.data as NodeData).config ?? {};
       const nodeRows = nodes.map((n) => {
         const d = n.data as NodeData;
         const ct = (d.config.contentType ?? "scenario") as Content;
@@ -1497,13 +1504,12 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       await saveScriptGraph(scriptId, nodeRows, edgeRows);
       // Reflect newly created scenarios/reply matchers on their boxes, refresh
       // the Playbook list, and drop drafts so they reseed from saved data.
-      if (created.size || replies.size) {
+      if (created.size) {
         setNodes((ns) =>
           ns.map((n) => {
-            if (!created.has(n.id) && !replies.has(n.id)) return n;
+            if (!created.has(n.id)) return n;
             const d = { ...(n.data as NodeData) };
-            if (created.has(n.id)) d.scenarioId = created.get(n.id)!;
-            if (replies.has(n.id)) d.config = { ...d.config, condBy: "intent", condValue: replies.get(n.id) };
+            d.scenarioId = created.get(n.id)!;
             return { ...n, data: d };
           })
         );
@@ -1512,7 +1518,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       setWarnings(found);
       setScenarios(await listHandlers());
       setLineDrafts({});
-      setReplyDrafts({});
+      setDirty(false);
       setNotice(found.length ? `Saved — ${found.length} thing${found.length > 1 ? "s" : ""} to check.` : "Script saved.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save");
@@ -1563,6 +1569,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       ? lineDrafts[selNode.id] ?? seedDraft(sd)
       : null;
   function patchDraft(nodeId: string, base: LineDraft, patch: Partial<LineDraft>) {
+    setDirty(true);
     setLineDrafts((m) => ({ ...m, [nodeId]: { ...(m[nodeId] ?? base), ...patch } }));
     // Live-preview the line and description on the canvas box while typing.
     const next = { ...base, ...patch };
@@ -1665,64 +1672,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
   // keyed by scenario intent key; saved to the Playbook scenario on blur.
   const [connDescDrafts, setConnDescDrafts] = useState<Record<string, string>>({});
 
-  // If/Else on result: offer the results actually declared by the Return
-  // boxes of whichever sub-workflow(s) feed this box, instead of free text.
-  const [subResults, setSubResults] = useState<Record<string, string[]>>({});
-  const feedingSubIds = useMemo(() => {
-    if (!selNode || content !== "ifelse") return [] as string[];
-    const ids = edges
-      .filter((e) => e.target === selNode.id)
-      .map((e) => nodes.find((n) => n.id === e.source))
-      .map((n) => (n ? (n.data as NodeData) : null))
-      .filter((d): d is NodeData => !!d && (d.config.contentType as Content) === "subworkflow")
-      .map((d) => d.config.subworkflowId as string | undefined)
-      .filter((x): x is string => !!x);
-    return Array.from(new Set(ids));
-  }, [selNode, content, edges, nodes]);
-  useEffect(() => {
-    feedingSubIds
-      .filter((id) => !(id in subResults))
-      .forEach(async (id) => {
-        try {
-          const g = await getScriptGraph(id);
-          const results = Array.from(
-            new Set(
-              g.nodes
-                .filter((n) => ((n.config as Record<string, unknown>)?.contentType as string) === "return")
-                .map((n) => ((((n.config as Record<string, unknown>)?.resultName as string) || n.label || "done") + "").trim())
-                .filter(Boolean)
-            )
-          );
-          setSubResults((m) => ({ ...m, [id]: results }));
-        } catch {
-          setSubResults((m) => ({ ...m, [id]: [] }));
-        }
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feedingSubIds]);
-  const resultOptions = Array.from(new Set(feedingSubIds.flatMap((id) => subResults[id] ?? [])));
-
-  // If/Else "expected reply": the scenario the condition currently points at,
-  // and the plain-language draft describing what counts as a match.
-  const condScn =
-    sd && content === "ifelse"
-      ? scenarios.find((s) => s.intent_key === ((sd.config.condValue as string) ?? "")) ?? null
-      : null;
-  const replyEditable = !condScn || condScn.action_type === "ignore";
-  const replyDraft = selNode && sd && content === "ifelse" ? replyDrafts[selNode.id] ?? condScn?.description ?? "" : "";
-  function patchReplyDraft(nodeId: string, value: string) {
-    setReplyDrafts((m) => ({ ...m, [nodeId]: value }));
-    // Live-preview the matching rule on the canvas box.
-    setNodes((ns) =>
-      ns.map((n) => {
-        if (n.id !== nodeId) return n;
-        const d = { ...(n.data as NodeData) };
-        d.note = value.trim() ? snip(`Then when: ${value}`, 72) : null;
-        return { ...n, data: d };
-      })
-    );
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-950">
       {/* Top bar */}
@@ -1730,7 +1679,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         {/* Script switcher — open any script without leaving the builder */}
         <select
           value={scriptId ?? ""}
-          onChange={(e) => e.target.value && loadScript(e.target.value)}
+          onChange={(e) => e.target.value && confirmDiscard() && loadScript(e.target.value)}
           title="Open another script"
           className="w-56 shrink-0 rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-200 focus:border-indigo-500 focus:outline-none [color-scheme:dark]"
         >
@@ -1831,7 +1780,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           </button>
 
           {/* Save */}
-          <button onClick={handleSave} disabled={!scriptId || busy} title="Save" className="rounded-lg bg-indigo-600 p-2 text-white transition hover:bg-indigo-500 disabled:opacity-40">
+          <button onClick={handleSave} disabled={!scriptId || busy || !dirty} title={dirty ? "Save" : "No changes to save"} className="rounded-lg bg-indigo-600 p-2 text-white transition hover:bg-indigo-500 disabled:opacity-40">
             {busy ? (
               <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" strokeDasharray="42" strokeLinecap="round" /></svg>
             ) : (
@@ -1851,7 +1800,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           </button>
 
           {/* Close */}
-          <button onClick={onClose} title="Close" className="rounded-lg border border-gray-700 p-2 text-gray-300 transition hover:bg-gray-800">
+          <button onClick={() => confirmDiscard() && onClose()} title="Close" className="rounded-lg border border-gray-700 p-2 text-gray-300 transition hover:bg-gray-800">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -2218,7 +2167,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
             <ReactFlow
               nodes={displayNodes}
               edges={displayEdges}
-              onNodesChange={onNodesChange}
+              onNodesChange={handleNodesChange}
+              deleteKeyCode={null}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
               onReconnect={onReconnect}
@@ -2358,10 +2308,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                         const stmts = (sd.config.statements as string[]) ?? [];
                         const setStmts = (arr: string[]) => patchConfig(selNode.id, { statements: arr });
                         return (
-                          <div>
-                            <label className="mb-1 block text-xs text-gray-400">
-                              Additional statements <span className="text-gray-600">(always added to this box&rsquo;s reply)</span>
-                            </label>
+                          <details className="rounded-lg border border-gray-800" open={stmts.length > 0}>
+                            <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-300">
+                              Additional statements ({stmts.length})
+                            </summary>
+                            <div className="p-2.5">
                             {stmts.map((s, i) => (
                               <div key={i} className="mb-1.5 flex items-start gap-1.5">
                                 <textarea
@@ -2390,7 +2341,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                                 Spoken with the box&rsquo;s line, in order, inside the SAME single reply.
                               </p>
                             )}
-                          </div>
+                            </div>
+                          </details>
                         );
                       })()}
 
@@ -2750,147 +2702,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                       </p>
                     )}
 
-                    {content === "ifelse" && (
-                      <>
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">Branch on</label>
-                          <select
-                            className={inputCls + " [color-scheme:dark]"}
-                            value={((sd.config.condBy as string) ?? "intent") === "result" ? "result" : "intent"}
-                            onChange={(e) => patchConfig(selNode.id, { condBy: e.target.value, condValue: "" })}
-                          >
-                            <option value="intent">The customer&rsquo;s reply</option>
-                            <option value="result">The last sub-workflow&rsquo;s result</option>
-                          </select>
-                        </div>
-
-                        {((sd.config.condBy as string) ?? "intent") !== "result" ? (
-                          <>
-                            {replyEditable ? (
-                              <div>
-                                <label className="mb-1 block text-xs text-gray-400">When the customer&rsquo;s reply is…</label>
-                                <textarea
-                                  className={inputCls + " min-h-[70px] resize-y"}
-                                  value={replyDraft}
-                                  onChange={(e) => patchReplyDraft(selNode.id, e.target.value)}
-                                  placeholder={'e.g. they agree — "yes", "sure", "text me", "sounds good"'}
-                                />
-                                <p className="mt-1 text-[10px] text-gray-600">
-                                  Describe the reply in plain words — replies that fit go down <strong>Then</strong>.
-                                </p>
-                              </div>
-                            ) : (
-                              <div>
-                                <label className="mb-1 block text-xs text-gray-400">When the customer&rsquo;s reply is…</label>
-                                <p className="rounded-md bg-gray-900/60 p-1.5 text-[10px] italic text-gray-500">
-                                  {condScn?.description || condScn?.name}
-                                </p>
-                                <p className="mt-1 text-[10px] text-gray-600">
-                                  Matching comes from &ldquo;{condScn?.name}&rdquo; — edit that scenario&rsquo;s description
-                                  to change what counts.
-                                </p>
-                              </div>
-                            )}
-
-                            <details className="rounded-lg border border-gray-800">
-                              <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-300">
-                                Advanced
-                              </summary>
-                              <div className="p-2.5">
-                                <label className="mb-1 block text-xs text-gray-400">Match an existing scenario instead</label>
-                                <select
-                                  className={inputCls + " [color-scheme:dark]"}
-                                  value={(sd.config.condValue as string) ?? ""}
-                                  onChange={(e) => {
-                                    patchConfig(selNode.id, { condBy: "intent", condValue: e.target.value });
-                                    setReplyDrafts((m) => {
-                                      const next = { ...m };
-                                      delete next[selNode.id];
-                                      return next;
-                                    });
-                                  }}
-                                >
-                                  <option value="">(new expected reply for this box)</option>
-                                  <optgroup label="Expected replies">
-                                    {scenarios.filter((s) => s.action_type === "ignore").map((s) => (
-                                      <option key={s.id} value={s.intent_key}>{s.name}</option>
-                                    ))}
-                                  </optgroup>
-                                  <optgroup label="All scenarios (matched by their description)">
-                                    {scenarios.filter((s) => s.action_type !== "ignore" && s.intent_key !== "first_message").map((s) => (
-                                      <option key={s.id} value={s.intent_key}>{s.name}</option>
-                                    ))}
-                                  </optgroup>
-                                </select>
-                              </div>
-                            </details>
-
-                            <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
-                              Replies that fit the description follow the green <strong>Then</strong> dot; anything else
-                              follows the red <strong>Else</strong> dot. One-off questions with a Playbook answer are
-                              answered in place and re-checked on the next reply.
-                            </p>
-                          </>
-                        ) : (
-                          <>
-                            <div>
-                              <label className="mb-1 block text-xs text-gray-400">If the result equals</label>
-                              {resultOptions.length > 0 ? (
-                                <select
-                                  className={inputCls + " [color-scheme:dark]"}
-                                  value={(sd.config.condValue as string) ?? ""}
-                                  onChange={(e) => patchConfig(selNode.id, { condBy: "result", condValue: e.target.value })}
-                                >
-                                  <option value="">(pick a result)</option>
-                                  {resultOptions.map((r) => (
-                                    <option key={r} value={r}>{r}</option>
-                                  ))}
-                                  {!!(sd.config.condValue as string) && !resultOptions.includes(sd.config.condValue as string) && (
-                                    <option value={sd.config.condValue as string}>{sd.config.condValue as string} (custom)</option>
-                                  )}
-                                </select>
-                              ) : (
-                                <>
-                                  <input
-                                    className={inputCls}
-                                    value={(sd.config.condValue as string) ?? ""}
-                                    onChange={(e) => patchConfig(selNode.id, { condBy: "result", condValue: e.target.value })}
-                                    placeholder="e.g. interested"
-                                  />
-                                  <p className="mt-1 text-[10px] text-gray-600">
-                                    Connect this box after a Sub-workflow to pick from its declared results.
-                                  </p>
-                                </>
-                              )}
-                            </div>
-                            <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
-                              Checks the result returned by the last sub-workflow&rsquo;s <strong>Return</strong> box
-                              (e.g. a pitch phase returning <strong>interested</strong>). Green <strong>Then</strong> dot
-                              for a match, red <strong>Else</strong> dot for everything else.
-                            </p>
-                          </>
-                        )}
-                      </>
-                    )}
-
-                    {content === "loop" && (
-                      <>
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">Max repeats</label>
-                          <input
-                            type="number"
-                            className={inputCls}
-                            value={(sd.config.maxLoops as number) ?? 3}
-                            onChange={(e) => patchConfig(selNode.id, { maxLoops: Number(e.target.value) || 1 })}
-                          />
-                        </div>
-                        <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
-                          Connect the <strong>Repeat</strong> dot back to the box(es) to repeat, and the
-                          <strong> Exit</strong> dot to where the call continues once the limit is hit.
-                        </p>
-                      </>
-                    )}
-
                     {content === "return" && (
                       <div>
                         <label className="mb-1 block text-xs text-gray-400">Result <span className="text-gray-600">(handed back to the parent workflow)</span></label>
@@ -2987,6 +2798,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                         </span>
                       </label>
                       {!isAny && (
+                      <>
                       <div>
                         <label className="mb-1 block text-xs text-gray-400">When should the agent use this?</label>
                         <textarea
@@ -3001,6 +2813,25 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                           creating a scenario. Saved when you click away.
                         </p>
                       </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-400">
+                          Quick match words <span className="text-gray-600">(optional — instant routing)</span>
+                        </label>
+                        <input
+                          className={inputCls}
+                          value={(() => {
+                            const srcN = selEdge.source ? nodes.find((n) => n.id === selEdge.source) : undefined;
+                            return srcN ? connectorsOf((srcN.data as NodeData).config).find((x) => x.id === h)?.quickWords ?? "" : "";
+                          })()}
+                          onChange={(e) => selEdge.source && setConnectorQuick(selEdge.source, h, e.target.value)}
+                          placeholder="yes, yeah, yup, sure, okay"
+                        />
+                        <p className="mt-1 text-[10px] text-gray-600">
+                          A short reply made ONLY of these words takes this arrow with zero thinking time — no
+                          router call at all. Leave empty to always use the router.
+                        </p>
+                      </div>
+                      </>
                       )}
                       <button
                         onClick={() => {
@@ -3068,7 +2899,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                         {new Date(r.updated_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                       </span>
                       <span className="block truncate text-[10px] text-gray-500">
-                        {endedAt ? `reached “${endedAt}”` : "position unknown (boxes changed since)"} · {r.call_id.slice(0, 8)}…
+                        {endedAt ? `reached “${endedAt}”` : "position unknown (boxes changed since)"} · {r.turns ?? 0} turn{(r.turns ?? 0) === 1 ? "" : "s"} · {r.call_id.slice(0, 8)}…
                       </span>
                     </span>
                     <span className="shrink-0 text-[11px] font-semibold text-emerald-400">Replay →</span>

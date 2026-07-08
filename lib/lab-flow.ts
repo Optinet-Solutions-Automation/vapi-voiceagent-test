@@ -35,19 +35,12 @@ export function contentTypeOf(node: ListenerScriptNode): string {
   return "noop";
 }
 
-type Cond = { kind?: string; by?: string; value?: string; maxLoops?: number; handle?: string };
+type Cond = { kind?: string; by?: string; value?: string; handle?: string };
 function cond(e: ListenerScriptEdge): Cond {
   return (e.condition ?? {}) as Cond;
 }
 function handleOf(e: ListenerScriptEdge): string {
-  const c = cond(e);
-  if (c.handle) return c.handle;
-  // legacy: derive from old condition shape
-  if (c.kind === "loop") return "loop";
-  if (c.kind === "branch") return c.by === "else" ? "else" : "then";
-  if (c.kind === "intent" || c.kind === "tag") return "then";
-  if (c.kind === "else") return "else";
-  return "out";
+  return cond(e).handle ?? "out";
 }
 
 export type FlowCtx = {
@@ -56,16 +49,14 @@ export type FlowCtx = {
   intents?: string[];
   tags: string[];
   result: string | null;
-  /** read/increment a per-edge loop counter; returns the new count */
-  bumpLoop?: (edgeId: string) => number;
 };
 
 /**
- * Pick the outgoing edge to follow from a node. Routing now lives in the box:
- * - if/else boxes evaluate their condition → take the `then` or `else` handle
- * - loop boxes take `loop` until the max is hit, then `exit`
- * - everything else takes its single outgoing edge
- * Legacy condition-edges are still honoured.
+ * Pick the outgoing edge to follow from a node. Reply connectors carry the
+ * routing: a connector whose reply matches wins (customer's primary intent
+ * first), then the "any other reply" catch-all, then a plain default edge.
+ * With connectors and no catch-all/default, stay parked (null) — the
+ * Playbook answers and the box re-checks on the next reply.
  */
 export function pickNextEdge(
   node: ListenerScriptNode,
@@ -74,37 +65,10 @@ export function pickNextEdge(
 ): ListenerScriptEdge | null {
   const outs = edges.filter((e) => e.source_node_id === node.id);
   if (outs.length === 0) return null;
-  const ct = contentTypeOf(node);
-  const cfg = (node.config ?? {}) as Record<string, unknown>;
 
-  if (ct === "ifelse") {
-    const by = (cfg.condBy as string) ?? "intent";
-    const value = (cfg.condValue as string) ?? "";
-    let truthy = false;
-    // Multi-part replies ("yes — and how much is it?") match on ANY intent.
-    if (by === "intent") truthy = !!value && (ctx.intents ?? [ctx.intent]).includes(value);
-    else if (by === "tag") truthy = !!value && ctx.tags.includes(value);
-    else if (by === "result") truthy = !!ctx.result && value === ctx.result;
-    const want = truthy ? "then" : "else";
-    return outs.find((e) => handleOf(e) === want) ?? outs.find((e) => handleOf(e) === "out") ?? null;
-  }
-
-  if (ct === "loop") {
-    const max = (cfg.maxLoops as number) ?? 3;
-    const n = ctx.bumpLoop ? ctx.bumpLoop(node.id) : 1;
-    const want = n <= max ? "loop" : "exit";
-    return outs.find((e) => handleOf(e) === want) ?? null;
-  }
-
-  // Reply connectors: the condition lives on the edge itself (the connector
-  // model; also the legacy pre-if/else shape). A connector whose reply
-  // matches wins; otherwise an "any other reply" catch-all connector fires;
-  // otherwise the default "out" connector. With reply connectors and NO
-  // catch-all or default, stay parked (null) — the Playbook answers and the
-  // box re-checks its connectors on the next reply.
   const conditional = outs.filter((e) => {
     const c = cond(e);
-    return c.kind === "intent" || c.kind === "tag" || c.kind === "branch" || c.kind === "any";
+    return c.kind === "intent" || c.kind === "tag" || c.kind === "any";
   });
   if (conditional.length) {
     // When a multi-part reply matches SEVERAL connectors, the customer's
@@ -123,12 +87,7 @@ export function pickNextEdge(
       if (by === "tag" && c.value && ctx.tags.includes(c.value)) return e;
       if (by === "result" && ctx.result && c.value === ctx.result) return e;
     }
-    return (
-      outs.find((e) => cond(e).kind === "any") ??
-      outs.find((e) => handleOf(e) === "else") ??
-      outs.find((e) => handleOf(e) === "out") ??
-      null
-    );
+    return outs.find((e) => cond(e).kind === "any") ?? outs.find((e) => handleOf(e) === "out") ?? null;
   }
 
   // Plain: first outgoing connector.

@@ -170,6 +170,68 @@ async function expectedIntentKeys(
   return [...new Set(keys)];
 }
 
+// ── Instant path: quick-word connector matching (no LLM at all) ──
+// Connectors can carry author-defined "quick words" (yes, yeah, yup…). A
+// short reply whose every meaningful token is on a connector's quick list
+// routes instantly — zero router latency for the most common turns.
+const QUICK_NOISE = new Set(["uh", "um", "mm", "hmm", "erm", "ah", "oh", "well", "so"]);
+async function quickMatch(callId: string, utterance: string, activeScriptId: string | null): Promise<string | null> {
+  if (!activeScriptId) return null;
+  const tokens = utterance
+    .toLowerCase()
+    .replace(/[^a-z0-9\s']/g, " ")
+    .split(/\s+/)
+    .filter((t) => t && !QUICK_NOISE.has(t));
+  if (tokens.length === 0 || tokens.length > 3) return null;
+  const state = await getFlowState(callId).catch(() => null);
+  const scriptId = state?.script_id ?? activeScriptId;
+  const graph = await getScriptGraph(scriptId).catch(() => ({ nodes: [], edges: [] }));
+  if (graph.nodes.length === 0) return null;
+  let nodeId: string | null = state?.current_node_id ?? null;
+  if (!nodeId || !graph.nodes.find((n) => n.id === nodeId)) nodeId = findEntryNode(graph.nodes, graph.edges)?.id ?? null;
+  const node = graph.nodes.find((n) => n.id === nodeId);
+  if (!node) return null;
+  const connectors = (((node.config ?? {}) as Record<string, unknown>).connectors as Array<{ intentKey?: string; quickWords?: string }>) ?? [];
+  for (const c of connectors) {
+    if (!c?.intentKey || !c?.quickWords) continue;
+    const qw = new Set(
+      c.quickWords
+        .toLowerCase()
+        .split(/[,\s]+/)
+        .map((w) => w.trim())
+        .filter(Boolean)
+    );
+    if (qw.size && tokens.every((t) => qw.has(t))) return c.intentKey;
+  }
+  return null;
+}
+
+// ── Two-tier classification: expected replies first, full vocabulary only on
+// escalation. The fast pass carries a tiny prompt (the step's 3–8 expected
+// handlers instead of the whole campaign) and returns in a fraction of the
+// full pass; "other" escalates. ──
+async function classifyTiered(
+  text: string,
+  turns: string[],
+  handlers: ListenerHandler[],
+  routerModel: string,
+  expectedKeys: string[]
+): Promise<{ cls: Classification; tier: "fast" | "full" }> {
+  if (expectedKeys.length) {
+    const fastHandlers = handlers.filter((h) => expectedKeys.includes(h.intent_key));
+    if (fastHandlers.length) {
+      try {
+        const fast = await classifyUtterance(text, turns, fastHandlers, routerModel, expectedKeys, true);
+        const escalate = fast.intent === "other" || fast.intents.some((g) => g.intent === "other");
+        if (!escalate) return { cls: fast, tier: "fast" };
+      } catch {
+        /* fall through to the full pass */
+      }
+    }
+  }
+  return { cls: await classifyUtterance(text, turns, handlers, routerModel, expectedKeys), tier: "full" };
+}
+
 // ── Anticipatory classification ───────────────────────────────
 // Start the router on the customer's LAST partial transcript while they're
 // still speaking. The final transcript very often equals the last partial, so
@@ -196,7 +258,7 @@ function speculate(callId: string, text: string): Promise<void> | undefined {
     let scoped = await scopeToActiveCollection(eligible, settings?.active_collection_id);
     scoped = await withScriptVocabulary(scoped, eligible, settings?.active_script_id);
     const expected = await expectedIntentKeys(callId, scoped, settings?.active_script_id ?? null).catch(() => [] as string[]);
-    const cls = await classifyUtterance(text, turns, scoped, settings?.router_model ?? "gpt-5.4-mini", expected);
+    const { cls } = await classifyTiered(text, turns, scoped, settings?.router_model ?? "gpt-5.4-mini", expected);
     return { cls, expected };
   })();
   const promise = work.then((w) => w.cls);
@@ -570,17 +632,25 @@ async function handleTranscript(
     () => [] as string[]
   );
 
-  // Classify — reusing the speculative run from the partial transcripts when
-  // the final matches it (the router's answer is then already in flight).
+  // Classify. Priority ladder: instant quick-word connector match (no LLM) →
+  // speculative run from the partials → persisted speculation → tiered
+  // router call (expected-first fast pass, full vocabulary on escalation).
   let cls;
   let speculativeHit = false;
+  let tier: "instant" | "speculative" | "fast" | "full" | null = null;
+  const quick = await quickMatch(callId, turnText, settings.active_script_id ?? null).catch(() => null);
+  if (quick) {
+    cls = { intent: quick, confidence: 0.99, intents: [{ intent: quick, confidence: 0.99 }], raw: "quick-word match" };
+    tier = "instant";
+  }
   const spec = speculativeCls.get(callId);
   // The speculative run only covers this fragment — reuse it only when no
   // earlier fragment was folded in.
-  if (spec && spec.text === utterance && turnText === utterance) {
+  if (!cls && spec && spec.text === utterance && turnText === utterance) {
     try {
       cls = await spec.promise;
       speculativeHit = true;
+      tier = "speculative";
     } catch {
       /* fall through to a fresh classification */
     }
@@ -594,11 +664,14 @@ async function handleTranscript(
     if (stored) {
       cls = stored as unknown as Classification;
       speculativeHit = true;
+      tier = "speculative";
     }
   }
   if (!cls) {
     try {
-      cls = await classifyUtterance(turnText, recentTurns, handlers, settings.router_model, await expectedPromise);
+      const tiered = await classifyTiered(turnText, recentTurns, handlers, settings.router_model, await expectedPromise);
+      cls = tiered.cls;
+      tier = tiered.tier;
     } catch (e) {
       await log({
         call_id: callId,
@@ -637,6 +710,7 @@ async function handleTranscript(
       raw: cls.raw,
       intents,
       speculative: speculativeHit,
+      tier,
       merged: turnText !== utterance,
       // Observer context: what the script step was expecting when this came in.
       expected: (await expectedPromise).slice(0, 6),
@@ -1072,32 +1146,12 @@ async function runScriptFlow(
     return false;
   }
 
-  const bumpLoop = (nodeId: string) => {
-    const key = "__loop_" + nodeId;
-    const n = ((variables[key] as number) ?? 0) + 1;
-    variables[key] = n;
-    return n;
-  };
-
-  // Did a branch fire *because of* this utterance? (Then edge whose intent/tag
-  // condition matched, or a connector/legacy intent condition edge.) Intents
-  // consumed by the routing are remembered so the routed box's line isn't
-  // ALSO merged with those intents' own Playbook answers.
+  // Did a connector fire *because of* this utterance? Intents consumed by the
+  // routing are remembered so the routed box's line isn't ALSO merged with
+  // those intents' own Playbook answers.
   const consumedIntents = new Set<string>();
-  function edgeRecognizedIntent(node: NonNullable<ReturnType<typeof nodeById>>, edge: NonNullable<ReturnType<typeof pickNextEdge>>): boolean {
+  function edgeRecognizedIntent(_node: NonNullable<ReturnType<typeof nodeById>>, edge: NonNullable<ReturnType<typeof pickNextEdge>>): boolean {
     const c = (edge.condition ?? {}) as Record<string, unknown>;
-    if (contentTypeOf(node) === "ifelse") {
-      if ((c.handle as string) !== "then") return false;
-      const cfg = (node.config ?? {}) as Record<string, unknown>;
-      const by = (cfg.condBy as string) ?? "intent";
-      if (by === "intent") {
-        const ok = intents.includes(cfg.condValue as string);
-        if (ok) consumedIntents.add(cfg.condValue as string);
-        return ok;
-      }
-      if (by === "tag") return !!cfg.condValue && intentTags.includes(cfg.condValue as string);
-      return false; // result-driven — unrelated to this utterance
-    }
     const by = (c.by as string) ?? (c.kind as string);
     if (by === "intent") {
       const ok = intents.includes(c.value as string);
@@ -1108,31 +1162,6 @@ async function runScriptFlow(
     // An "any other reply" catch-all is an explicit author instruction: this
     // arrow fires NO MATTER WHAT was said — it owns the turn, no deferring.
     if (by === "any") return true;
-    return false;
-  }
-
-  // Does an if/else within the next few hops branch on one of this turn's
-  // intents? Used to skip a speaking box the reply has already answered past —
-  // consent arriving while the flow still sits before the pitch (or before a
-  // chain of checks) must take its branch, not trigger the box's default.
-  // Chains of consecutive if/elses are walked via their Else edges.
-  function nextIfElseRecognizes(fromId: string): boolean {
-    let cursor = fromId;
-    for (let hops = 0; hops < 3; hops++) {
-      const outs = graph.edges.filter((e) => e.source_node_id === cursor);
-      const step =
-        hops === 0
-          ? outs.length === 1
-            ? outs[0]
-            : undefined
-          : outs.find((e) => (((e.condition ?? {}) as Record<string, unknown>).handle as string) === "else");
-      if (!step) return false;
-      const nxt = nodeById(graph.nodes, step.target_node_id);
-      if (!nxt || contentTypeOf(nxt) !== "ifelse") return false;
-      const c = (nxt.config ?? {}) as Record<string, unknown>;
-      if (((c.condBy as string) ?? "intent") === "intent" && intents.includes(c.condValue as string)) return true;
-      cursor = nxt.id;
-    }
     return false;
   }
 
@@ -1171,7 +1200,7 @@ async function runScriptFlow(
     } else {
       const currentNode = nodeById(graph.nodes, currentNodeId!);
       if (!currentNode) return false;
-      const edge = pickNextEdge(currentNode, graph.edges, { intent, intents, tags: intentTags, result, bumpLoop });
+      const edge = pickNextEdge(currentNode, graph.edges, { intent, intents, tags: intentTags, result });
       if (!edge) return false; // nowhere to go → reactive layer handles it
       if (edgeRecognizedIntent(currentNode, edge)) pathExpected = true;
       target = nodeById(graph.nodes, edge.target_node_id);
@@ -1191,7 +1220,7 @@ async function runScriptFlow(
     }
 
     // ── Control / pass-through boxes: advance on the same turn ──
-    if (ct === "noop" || ct === "ifelse" || ct === "loop") {
+    if (ct === "noop") {
       currentNodeId = target.id;
       note("", target, ct, edgeCond, null);
       continue;
@@ -1287,7 +1316,7 @@ async function runScriptFlow(
       // Skip-ahead: this box has no line for the reply, but the if/else right
       // after it (or one of its own reply connectors) does — pass through
       // silently and let the branch fire.
-      if (!match && (nextIfElseRecognizes(target.id) || (!pathExpected && connectorRecognizes(target.id)))) {
+      if (!match && !pathExpected && connectorRecognizes(target.id)) {
         currentNodeId = target.id;
         note("", target, ct, edgeCond, null, "skipped_ahead");
         continue;
@@ -1310,7 +1339,7 @@ async function runScriptFlow(
           .sort((a, b) => intents.indexOf(a.intent_key) - intents.indexOf(b.intent_key));
       }
       const effective = matches.length > 0 ? matches : elseMatches;
-      if (effective.length === 0 && (nextIfElseRecognizes(target.id) || (!pathExpected && connectorRecognizes(target.id)))) {
+      if (effective.length === 0 && !pathExpected && connectorRecognizes(target.id)) {
         currentNodeId = target.id;
         note("", target, ct, edgeCond, null, "skipped_ahead");
         continue;

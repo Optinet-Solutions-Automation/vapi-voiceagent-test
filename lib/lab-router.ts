@@ -23,7 +23,11 @@ export async function classifyUtterance(
   /** Observer's navigation hint: at the current script step, these replies
    *  are the ones the flow is waiting for — listed first and preferred when
    *  the utterance plausibly fits one. */
-  expectedKeys: string[] = []
+  expectedKeys: string[] = [],
+  /** Fast tier: the handler list contains ONLY the step's expected replies —
+   *  a tiny prompt that returns in a fraction of the full pass. The model
+   *  may answer "other" to escalate to the full vocabulary. */
+  fastTier = false
 ): Promise<Classification> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -39,11 +43,15 @@ export async function classifyUtterance(
     ? `\n- The script is at a step where these replies are EXPECTED next: ${expectedKeys.join(", ")}. When the utterance plausibly fits one of them, prefer it over other handlers; if it clearly matches something else, pick what truly matches. A bare agreement ("yes", "yeah", "yup", "okay") right after the agent asked a question maps to the EXPECTED agreement-style handler. If SEVERAL expected handlers fit the same reply (e.g. an agreement matcher plus the scenario that reacts to that agreement), list ALL of them.`
     : "";
 
+  const fastLine = fastTier
+    ? `\n- This list is INTENTIONALLY SHORT (only the replies the script expects right now). If the utterance is substantive but clearly addresses something NOT on this list, return intent "other" — do NOT force it into a listed handler and do NOT call it none. none stays reserved for back-channel, fillers and noise.`
+    : "";
+
   const systemPrompt = `You route utterances from a live phone call to handlers. Handlers:
 ${handlerLines}
-- intent_key: none — anything that doesn't clearly need a handler.
+- intent_key: none — anything that doesn't clearly need a handler.${fastTier ? `\n- intent_key: other — substantive, but fits nothing in this list.` : ""}
 
-Rules:${expectedLine}
+Rules:${expectedLine}${fastLine}
 - Back-channel and fillers ("okay", "k", "uh-huh", "right", "hmm", "I hear you", "whatever"), incomplete fragments, a mid-call "hello?", stutters, or background noise → none. These are acknowledgements, not requests.
 - Bare agreement ("yes", "sure", "okay") matches a consent/offer handler ONLY if the agent's last line in the recent turns asked exactly that question; otherwise → none.
 - Hedged or reluctant agreement still counts as agreement: "yeah I guess", "okay fine", "sure, whatever", a bare "okay" — if the agent's last line asked a yes/no question, map these to that question's handler (confidence around 0.8). Only a clear refusal or a new topic breaks the match.

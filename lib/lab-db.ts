@@ -423,6 +423,22 @@ export async function listScriptRuns(
   return (data ?? []) as { call_id: string; current_node_id: string | null; updated_at: string }[];
 }
 
+/** Customer-turn counts for a batch of calls — powers the run-history list
+ *  ("N turns") without one query per run. */
+export async function utteranceCounts(callIds: string[]): Promise<Record<string, number>> {
+  if (!callIds.length) return {};
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("call_id")
+    .in("call_id", callIds)
+    .eq("event_type", "utterance")
+    .limit(2000);
+  if (error) throw new Error(error.message);
+  const counts: Record<string, number> = {};
+  for (const r of data ?? []) counts[r.call_id] = (counts[r.call_id] ?? 0) + 1;
+  return counts;
+}
+
 /** The call's memory of what has already been SAID: how many times each
  *  scenario was delivered so far (anti-repeat ledger). Insertion order =
  *  delivery order, so the first topics covered come first. */
