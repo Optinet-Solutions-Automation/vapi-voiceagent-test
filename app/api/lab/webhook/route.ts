@@ -1240,13 +1240,21 @@ async function runScriptFlow(
       await waitForAgentSilence(callId); // speaking lock
       if (await staleNow()) return true;
       const text = scn?.response_template || "Thanks for your time today. Goodbye!";
+      // Goodbye delivery honours the scenario: exact line → spoken verbatim
+      // with the hangup attached; reword → briefed, hangup follows shortly.
+      const rewordGoodbye = scn?.delivery === "reword" && !!scn?.response_template;
       currentNodeId = target.id;
-      note(text, target, ct, edgeCond, scn?.id ?? null);
+      note(text, target, ct, edgeCond, scn?.id ?? null, undefined, rewordGoodbye ? { rewordGoodbye: true } : undefined);
       if (!(await flush())) return true; // lost the race — say nothing
       const controlUrl = await ctl();
       if (controlUrl) {
-        const r = await injectSay(controlUrl, text, true);
-        if (!r.ok) setTimeout(() => endCall(controlUrl).catch(() => {}), 4000);
+        if (rewordGoodbye) {
+          await injectStaffNote(controlUrl, `Deliver this goodbye in your own words — nothing else, no questions — then stop speaking: ${text}`, true).catch(() => {});
+          setTimeout(() => endCall(controlUrl).catch(() => {}), 7000);
+        } else {
+          const r = await injectSay(controlUrl, text, true);
+          if (!r.ok) setTimeout(() => endCall(controlUrl).catch(() => {}), 4000);
+        }
       }
       return true;
     }
@@ -1281,24 +1289,34 @@ async function runScriptFlow(
       const matches = allHandlers
         .filter((h) => ids.includes(h.id) && intents.includes(h.intent_key))
         .sort((a, b) => intents.indexOf(a.intent_key) - intents.indexOf(b.intent_key));
-      if (matches.length === 0 && (nextIfElseRecognizes(target.id) || (!pathExpected && connectorRecognizes(target.id)))) {
+      // Else-collection fallback: when no member fits, a second collection
+      // (e.g. neutral edge cases) gets a chance before the default line.
+      let elseMatches: ListenerHandler[] = [];
+      if (matches.length === 0 && cfg.elseCollectionId) {
+        const eids = await getCollectionHandlerIds(cfg.elseCollectionId as string).catch(() => [] as string[]);
+        elseMatches = allHandlers
+          .filter((h) => eids.includes(h.id) && h.enabled && intents.includes(h.intent_key))
+          .sort((a, b) => intents.indexOf(a.intent_key) - intents.indexOf(b.intent_key));
+      }
+      const effective = matches.length > 0 ? matches : elseMatches;
+      if (effective.length === 0 && (nextIfElseRecognizes(target.id) || (!pathExpected && connectorRecognizes(target.id)))) {
         currentNodeId = target.id;
         note("", target, ct, edgeCond, null, "skipped_ahead");
         continue;
       }
-      if (reactiveCanHandle && !pathExpected && matches.length === 0) return defer(target.label || ct);
-      if (matches.length > 1) {
+      if (reactiveCanHandle && !pathExpected && effective.length === 0) return defer(target.label || ct);
+      if (effective.length > 1) {
         mergedText =
-          `The customer raised ${matches.length} points at once — cover ALL of them in ONE short, natural reply (a single paragraph, keep exact facts, prices and terms word-accurate): ` +
-          matches.map((m, i) => `(${i + 1}) ${m.response_template}`).join(" ");
-        mergedIds = matches.map((m) => m.id);
+          `The customer raised ${effective.length} points at once — cover ALL of them in ONE short, natural reply (a single paragraph, keep exact facts, prices and terms word-accurate): ` +
+          effective.map((m, i) => `(${i + 1}) ${m.response_template}`).join(" ");
+        mergedIds = effective.map((m) => m.id);
       }
       // No member fits the reply → the box's default line if one is set;
       // otherwise NOTHING is picked and the stage-guidance briefing grounds
       // the agent. Never blind-pick a member: a live call once answered a
       // plain "yes" with "It's Victor from Lucky Seven" because the
       // highest-priority member happened to be the who-is-calling reply.
-      scenario = matches.length > 0 ? matches[0] : handlerById(target.scenario_id) ?? null;
+      scenario = effective.length > 0 ? effective[0] : handlerById(target.scenario_id) ?? null;
       stageMemberNames = allHandlers.filter((h) => ids.includes(h.id) && h.enabled).map((h) => h.name);
     } else {
       // send_sms / transfer

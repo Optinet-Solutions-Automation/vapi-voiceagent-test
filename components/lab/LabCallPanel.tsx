@@ -98,14 +98,19 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
       // opening); otherwise the global "first_message" scenario. {{name}} is
       // personalized here.
       let overrides: Record<string, unknown> | undefined;
+      let openingReword = false;
       try {
         let opening: string | null = null;
         const settings = await getLabSettings().catch(() => null);
         if (settings?.active_script_id) {
           const g = await getScriptGraph(settings.active_script_id).catch(() => ({ nodes: [], edges: [] }));
           const start = g.nodes.find((n) => n.type === "start");
-          const op = ((start?.config as Record<string, unknown>)?.opening as string | undefined)?.trim();
-          if (op) opening = op;
+          const sc = (start?.config ?? {}) as Record<string, unknown>;
+          const op = ((sc.opening as string) ?? "").trim();
+          if (op) {
+            opening = op;
+            openingReword = (sc.openingDelivery as string) === "reword";
+          }
         }
         if (!opening) {
           const handlers = await listHandlers();
@@ -116,7 +121,11 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
           const rendered = opening
             .replace(/\{\{\s*name\s*\}\}/gi, clientName.trim() || "there")
             .replace(/\s{2,}/g, " ");
-          overrides = { firstMessage: rendered, firstMessageMode: "assistant-speaks-first" };
+          // Reworded opening: the gist lives in the composed prompt (pushed
+          // above); the model generates the first message itself.
+          overrides = openingReword
+            ? { firstMessageMode: "assistant-speaks-first-with-model-generated-message" }
+            : { firstMessage: rendered, firstMessageMode: "assistant-speaks-first" };
         }
       } catch {
         /* no handler / DB hiccup → fall back to the assistant's own first message */
@@ -128,7 +137,7 @@ export default function LabCallPanel({ assistantId, onCallStarted, onCallEnded }
         // Log the opening as an agent turn (no injected_at → doesn't trip the
         // cooldown) so the router classifies the first reply in context —
         // "yes, sure" after "got a moment?" is agreement, not SMS consent.
-        const opening = overrides?.firstMessage as string | undefined;
+        const opening = overrides?.firstMessage as string | undefined; // absent for reworded openings
         if (opening) {
           insertLabEvent({
             call_id: call.id,

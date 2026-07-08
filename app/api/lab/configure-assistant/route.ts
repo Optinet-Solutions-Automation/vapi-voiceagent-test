@@ -2,7 +2,7 @@
 // monitorPlan to the chosen assistant so the listener loop can run.
 import { NextResponse } from "next/server";
 import { LAB_TOOLS, LAB_OPERATING_RULES, DEFAULT_SHORT_PROMPT } from "@/lib/lab-tools";
-import { getLabSettings, saveLabSettings, listHandlers } from "@/lib/lab-db";
+import { getLabSettings, saveLabSettings, listHandlers, getScriptGraph } from "@/lib/lab-db";
 
 const VAPI_BASE = "https://api.vapi.ai";
 
@@ -69,7 +69,23 @@ export async function POST(req: Request) {
     ? `\n8. This call follows a script — the SYSTEM chooses every next move and supplies every answer, never you. After EVERY customer turn — a yes, a no, an objection, even a direct question — say at most ONE filler from the approved list below and WAIT for the supplied line. Never answer a question yourself, never re-introduce yourself, never pitch, never ask your own question: the answer is already on its way, and answering twice ruins the call. Waiting means SILENCE after the filler — no repeating earlier lines. When a supplied line arrives, deliver it and STOP.
 9. APPROVED FILLERS — in this call these are the ONLY words you may say that were not supplied to you: "mm-hmm", "uh-huh", "right—", "okay so—", "got it.", "perfect.", "fair question—", "alright—", "sounds good—". Nothing else, ever; never the same one twice in a call.`
     : "";
-  const prompt = `ABSOLUTE RULE — never say "hold on", "hold on a sec", "one moment", "just a sec", "just a moment", "give me a second", "please hold" or any wait-phrase, in any situation, ever. If you need a beat: one tiny casual filler ("mm-hmm", "okay so—") or silence.\n\n${persona}\n\n${LAB_OPERATING_RULES}${scriptRule}`;
+  // Reworded opening: the model generates the first message itself (the run
+  // sets firstMessageMode accordingly), so the gist must live in the prompt.
+  let openingRule = "";
+  if (settings?.active_script_id) {
+    try {
+      const g = await getScriptGraph(settings.active_script_id);
+      const startN = g.nodes.find((n) => n.type === "start");
+      const sc = (startN?.config ?? {}) as Record<string, unknown>;
+      const op = ((sc.opening as string) ?? "").trim();
+      if (op && (sc.openingDelivery as string) === "reword")
+        openingRule = `\n\n[Opening] Open the call in your own words with exactly this meaning — one short greeting and the question, nothing more: "${op.replace(/\{\{\s*name\s*\}\}/gi, "there")}"`;
+    } catch {
+      /* no graph → no opening rule */
+    }
+  }
+
+  const prompt = `ABSOLUTE RULE — never say "hold on", "hold on a sec", "one moment", "just a sec", "just a moment", "give me a second", "please hold" or any wait-phrase, in any situation, ever. If you need a beat: one tiny casual filler ("mm-hmm", "okay so—") or silence.\n\n${persona}\n\n${LAB_OPERATING_RULES}${scriptRule}${openingRule}`;
 
   const model = assistant.model ?? {};
   let messages: Array<{ role: string; content: string }> = model.messages ?? [];

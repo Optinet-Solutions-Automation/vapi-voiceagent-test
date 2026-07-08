@@ -895,7 +895,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       if (!draft) continue; // untouched box
       const text = draft.text.trim();
       if (!text) continue; // never wipe a line via an emptied box
-      const delivery = ct === "scenario" || ct === "collection" ? draft.delivery : "verbatim";
+      // Scenario, collection-else and goodbye lines honour the chosen
+      // delivery; SMS confirmations and transfer lines stay exact.
+      const delivery = ct === "send_sms" || ct === "transfer" ? "verbatim" : draft.delivery;
       if (d.scenarioId) {
         const scn = scenarios.find((s) => s.id === d.scenarioId);
         if (!scn) continue;
@@ -1156,19 +1158,27 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       const startNode = nodes.find((n) => (n.data as NodeData).kind === "start");
       // Empty opening is a deliberate author choice: no override, the VAPI
       // assistant's own greeting plays.
-      const opening = ((((startNode?.data as NodeData) ?? {}).config?.opening as string) ?? "").trim();
+      const startCfg = (((startNode?.data as NodeData) ?? {}).config ?? {}) as Record<string, unknown>;
+      const opening = ((startCfg.opening as string) ?? "").trim();
       const rendered = opening ? opening.replace(/\{\{\s*name\s*\}\}/gi, "there").replace(/\s{2,}/g, " ") : "";
+      // Reworded opening: configure-assistant put the gist in the prompt; the
+      // model generates the first message in its own words.
+      const openingReword = ((startCfg.openingDelivery as string) ?? "verbatim") === "reword";
       const vapi = getVapi();
       const call = await vapi.start(
         aid,
-        rendered ? { firstMessage: rendered, firstMessageMode: "assistant-speaks-first" } : undefined
+        rendered
+          ? openingReword
+            ? { firstMessageMode: "assistant-speaks-first-with-model-generated-message" }
+            : { firstMessage: rendered, firstMessageMode: "assistant-speaks-first" }
+          : undefined
       );
       if (call?.id) {
         // The engine only persists its position after the first routed turn —
         // paint the Start box as "you are here" from second zero.
         const startId = startNode?.id ?? null;
         setRun((r) => ({ ...r, callId: call.id, status: "live", currentNodeId: startId, visited: startId ? [startId] : [] }));
-        if (rendered)
+        if (rendered && !openingReword)
           insertLabEvent({ call_id: call.id, event_type: "injected", role: "assistant", content: rendered, action_type: "opening", meta: { opening: true } }).catch(() => {});
       } else {
         setRun({ callId: null, status: "idle", currentNodeId: null, visited: [], lastLine: null, lastHop: null });
@@ -2200,9 +2210,30 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                           onChange={(e) => patchConfig(selNode.id, { opening: e.target.value })}
                           placeholder="e.g. Hi {{name}}! This is Alex from the customer team — quick welcome call. Got a moment?"
                         />
+                        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                          {(
+                            [
+                              ["reword", "Agent rewords it"],
+                              ["verbatim", "Exact line"],
+                            ] as const
+                          ).map(([val, lbl]) => (
+                            <button
+                              key={val}
+                              onClick={() => patchConfig(selNode.id, { openingDelivery: val })}
+                              className={`rounded-md border px-2 py-1.5 text-xs font-medium transition ${
+                                (((sd.config.openingDelivery as string) ?? "verbatim") === val)
+                                  ? "border-indigo-500 bg-indigo-500/15 text-indigo-200"
+                                  : "border-gray-700 text-gray-400 hover:bg-gray-800"
+                              }`}
+                            >
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
                         <p className="mt-1 text-[10px] text-gray-600">
                           Spoken as the very first thing on the call — overrides the global &ldquo;First
-                          Message&rdquo; scenario. Use {"{{name}}"} for the client&rsquo;s name.
+                          Message&rdquo; scenario. Use {"{{name}}"} for the client&rsquo;s name. Exact line is spoken
+                          word-for-word; Agent rewords it keeps the meaning in the agent&rsquo;s own phrasing.
                         </p>
                       </div>
                     )}
@@ -2232,8 +2263,18 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                         </div>
                         <div>
                           <label className="mb-1 block text-xs text-gray-400">
-                            What the agent says <span className="text-gray-600">(tentative — this is the scenario&rsquo;s line)</span>
+                            What the agent says <span className="text-gray-600">(write new, or pick an existing scenario)</span>
                           </label>
+                          <select
+                            className={inputCls + " mb-1.5 [color-scheme:dark]"}
+                            value={sd.scenarioId ?? ""}
+                            onChange={(e) => pickScenario(selNode.id, e.target.value || null)}
+                          >
+                            <option value="">(new line for this box)</option>
+                            {scenarios.filter((s) => s.action_type !== "ignore").map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
                           <textarea
                             className={inputCls + " min-h-[110px] resize-y"}
                             value={draft.text}
@@ -2241,8 +2282,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             placeholder="Type the line for this step — it's saved to the Playbook automatically."
                           />
                           <p className="mt-1 text-[10px] text-gray-600">
-                            Prefilled from the selected scenario. Editing here edits that Playbook scenario — for every
-                            script and campaign that uses it. Keep campaign wording in scenarios so scripts stay reusable.
+                            Picking a scenario shows its line here. Editing the text edits that Playbook scenario — for
+                            every script and campaign that uses it. Keep campaign wording in scenarios so scripts stay
+                            reusable.
                           </p>
                         </div>
                         <div>
@@ -2250,8 +2292,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                           <div className="grid grid-cols-2 gap-1.5">
                             {(
                               [
-                                ["reword", "Just the gist"],
-                                ["verbatim", "Exact words"],
+                                ["reword", "Agent rewords it"],
+                                ["verbatim", "Exact line"],
                               ] as const
                             ).map(([val, lbl]) => (
                               <button
@@ -2268,8 +2310,8 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             ))}
                           </div>
                           <p className="mt-1 text-[10px] text-gray-600">
-                            Just the gist is usually best — the agent phrases it naturally in context. Keep Exact words
-                            for prices, terms, and compliance lines.
+                            Agent rewords it is usually best — natural phrasing in context. Keep Exact line for prices,
+                            terms, and compliance wording.
                           </p>
                         </div>
 
@@ -2278,21 +2320,6 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             Advanced
                           </summary>
                           <div className="space-y-3 p-2.5">
-                            <div>
-                              <label className="mb-1 block text-xs text-gray-400">Reuse an existing line</label>
-                              <select
-                                className={inputCls + " [color-scheme:dark]"}
-                                value={sd.scenarioId ?? ""}
-                                onChange={(e) => pickScenario(selNode.id, e.target.value || null)}
-                              >
-                                <option value="">(new line for this box)</option>
-                                {scenarios.filter((s) => s.action_type !== "ignore").map((s) => (
-                                  <option key={s.id} value={s.id}>
-                                    {s.name}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
                             <div>
                               <label className="mb-1 block text-xs text-gray-400">
                                 Also consider <span className="text-gray-600">(router picks best)</span>
@@ -2396,51 +2423,97 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             );
                           })()}
                         </div>
-                        {draft && (
-                          <div>
-                            <label className="mb-1 block text-xs text-gray-400">
-                              When nothing in the collection fits, say…{" "}
-                              <span className="text-gray-600">(leave empty for an automatic briefing)</span>
-                            </label>
-                            <textarea
-                              className={inputCls + " min-h-[80px] resize-y"}
-                              value={draft.text}
-                              onChange={(e) => patchDraft(selNode.id, draft, { text: e.target.value })}
-                              placeholder="e.g. Great — so quickly, here's why I'm calling: you've got free spins waiting on your account…"
-                            />
-                            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-                              {(
-                                [
-                                  ["reword", "Agent rewords it"],
-                                  ["verbatim", "Exact line"],
-                                ] as const
-                              ).map(([val, lbl]) => (
-                                <button
-                                  key={val}
-                                  onClick={() => patchDraft(selNode.id, draft, { delivery: val })}
-                                  className={`rounded-md border px-2 py-1.5 text-xs font-medium transition ${
-                                    draft.delivery === val
-                                      ? "border-indigo-500 bg-indigo-500/15 text-indigo-200"
-                                      : "border-gray-700 text-gray-400 hover:bg-gray-800"
-                                  }`}
-                                >
-                                  {lbl}
-                                </button>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">
+                            When nothing in the collection fits{" "}
+                            <span className="text-gray-600">(write a line, use a scenario, or fall back to a collection)</span>
+                          </label>
+                          <select
+                            className={inputCls + " mb-1.5 [color-scheme:dark]"}
+                            value={
+                              (sd.config.elseCollectionId as string)
+                                ? "col:" + (sd.config.elseCollectionId as string)
+                                : sd.scenarioId
+                                  ? "scn:" + sd.scenarioId
+                                  : ""
+                            }
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v.startsWith("col:")) {
+                                patchConfig(selNode.id, { elseCollectionId: v.slice(4) });
+                                pickScenario(selNode.id, null);
+                              } else if (v.startsWith("scn:")) {
+                                patchConfig(selNode.id, { elseCollectionId: null });
+                                pickScenario(selNode.id, v.slice(4));
+                              } else {
+                                patchConfig(selNode.id, { elseCollectionId: null });
+                                pickScenario(selNode.id, null);
+                              }
+                            }}
+                          >
+                            <option value="">(write a line below)</option>
+                            <optgroup label="Use an existing scenario">
+                              {scenarios.filter((s) => s.action_type !== "ignore").map((s) => (
+                                <option key={s.id} value={"scn:" + s.id}>{s.name}</option>
                               ))}
-                            </div>
-                            {sd.scenarioId && (
-                              <button
-                                onClick={() => pickScenario(selNode.id, null)}
-                                className="mt-1.5 text-[11px] text-gray-500 transition hover:text-rose-400"
-                              >
-                                Remove the else line (back to the automatic briefing)
-                              </button>
-                            )}
-                            <p className="mt-1 text-[10px] text-gray-600">
-                              Saved to the Playbook on Save, like any box line.
+                            </optgroup>
+                            <optgroup label="Fall back to another collection">
+                              {collections.filter((c) => c.id !== (sd.config.collectionId as string)).map((c) => (
+                                <option key={c.id} value={"col:" + c.id}>{c.name}</option>
+                              ))}
+                            </optgroup>
+                          </select>
+                          {(sd.config.elseCollectionId as string) ? (
+                            <p className="rounded-md bg-gray-900/60 p-1.5 text-[10px] text-gray-500">
+                              Unmatched replies get a second chance against{" "}
+                              <span className="text-gray-300">{collectionName(sd.config.elseCollectionId as string) ?? "that collection"}</span>{" "}
+                              — its matching reply is spoken (merged when several fit). Nothing fits there either → the
+                              automatic briefing.
                             </p>
-                          </div>
-                        )}
+                          ) : (
+                            draft && (
+                              <>
+                                <textarea
+                                  className={inputCls + " min-h-[80px] resize-y"}
+                                  value={draft.text}
+                                  onChange={(e) => patchDraft(selNode.id, draft, { text: e.target.value })}
+                                  placeholder="e.g. Quick version: you've got free spins waiting on your account — want the link by text?"
+                                />
+                                <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                                  {(
+                                    [
+                                      ["reword", "Agent rewords it"],
+                                      ["verbatim", "Exact line"],
+                                    ] as const
+                                  ).map(([val, lbl]) => (
+                                    <button
+                                      key={val}
+                                      onClick={() => patchDraft(selNode.id, draft, { delivery: val })}
+                                      className={`rounded-md border px-2 py-1.5 text-xs font-medium transition ${
+                                        draft.delivery === val
+                                          ? "border-indigo-500 bg-indigo-500/15 text-indigo-200"
+                                          : "border-gray-700 text-gray-400 hover:bg-gray-800"
+                                      }`}
+                                    >
+                                      {lbl}
+                                    </button>
+                                  ))}
+                                </div>
+                                {sd.scenarioId && (
+                                  <button
+                                    onClick={() => pickScenario(selNode.id, null)}
+                                    className="mt-1.5 text-[11px] text-gray-500 transition hover:text-rose-400"
+                                  >
+                                    Remove the else line (back to the automatic briefing)
+                                  </button>
+                                )}
+                                <p className="mt-1 text-[10px] text-gray-600">
+                                  Leave empty for the automatic briefing. Saved to the Playbook on Save, like any box line.
+                                </p>
+                              </>
+                            )
+                          )}
+                        </div>
                         <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
                           Reply order at this box: a matching reply in the collection answers on the spot; nothing
                           fits → the Else scenario speaks; no Else set → the agent gets a short grounding briefing.
@@ -2689,8 +2762,29 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             onChange={(e) => patchDraft(selNode.id, draft, { text: e.target.value })}
                             placeholder="e.g. Thanks for your time today — have a great day!"
                           />
+                          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                            {(
+                              [
+                                ["reword", "Agent rewords it"],
+                                ["verbatim", "Exact line"],
+                              ] as const
+                            ).map(([val, lbl]) => (
+                              <button
+                                key={val}
+                                onClick={() => patchDraft(selNode.id, draft, { delivery: val })}
+                                className={`rounded-md border px-2 py-1.5 text-xs font-medium transition ${
+                                  draft.delivery === val
+                                    ? "border-indigo-500 bg-indigo-500/15 text-indigo-200"
+                                    : "border-gray-700 text-gray-400 hover:bg-gray-800"
+                                }`}
+                              >
+                                {lbl}
+                              </button>
+                            ))}
+                          </div>
                           <p className="mt-1 text-[10px] text-gray-600">
-                            Spoken word-for-word before hanging up. Leave blank for the default goodbye.
+                            Spoken before hanging up — Exact line word-for-word, Agent rewords it in its own phrasing.
+                            Leave blank for the default goodbye.
                           </p>
                         </div>
                         <details className="rounded-lg border border-gray-800">
