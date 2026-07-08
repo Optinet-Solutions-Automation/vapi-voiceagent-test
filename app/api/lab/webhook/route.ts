@@ -1476,18 +1476,21 @@ async function runScriptFlow(
           deliveredAsNote = true;
         }
       }
-      // Delivery watchdog: a triggered briefing can race the agent's own
-      // filler ("Perfect.") and get silently swallowed by the platform — the
-      // line is never voiced and the call stalls into idle nudges. Verify
-      // substantial speech follows; re-trigger the briefing ONCE if not.
+      // Delivery watchdog: the model sometimes answers a triggered briefing
+      // with its filler ALONE ("Uh-huh." … silence) — it "waits" for a line
+      // that already arrived — or the trigger races the filler and gets
+      // swallowed outright. Verify substantial speech follows; re-trigger
+      // once with blunter wording; if even that stays silent, log a red
+      // error so an undelivered line can never pass QA unnoticed.
       if (deliveredAsNote) {
-        const watchdogBrief = brief(injectedText);
         after(async () => {
-          await new Promise((r) => setTimeout(r, 5000));
+          const undisturbed = async () =>
+            !(utteranceEventId != null && (await hasNewerUtterance(callId, utteranceEventId))) &&
+            !(await assistantSpeaking(callId)) &&
+            !(await agentSaidAfter(callId, anchorId, 20));
           try {
-            if (utteranceEventId != null && (await hasNewerUtterance(callId, utteranceEventId))) return;
-            if (await assistantSpeaking(callId)) return; // delivery in progress
-            if (await agentSaidAfter(callId, anchorId, 20)) return;
+            await new Promise((r) => setTimeout(r, 5000));
+            if (!(await undisturbed())) return;
             await log({
               call_id: callId,
               event_type: "skipped",
@@ -1495,7 +1498,20 @@ async function runScriptFlow(
               intent_key: intent,
               meta: { flow: true, reason: "retrigger" },
             });
-            await injectStaffNote(controlUrl, watchdogBrief, true);
+            await injectStaffNote(
+              controlUrl,
+              `You paused after your filler, but the supplied line is still UNDELIVERED — say it NOW, nothing else: ${injectedText}`,
+              true
+            );
+            await new Promise((r) => setTimeout(r, 5000));
+            if (!(await undisturbed())) return;
+            await log({
+              call_id: callId,
+              event_type: "error",
+              content: "line never voiced — briefing and retrigger both produced no speech",
+              intent_key: intent,
+              meta: { flow: true, reason: "undelivered" },
+            });
           } catch {
             /* best effort */
           }
