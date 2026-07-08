@@ -163,6 +163,10 @@ function FlowNode({ id, data, selected }: NodeProps) {
           ? "ring-2 ring-white/60"
           : "";
   const nodeDisabled = d.config.disabled === true;
+  // Additional statements are parasites: they exist only through a host box
+  // and ride along with its reply — drawn as dashed capsules latched onto the
+  // box's left side. Clicking one selects the host (that's where they live).
+  const stmts = ((d.config.statements as string[]) ?? []).map((s) => (s ?? "").trim()).filter(Boolean);
   return (
     <div
       className={`group max-w-[420px] rounded-lg border-2 px-3 ${labelled ? "pb-7 pt-2" : "py-2"} text-left shadow ${meta.color} ${ring} ${nodeDisabled ? "opacity-50" : ""}`}
@@ -248,6 +252,19 @@ function FlowNode({ id, data, selected }: NodeProps) {
           </span>
         );
       })}
+      {/* Parasite statements — always spoken with this box's reply */}
+      {stmts.length > 0 && (
+        <div className="absolute right-full top-1.5 mr-0 w-44 space-y-1">
+          {stmts.map((s, i) => (
+            <div key={i} className="flex items-center justify-end" title={s}>
+              <span className="max-w-full truncate rounded-full border border-dashed border-gray-500 bg-gray-800/95 px-2 py-0.5 text-[9px] leading-tight text-gray-300">
+                + {snip(s, 34)}
+              </span>
+              <span className="h-px w-2.5 shrink-0 bg-gray-500" />
+            </div>
+          ))}
+        </div>
+      )}
       {canAddConnector && (
         <>
           {/* Hidden anchor: legacy plain arrows (old scripts' default paths)
