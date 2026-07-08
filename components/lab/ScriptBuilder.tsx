@@ -856,12 +856,12 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         continue;
       }
 
-      if (!LINE_CONTENT.includes(ct)) continue;
+      if (!LINE_CONTENT.includes(ct) && ct !== "collection") continue; // collection: the Else line
       const draft = lineDrafts[n.id];
       if (!draft) continue; // untouched box
       const text = draft.text.trim();
       if (!text) continue; // never wipe a line via an emptied box
-      const delivery = ct === "scenario" ? draft.delivery : "verbatim";
+      const delivery = ct === "scenario" || ct === "collection" ? draft.delivery : "verbatim";
       if (d.scenarioId) {
         const scn = scenarios.find((s) => s.id === d.scenarioId);
         if (!scn) continue;
@@ -1390,7 +1390,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     };
   }
   const draft =
-    selNode && sd && sd.kind === "step" && LINE_CONTENT.includes(content)
+    selNode && sd && sd.kind === "step" && (LINE_CONTENT.includes(content) || content === "collection")
       ? lineDrafts[selNode.id] ?? seedDraft(sd)
       : null;
   function patchDraft(nodeId: string, base: LineDraft, patch: Partial<LineDraft>) {
@@ -1400,6 +1400,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     setNodes((ns) =>
       ns.map((n) => {
         if (n.id !== nodeId) return n;
+        // Collection boxes keep their collection-name subtitle — the Else
+        // line lives in the drawer, not on the box face.
+        if (((n.data as NodeData).config.contentType as Content) === "collection") return n;
         const d = { ...(n.data as NodeData) };
         d.subtitle = next.text.trim() ? `“${snip(next.text, 42)}”` : subtitleFor(d);
         d.note = next.hint.trim() ? snip(next.hint, 64) : null;
@@ -2329,29 +2332,51 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             );
                           })()}
                         </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">
-                            Else scenario <span className="text-gray-600">(when no reply in the collection fits)</span>
-                          </label>
-                          <select
-                            className={inputCls + " [color-scheme:dark]"}
-                            value={sd.scenarioId ?? ""}
-                            onChange={(e) => patchNodeData(selNode.id, { scenarioId: e.target.value || null })}
-                          >
-                            <option value="">(none — the agent bridges with a briefing)</option>
-                            {scenarios.filter((s) => s.action_type !== "ignore").map((s) => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                          </select>
-                          {(() => {
-                            const els = sd.scenarioId ? scenarios.find((s) => s.id === sd.scenarioId) : undefined;
-                            return els?.response_template ? (
-                              <p className="mt-1 rounded-md bg-gray-900/60 p-1.5 text-[10px] italic text-gray-500">
-                                “{snip(els.response_template, 110)}”
-                              </p>
-                            ) : null;
-                          })()}
-                        </div>
+                        {draft && (
+                          <div>
+                            <label className="mb-1 block text-xs text-gray-400">
+                              When nothing in the collection fits, say…{" "}
+                              <span className="text-gray-600">(leave empty for an automatic briefing)</span>
+                            </label>
+                            <textarea
+                              className={inputCls + " min-h-[80px] resize-y"}
+                              value={draft.text}
+                              onChange={(e) => patchDraft(selNode.id, draft, { text: e.target.value })}
+                              placeholder="e.g. Great — so quickly, here's why I'm calling: you've got free spins waiting on your account…"
+                            />
+                            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                              {(
+                                [
+                                  ["reword", "Agent rewords it"],
+                                  ["verbatim", "Exact line"],
+                                ] as const
+                              ).map(([val, lbl]) => (
+                                <button
+                                  key={val}
+                                  onClick={() => patchDraft(selNode.id, draft, { delivery: val })}
+                                  className={`rounded-md border px-2 py-1.5 text-xs font-medium transition ${
+                                    draft.delivery === val
+                                      ? "border-indigo-500 bg-indigo-500/15 text-indigo-200"
+                                      : "border-gray-700 text-gray-400 hover:bg-gray-800"
+                                  }`}
+                                >
+                                  {lbl}
+                                </button>
+                              ))}
+                            </div>
+                            {sd.scenarioId && (
+                              <button
+                                onClick={() => pickScenario(selNode.id, null)}
+                                className="mt-1.5 text-[11px] text-gray-500 transition hover:text-rose-400"
+                              >
+                                Remove the else line (back to the automatic briefing)
+                              </button>
+                            )}
+                            <p className="mt-1 text-[10px] text-gray-600">
+                              Saved to the Playbook on Save, like any box line.
+                            </p>
+                          </div>
+                        )}
                         <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
                           Reply order at this box: a matching reply in the collection answers on the spot; nothing
                           fits → the Else scenario speaks; no Else set → the agent gets a short grounding briefing.
