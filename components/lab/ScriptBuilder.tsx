@@ -2329,9 +2329,33 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                             );
                           })()}
                         </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">
+                            Else scenario <span className="text-gray-600">(when no reply in the collection fits)</span>
+                          </label>
+                          <select
+                            className={inputCls + " [color-scheme:dark]"}
+                            value={sd.scenarioId ?? ""}
+                            onChange={(e) => patchNodeData(selNode.id, { scenarioId: e.target.value || null })}
+                          >
+                            <option value="">(none — the agent bridges with a briefing)</option>
+                            {scenarios.filter((s) => s.action_type !== "ignore").map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                          {(() => {
+                            const els = sd.scenarioId ? scenarios.find((s) => s.id === sd.scenarioId) : undefined;
+                            return els?.response_template ? (
+                              <p className="mt-1 rounded-md bg-gray-900/60 p-1.5 text-[10px] italic text-gray-500">
+                                “{snip(els.response_template, 110)}”
+                              </p>
+                            ) : null;
+                          })()}
+                        </div>
                         <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[10px] text-gray-500">
-                          Whichever reply matches is answered on the spot and the box stays parked. Add reply
-                          connectors (the + on the box) for the replies that should move the call onward.
+                          Reply order at this box: a matching reply in the collection answers on the spot; nothing
+                          fits → the Else scenario speaks; no Else set → the agent gets a short grounding briefing.
+                          Add reply connectors (the + on the box) for the replies that should move the call onward.
                         </p>
                       </>
                     )}
