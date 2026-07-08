@@ -14,10 +14,13 @@ import {
   useNodesState,
   useEdgesState,
   useUpdateNodeInternals,
+  BaseEdge,
+  EdgeLabelRenderer,
   type Node,
   type Edge,
   type Connection,
   type NodeProps,
+  type EdgeProps,
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -221,6 +224,36 @@ function FlowNode({ id, data, selected }: NodeProps) {
   );
 }
 const nodeTypes = { lab: FlowNode };
+
+// A connector arrow pointing back at its OWN box ("repeat this stage") —
+// the default bezier between two near-identical points is an unreadable
+// squiggle. Draw a proper loop instead: out of the bottom dot, around the
+// right side of the box, back into the top, label at the apex.
+function SelfLoopEdge({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: EdgeProps) {
+  const reach = 110;
+  const midY = (sourceY + targetY) / 2;
+  const apexX = Math.max(sourceX, targetX) + reach;
+  const path =
+    `M ${sourceX} ${sourceY} ` +
+    `C ${sourceX + reach * 0.6} ${sourceY + 55}, ${apexX} ${midY + 45}, ${apexX} ${midY} ` +
+    `C ${apexX} ${midY - 45}, ${targetX + reach * 0.6} ${targetY - 55}, ${targetX} ${targetY}`;
+  return (
+    <>
+      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
+      {label ? (
+        <EdgeLabelRenderer>
+          <div
+            style={{ position: "absolute", transform: `translate(-50%, -50%) translate(${apexX}px, ${midY}px)`, pointerEvents: "all" }}
+            className="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] font-medium text-gray-300"
+          >
+            {String(label)}
+          </div>
+        </EdgeLabelRenderer>
+      ) : null}
+    </>
+  );
+}
+const edgeTypes = { selfloop: SelfLoopEdge };
 
 const inputCls =
   "w-full rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none";
@@ -445,6 +478,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           id: e.id,
           source: e.source_node_id,
           target: e.target_node_id,
+          type: e.source_node_id === e.target_node_id ? "selfloop" : undefined,
           sourceHandle: condRaw.handle as string,
           label: isAny ? "anything else" : scn ? snip(scn.name, 18) : "",
           style: isAny ? { stroke: "#34d399", strokeDasharray: "3 3" } : { stroke: "#34d399" },
@@ -1447,8 +1481,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     const specMatched =
       !!specIntent && edges.some((e) => e.source === run.currentNodeId && condOf(e).value === specIntent);
     return edges.map((e) => {
-      const up = (posY.get(e.target) ?? 0) < (posY.get(e.source) ?? 0);
-      let out = up ? { ...e, style: { ...(e.style ?? {}), strokeDasharray: "7 5" } } : e;
+      const isSelf = e.source === e.target;
+      const up = isSelf || (posY.get(e.target) ?? 0) < (posY.get(e.source) ?? 0);
+      let out = up
+        ? { ...e, type: isSelf ? "selfloop" : e.type, style: { ...(e.style ?? {}), strokeDasharray: "7 5" } }
+        : e;
       if (run.status !== "idle") {
         const walked = walkedPairs.has(e.source + ">" + e.target);
         const intoCurrent = e.target === run.currentNodeId && walked;
@@ -2060,6 +2097,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 setSelEdgeId(null);
               }}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               colorMode="dark"
               snapToGrid
               snapGrid={[16, 16]}
@@ -2869,6 +2907,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 nodes={preview.nodes}
                 edges={preview.edges}
                 nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
                 colorMode="dark"
                 fitView
                 nodesDraggable={false}
