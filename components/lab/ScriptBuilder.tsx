@@ -1767,9 +1767,10 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 handler_ignore: "recognized, deliberately not answered",
                 flow_owns_action: "the flow owns this action — reactive stood down",
               };
-              const transcript = runEvents.filter(
-                (e) => e.event_type === "utterance" || e.event_type === "agent_said" || (e.event_type === "injected" && !!metaOf(e).opening)
-              );
+              // agent_said covers everything actually spoken (VAPI transcribes
+              // the firstMessage too) — including our logged opening would
+              // show the greeting twice.
+              const transcript = runEvents.filter((e) => e.event_type === "utterance" || e.event_type === "agent_said");
               const listener = runEvents.filter(
                 (e) =>
                   ["classified", "sms", "error"].includes(e.event_type) ||

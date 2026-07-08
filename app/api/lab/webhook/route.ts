@@ -837,11 +837,16 @@ async function handleTranscript(
         ? ` (You've already answered this ${priorRepeats === 1 ? "once" : `${priorRepeats} times`} this call — likely a clarification. Do NOT restate the same sentence: shift the emphasis or add ONE new concrete detail. E.g. a second self-introduction stresses the COMPANY you represent, not your name again.)`
         : "";
     // Ground the briefing in the customer's actual words so the reply connects
-    // to the conversation instead of reading like a recital.
+    // to the conversation instead of reading like a recital. In script mode,
+    // clamp the tail — the model otherwise appends invented follow-ups.
+    const scriptClamp = settings.active_script_id
+      ? " Deliver ONLY that, then stop — no added follow-up question of your own; the script decides what comes next."
+      : "";
     const brief = (t: string) =>
       (alreadyReplied
         ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
         : `The customer just said: "${turnText.slice(0, 160)}" — react to that naturally in your own words, then: ${t}`) +
+      scriptClamp +
       repeatLine +
       coveredLine;
     // Multi-part replies ("how much is it — and where did you get my number?"):
@@ -1332,11 +1337,14 @@ async function runScriptFlow(
         ? ` (You've already said this ${priorRepeats === 1 ? "once" : `${priorRepeats} times`} this call — don't recite it again: much shorter, new emphasis or one new detail. E.g. a second self-introduction stresses the COMPANY, not your name.)`
         : "";
     // Ground briefings in the customer's actual words — the step should feel
-    // like a reply to them, not a recital of the next script line.
+    // like a reply to them, not a recital of the next script line. The clamp
+    // at the end is load-bearing: without it the model appends invented
+    // follow-up questions after delivering the line.
     const brief = (t: string) =>
       (alreadyReplied
         ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
         : `The customer just said: "${utterance.slice(0, 140)}" — react to that naturally in your own words, then: ${t}`) +
+      " Deliver ONLY that, then stop — no added follow-up question of your own; the script decides what comes next." +
       repeatLine +
       coveredLine;
     let injectedText = "";
