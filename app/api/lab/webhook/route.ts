@@ -1285,15 +1285,12 @@ async function runScriptFlow(
           matches.map((m, i) => `(${i + 1}) ${m.response_template}`).join(" ");
         mergedIds = matches.map((m) => m.id);
       }
-      // No member fits the reply → the box's default line; failing that, the
-      // highest-priority ENABLED member (a toggled-off scenario is never an
-      // automatic pick — only an explicit box assignment may still speak it).
-      scenario =
-        matches.length > 0
-          ? matches[0]
-          : handlerById(target.scenario_id) ??
-            allHandlers.filter((h) => ids.includes(h.id) && h.enabled).sort((a, b) => a.priority - b.priority)[0] ??
-            null;
+      // No member fits the reply → the box's default line if one is set;
+      // otherwise NOTHING is picked and the stage-guidance briefing grounds
+      // the agent. Never blind-pick a member: a live call once answered a
+      // plain "yes" with "It's Victor from Lucky Seven" because the
+      // highest-priority member happened to be the who-is-calling reply.
+      scenario = matches.length > 0 ? matches[0] : handlerById(target.scenario_id) ?? null;
       stageMemberNames = allHandlers.filter((h) => ids.includes(h.id) && h.enabled).map((h) => h.name);
     } else {
       // send_sms / transfer
