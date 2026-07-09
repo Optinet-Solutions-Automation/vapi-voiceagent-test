@@ -14,9 +14,6 @@ import {
   assistantSpeaking,
   recentUnansweredFragment,
   getDeliveredHandlers,
-  agentSaidAfter,
-  lastFlowInjection,
-  watchdogStateAfter,
   getLastInjectedEvent,
   getRecentTurns,
   getCollectionHandlerIds,
@@ -24,6 +21,7 @@ import {
   getFlowState,
   persistFlowStateGuarded,
 } from "@/lib/lab-db";
+import { checkDelivery } from "@/lib/lab-watchdog";
 import { findEntryNode, nodeById, pickNextEdge, contentTypeOf } from "@/lib/lab-flow";
 import { classifyUtterance, type Classification } from "@/lib/lab-router";
 import {
@@ -331,74 +329,6 @@ async function scopeToActiveCollection(
     return handlers.filter((h) => allowed.has(h.id));
   } catch {
     return handlers;
-  }
-}
-
-// The idle nudges configure-assistant installs — spoken by VAPI itself, so
-// they must never count as the briefed line having been delivered.
-const IDLE_NUDGES = ["Take your time — I'm still here.", "Are you still with me?", "Can you hear me okay?"];
-
-/** Delivery watchdog. The model sometimes answers a triggered briefing with
- *  its filler ALONE ("Uh-huh." … silence) — it "waits" for a line that
- *  already arrived — or the trigger races the filler and gets swallowed.
- *  Serverless freezes background timers (a live call proved the old
- *  setTimeout version never ran on Vercel), so this check is EVENT-DRIVEN:
- *  every subsequent webhook message re-checks the newest injection. It is
- *  idempotent across invocations via persisted marker events — re-trigger
- *  once with blunter wording, and if even that stays silent, log a red error
- *  so an undelivered line can never pass QA unnoticed. */
-async function checkDelivery(callId: string, controlUrlHint: string | null): Promise<void> {
-  try {
-    const inj = await lastFlowInjection(callId);
-    if (!inj || !inj.content || !inj.meta.flow) return;
-    if (inj.meta.mode === "disabled_skipped") return;
-    const nodeType = inj.meta.nodeType as string | undefined;
-    const age = Date.now() - new Date(inj.createdAt).getTime();
-    // Goodbyes end the call themselves — but the reworded-goodbye hangup used
-    // a background timer serverless freezes, so the event stream ends it:
-    // once the goodbye was voiced (or waiting stopped making sense), hang up.
-    if (nodeType === "end") {
-      const voiced = await agentSaidAfter(callId, inj.id, 10, IDLE_NUDGES);
-      const overdue = inj.meta.rewordGoodbye ? (voiced && age > 7000) || age > 15000 : !voiced && age > 8000;
-      if (overdue && !(await assistantSpeaking(callId))) {
-        const controlUrl = await getControlUrl(callId, controlUrlHint);
-        if (controlUrl) await endCall(controlUrl).catch(() => {});
-      }
-      return;
-    }
-    if (nodeType === "transfer") return;
-    if (age < 4500 || age > 60000) return;
-    if (await hasNewerUtterance(callId, inj.id)) return; // customer moved on — the new turn owns delivery
-    if (await agentSaidAfter(callId, inj.id, 20, IDLE_NUDGES)) return; // substantial non-idle speech = delivered
-    if (await assistantSpeaking(callId)) return; // mid-speech — the next event re-checks
-    const wd = await watchdogStateAfter(callId, inj.id);
-    if (wd.errored) return;
-    if (wd.retriggerAt) {
-      if (Date.now() - new Date(wd.retriggerAt).getTime() < 5000) return;
-      await log({
-        call_id: callId,
-        event_type: "error",
-        content: "line never voiced — briefing and retrigger both produced no speech",
-        meta: { flow: true, reason: "undelivered" },
-      });
-      return;
-    }
-    const controlUrl = await getControlUrl(callId, controlUrlHint);
-    if (!controlUrl) return;
-    // Marker first: it is the idempotency lock other invocations check.
-    await log({
-      call_id: callId,
-      event_type: "skipped",
-      content: "briefing produced no speech — re-triggering once",
-      meta: { flow: true, reason: "retrigger" },
-    });
-    await injectStaffNote(
-      controlUrl,
-      `You paused after your filler, but the supplied step is still UNDELIVERED — speak it NOW, nothing else (if it's written as an instruction, say what it asks for; never read instruction wording aloud): ${inj.content}`,
-      true
-    );
-  } catch {
-    /* best effort */
   }
 }
 
@@ -1187,7 +1117,10 @@ async function runScriptFlow(
         classified_at: new Date(classifiedAt).toISOString(),
         injected_at: new Date(ms).toISOString(),
         latency_ms: ms - utteranceAt.getTime(),
-        meta: { flow: true, toNode: p.targetId, nodeType: p.ct, edgeCondition: p.edgeCond, ...(p.mode ? { mode: p.mode } : {}), ...(p.extra ?? {}) },
+        // controlUrl rides along so ANY later invocation (the /api/lab/watch
+        // poll runs as a separate lambda with no in-memory cache) can
+        // retrigger from this row alone, without a VAPI API roundtrip.
+        meta: { flow: true, toNode: p.targetId, nodeType: p.ct, edgeCondition: p.edgeCond, ...(controlUrlHint ? { controlUrl: controlUrlHint } : {}), ...(p.mode ? { mode: p.mode } : {}), ...(p.extra ?? {}) },
       });
     }
     return true;

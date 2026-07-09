@@ -1332,6 +1332,15 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     const callId = run.callId;
     const timer = setInterval(async () => {
       try {
+        // Watchdog tick: serverless freezes background timers and the VAPI
+        // webhook goes silent exactly when a briefing is swallowed (nobody
+        // speaking → no events), so this poll is the server's clock. Fire
+        // and forget — the poll must not wait on it.
+        fetch("/api/lab/watch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ callId }),
+        }).catch(() => {});
         const [state, evs] = await Promise.all([
           getFlowState(callId).catch(() => null),
           listLabCallEvents(callId, lastRunEvId.current).catch(() => []),

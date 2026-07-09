@@ -54,6 +54,14 @@ export default function ListenerMonitor({ callId, active }: Props) {
 
     async function poll() {
       try {
+        // Watchdog tick — the server has no reliable timer of its own (see
+        // /api/lab/watch); the live poll is its clock. Fire and forget.
+        if (active)
+          fetch("/api/lab/watch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ callId }),
+          }).catch(() => {});
         const evs = await listLabCallEvents(callId!, lastIdRef.current);
         if (evs.length > 0) {
           lastIdRef.current = evs[evs.length - 1].id;
