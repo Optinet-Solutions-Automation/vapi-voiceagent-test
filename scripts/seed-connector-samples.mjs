@@ -112,7 +112,7 @@ await sb.from("listener_collection_handlers").insert(
 );
 
 // ── Graph helpers ─────────────────────────────────────────────
-const conn = (intentKey, label, any = false) => ({ id: "c:" + randomUUID(), intentKey: any ? "" : intentKey, label, ...(any ? { any: true } : {}) });
+const conn = (intentKey, label, any = false, quickWords = null) => ({ id: "c:" + randomUUID(), intentKey: any ? "" : intentKey, label, ...(any ? { any: true } : {}), ...(quickWords ? { quickWords } : {}) });
 const node = (script_id, type, label, config, scenarioKey, x, y) => ({
   id: randomUUID(), script_id, type, label, config, scenario_id: scenarioKey ? byKey[scenarioKey].id : null, pos_x: x, pos_y: y,
 });
@@ -124,7 +124,7 @@ const edgeFor = (script_id, from, connector, to) => ({
 // ── Basic sample ──────────────────────────────────────────────
 const { data: basic } = await sb.from("listener_scripts").insert({ name: BASIC, description: "The minimal strict script: agree → pitch → end; anything else ends the call." }).select().single();
 {
-  const cYes = conn("sample_basic_yes", "Sample — customer agrees");
+  const cYes = conn("sample_basic_yes", "Sample — customer agrees", false, "yes, yeah, yup, sure, okay, ok");
   const cElse = conn(null, "anything else", true);
   const cAfter = conn(null, "anything else", true);
   const start = node(basic.id, "start", "Start call", { mode: "agent_first", opening: "Hi, this is Alex from BrightPath — quick question: have you had a chance to look at your account this week?", openingDelivery: "verbatim", connectors: [cYes, cElse] }, null, 260, 40);
@@ -142,10 +142,10 @@ const { data: basic } = await sb.from("listener_scripts").insert({ name: BASIC, 
 // ── Advanced sample ───────────────────────────────────────────
 const { data: adv } = await sb.from("listener_scripts").insert({ name: ADV, description: "Collections + connectors showcase: two routes into one discovery stage, in-place Q&A with an Else line, a repeat loop-back, SMS consent, catch-alls to End." }).select().single();
 {
-  const cInterested = conn("sample_adv_interested", "Sample — shows interest");
+  const cInterested = conn("sample_adv_interested", "Sample — shows interest", false, "yes, yeah, yup, sure, okay, ok");
   const cQuestion = conn("sample_adv_question", "Sample — asks about the offer");
   const cStartElse = conn(null, "anything else", true);
-  const cTextYes = conn("sample_adv_text_yes", "Sample — agrees to the text");
+  const cTextYes = conn("sample_adv_text_yes", "Sample — agrees to the text", false, "yes, yeah, sure, okay, ok");
   const cRepeat = conn("sample_adv_repeat", "Sample — asks to repeat");
   const cStageElse = conn(null, "anything else", true);
   const cAfterSms = conn(null, "anything else", true);
