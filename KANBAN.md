@@ -49,6 +49,7 @@ _(empty)_
 _(empty)_
 
 ## ✅ Done
+- [x] **Transcript reply-latency tags** · `MEDIUM` · `cmrd8lfuz000h04lhlyd8xstx` — _Jul 9; each agent line shows the seconds the customer waited (utterance → speech start)_
 - [x] **Live-call QA: silent briefings, guidance recital, router spike** · `HIGH` · `cmrd7y1vy000004lipz4ndjyu` — _Jul 9; watchdog now event-driven (serverless-proof), stage guidance framed INTERNAL, router capped 4s+retry_
 - [x] **Multi-intent router + anticipatory listener + analyzed interruptions** · `HIGH` · `cmrd52zkx000604kvkjq9cki2` — _Jul 4-5_
 - [x] **One response per turn + speaking lock + skip-ahead** · `HIGH` · `cmrd54z1a001r04joei51tyua` — _Jul 4-5_
