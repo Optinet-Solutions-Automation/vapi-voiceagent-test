@@ -106,7 +106,10 @@ async function targetSays(node: ListenerScriptNode, byId: Map<string, ListenerHa
 export async function compileStageBriefing(graph: Graph, nodeId: string, handlers: ListenerHandler[]): Promise<string | null> {
   const node = graph.nodes.find((n) => n.id === nodeId);
   if (!node) return null;
-  const outs = graph.edges.filter((e) => e.source_node_id === nodeId);
+  // Silence paths ({kind:"timeout"}) are engine plumbing, not customer-reply
+  // routes — the poll-driven silence advance walks them, so they never
+  // belong in the model's menu.
+  const outs = graph.edges.filter((e) => e.source_node_id === nodeId && ((e.condition ?? {}) as Cfg).kind !== "timeout");
   if (!outs.length) return null;
   const byId = new Map(handlers.map((h) => [h.id, h] as const));
   const ordered = [...outs.filter((e) => !isAnyEdge(e)), ...outs.filter(isAnyEdge)];

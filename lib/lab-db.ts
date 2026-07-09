@@ -567,6 +567,28 @@ export async function agentSaidAfter(callId: string, afterId: number, minLen = 0
   });
 }
 
+/** When did ANYONE last speak on this call (customer utterance or agent
+ *  transcript)? Excluded lines (the configured idle nudges) don't count —
+ *  they'd reset the Wait box's silence clock every 12s and the timeout
+ *  would never fire. Returns epoch ms, or null for a call with no speech. */
+export async function lastSpeechAt(callId: string, exclude: string[] = []): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("event_type, content, created_at")
+    .eq("call_id", callId)
+    .in("event_type", ["utterance", "agent_said"])
+    .order("id", { ascending: false })
+    .limit(25);
+  if (error) throw new Error(error.message);
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const ex = new Set(exclude.map(norm));
+  for (const e of data ?? []) {
+    if (e.event_type === "agent_said" && ex.has(norm((e.content ?? "").trim()))) continue;
+    return new Date(e.created_at).getTime();
+  }
+  return null;
+}
+
 /** The newest flow injection for a call — the delivery watchdog's subject. */
 export async function lastFlowInjection(
   callId: string

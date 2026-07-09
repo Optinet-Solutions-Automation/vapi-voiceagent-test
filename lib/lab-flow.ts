@@ -63,7 +63,9 @@ export function pickNextEdge(
   edges: ListenerScriptEdge[],
   ctx: FlowCtx
 ): ListenerScriptEdge | null {
-  const outs = edges.filter((e) => e.source_node_id === node.id);
+  // Silence paths ({kind:"timeout"}) never fire on a spoken turn — only the
+  // poll-driven silence advance (checkWaitTimeout) walks them.
+  const outs = edges.filter((e) => e.source_node_id === node.id && cond(e).kind !== "timeout");
   if (outs.length === 0) return null;
 
   const conditional = outs.filter((e) => {

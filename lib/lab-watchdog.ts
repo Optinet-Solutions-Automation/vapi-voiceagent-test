@@ -13,12 +13,124 @@ import {
   agentSaidAfter,
   assistantSpeaking,
   watchdogStateAfter,
+  getLabSettings,
+  getFlowState,
+  getScriptGraph,
+  persistFlowStateGuarded,
+  listHandlers,
+  lastSpeechAt,
 } from "./lab-db";
-import { getControlUrl, injectStaffNote, endCall } from "./lab-control";
+import { getControlUrl, injectStaffNote, injectSay, endCall } from "./lab-control";
+import { contentTypeOf } from "./lab-flow";
+import { compileStageBriefing } from "./lab-briefing";
 
 // The idle nudges configure-assistant installs — spoken by VAPI itself, so
 // they must never count as the briefed line having been delivered.
 const IDLE_NUDGES = ["Take your time — I'm still here.", "Are you still with me?", "Can you hear me okay?"];
+
+/** Wait-box silence timeout, driven by the same poll clock. When the flow
+ *  parks on a Wait box that has a silence path ({kind:"timeout"} edge) and
+ *  NOBODY has spoken for the box's waitSeconds (idle nudges excluded), the
+ *  call advances down that path: the target's line is engine-delivered —
+ *  silence means there is no customer turn to make the model answer
+ *  natively — and the target's own stage menu is armed. The flow-state
+ *  optimistic lock makes concurrent poll ticks single-fire. */
+export async function checkWaitTimeout(callId: string, controlUrlHint: string | null): Promise<void> {
+  try {
+    const settings = await getLabSettings().catch(() => null);
+    if (!settings?.active_script_id) return;
+    const state = await getFlowState(callId).catch(() => null);
+    if (!state?.current_node_id) return;
+    const scriptId = state.script_id ?? settings.active_script_id;
+    const graph = await getScriptGraph(scriptId);
+    const node = graph.nodes.find((n) => n.id === state.current_node_id);
+    if (!node || contentTypeOf(node) !== "wait") return;
+    const timeoutEdge = graph.edges.find(
+      (e) => e.source_node_id === node.id && ((e.condition ?? {}) as Record<string, unknown>).kind === "timeout"
+    );
+    if (!timeoutEdge) return;
+    const cfg = (node.config ?? {}) as Record<string, unknown>;
+    const waitMs = Math.min(120, Math.max(2, Number(cfg.waitSeconds) || 8)) * 1000;
+    // The silence clock starts at whichever is newest: entering the box or
+    // the last real speech from either side.
+    const entered = new Date(state.updated_at as string).getTime();
+    const spoke = await lastSpeechAt(callId, IDLE_NUDGES).catch(() => null);
+    if (Date.now() - Math.max(entered, spoke ?? 0) < waitMs) return;
+    if (await assistantSpeaking(callId)) return;
+    const target = graph.nodes.find((n) => n.id === timeoutEdge.target_node_id);
+    if (!target) return;
+    // Advance under the lock BEFORE speaking — a lost race means another
+    // invocation (a real turn or another tick) already moved the call.
+    const won = await persistFlowStateGuarded(
+      callId,
+      scriptId,
+      target.id,
+      (state.variables as Record<string, unknown>) ?? {},
+      state.updated_at as string
+    );
+    if (!won) return;
+    const handlers = await listHandlers().catch(() => []);
+    const byId = new Map(handlers.map((h) => [h.id, h] as const));
+    const ct = contentTypeOf(target);
+    const tCfg = (target.config ?? {}) as Record<string, unknown>;
+    const statements = (((tCfg.statements as string[]) ?? []).map((s) => (s ?? "").trim()).filter(Boolean));
+    const scn = target.scenario_id ? byId.get(target.scenario_id) : undefined;
+    const text = [scn?.response_template?.trim() || (ct === "end" ? "Thanks for your time today. Goodbye!" : ""), ...statements]
+      .filter(Boolean)
+      .join(" ");
+    const controlUrl = await getControlUrl(callId, controlUrlHint);
+    if (ct === "end") {
+      await insertLabEvent({
+        call_id: callId,
+        event_type: "injected",
+        content: text,
+        handler_id: scn?.id ?? null,
+        action_type: "flow:end",
+        meta: { flow: true, toNode: target.id, nodeType: "end", mode: "silence_timeout", ...(controlUrlHint ? { controlUrl: controlUrlHint } : {}) },
+      }).catch(() => {});
+      if (controlUrl) {
+        const r = await injectSay(controlUrl, text, true).catch(() => ({ ok: false }));
+        if (!r.ok) await endCall(controlUrl).catch(() => {});
+      }
+      return;
+    }
+    // Arm the target's menu FIRST, then deliver its line with a trigger —
+    // logged last so the delivery watchdog above guards exactly this row.
+    if (controlUrl) {
+      const briefing = await compileStageBriefing(graph, target.id, handlers).catch(() => null);
+      if (briefing) {
+        await injectStaffNote(controlUrl, briefing, false).catch(() => {});
+        await insertLabEvent({
+          call_id: callId,
+          event_type: "injected",
+          content: `→ armed stage: ${target.label || ct}`,
+          meta: { flow: true, mode: "briefed", toNode: target.id, nodeType: ct },
+        }).catch(() => {});
+      }
+    }
+    await insertLabEvent({
+      call_id: callId,
+      event_type: "injected",
+      content: text || `→ ${target.label || ct}`,
+      handler_id: scn?.id ?? null,
+      action_type: `flow:${ct}`,
+      meta: { flow: true, toNode: target.id, nodeType: ct, mode: "silence_timeout", ...(controlUrlHint ? { controlUrl: controlUrlHint } : {}) },
+    }).catch(() => {});
+    if (controlUrl && text) {
+      if (scn?.delivery === "verbatim") {
+        await injectSay(controlUrl, text, false).catch(() => {});
+      } else {
+        await injectStaffNote(
+          controlUrl,
+          `The customer has stayed quiet — re-engage NOW by delivering this step (own words, keep facts exact; if it reads as an instruction, do what it asks; never read instruction wording aloud): ${text}`,
+          true
+        ).catch(() => {});
+      }
+    }
+  } catch {
+    /* best effort */
+  }
+}
 
 /** The model sometimes answers a triggered briefing with its filler ALONE
  *  ("Uh-huh." … silence) — it "waits" for a line that already arrived — or

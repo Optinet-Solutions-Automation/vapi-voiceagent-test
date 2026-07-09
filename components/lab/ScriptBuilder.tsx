@@ -96,7 +96,7 @@ const snip = (t: string, n: number) => {
 // the other connectors didn't claim ("anything other than yes", "after this
 // box continue no matter what"). Ids are "c:<uuid>" so they're
 // distinguishable from the fixed handles (out/then/else/loop/exit) everywhere.
-type Connector = { id: string; intentKey: string; label?: string; any?: boolean; quickWords?: string };
+type Connector = { id: string; intentKey: string; label?: string; any?: boolean; silence?: boolean; quickWords?: string };
 const isConnectorHandle = (h: string | null | undefined): h is string => !!h && h.startsWith("c:");
 const connectorsOf = (config: Record<string, unknown>): Connector[] =>
   Array.isArray(config.connectors) ? (config.connectors as Connector[]) : [];
@@ -111,8 +111,8 @@ function sourceHandlesFor(
   // arrows still render via a hidden anchor on the box — see FlowNode.)
   const conns = connectors.map((c) => ({
     id: c.id,
-    label: c.any ? "anything else" : c.label ? snip(c.label, 13) : undefined,
-    color: "#34d399",
+    label: c.silence ? "stays silent" : c.any ? "anything else" : c.label ? snip(c.label, 13) : undefined,
+    color: c.silence ? "#38bdf8" : "#34d399",
   }));
   if (isStart) return conns;
   if (CONTENT_META[content].terminal) return [];
@@ -512,7 +512,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     if (c === "send_sms") return scenarioLine(d.scenarioId) ? `“${scenarioLine(d.scenarioId)}”` : "(click to write the confirmation)";
     if (c === "transfer") return (d.config.number as string) || "(phone number)";
     if (c === "return") return `↩ ${(d.config.resultName as string) || "result"}`;
-    if (c === "wait") return "wait for caller";
+    if (c === "wait") {
+      const secs = Number(d.config.waitSeconds) || 8;
+      const hasSilence = connectorsOf(d.config).some((x) => x.silence) || false;
+      return hasSilence ? `listens — silent ${secs}s → silence path` : "listens for the caller's reply";
+    }
     if (c === "end") return scenarioLine(d.scenarioId) ? `“${scenarioLine(d.scenarioId)}”` : null;
     return null;
   }
@@ -585,6 +589,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       // Reply-connector arrows keep their stored condition verbatim.
       if (isConnectorHandle(condRaw.handle as string)) {
         const isAny = (condRaw.kind as string) === "any";
+        const isTimeout = (condRaw.kind as string) === "timeout";
         const value = (condRaw.value as string) ?? "";
         const scn = scenarios.find((s) => s.intent_key === value);
         return {
@@ -593,8 +598,12 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
           target: e.target_node_id,
           type: e.source_node_id === e.target_node_id ? "selfloop" : undefined,
           sourceHandle: condRaw.handle as string,
-          label: isAny ? "anything else" : scn ? snip(scn.name, 18) : "",
-          style: isAny ? { stroke: "#34d399", strokeDasharray: "3 3" } : { stroke: "#34d399" },
+          label: isTimeout ? "customer stays silent" : isAny ? "anything else" : scn ? snip(scn.name, 18) : "",
+          style: isTimeout
+            ? { stroke: "#38bdf8", strokeDasharray: "3 3" }
+            : isAny
+              ? { stroke: "#34d399", strokeDasharray: "3 3" }
+              : { stroke: "#34d399" },
           data: { condition: condRaw },
           markerEnd: { type: MarkerType.ArrowClosed },
         };
@@ -661,6 +670,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       if (isConnectorHandle(h) && sourceId) {
         const src = nodes.find((n) => n.id === sourceId);
         const conn = src ? connectorsOf((src.data as NodeData).config).find((x) => x.id === h) : undefined;
+        if (conn?.silence)
+          return {
+            condition: { kind: "timeout", handle: h },
+            visual: { label: "customer stays silent", style: { stroke: "#38bdf8", strokeDasharray: "3 3" } },
+          };
         if (conn?.any)
           return {
             condition: { kind: "any", handle: h },
@@ -752,6 +766,13 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     const content = payload as Content;
     if (!CONTENT_META[content]) return;
     const config: Record<string, unknown> = { contentType: content };
+    if (content === "wait") {
+      // A Wait box listens for the customer's reply — and ships with a
+      // silence path so "they said nothing" is an authored route, not a
+      // stall: after waitSeconds of quiet the sky-blue dot's arrow fires.
+      config.waitSeconds = 8;
+      config.connectors = [{ id: "c:" + crypto.randomUUID(), intentKey: "", silence: true, label: "customer stays silent" }];
+    }
     dropNode({ kind: "step", label: CONTENT_META[content].label, scenarioId: null, config }, position);
   }
   function onDragStartPalette(e: React.DragEvent, payload: string) {
@@ -1173,8 +1194,13 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       connectorsOf(d.config).forEach((c, i) => {
         const cname = c.label ? `“${snip(c.label, 24)}”` : `#${i + 1}`;
         if (!outsOf(n.id).some((e) => e.sourceHandle === c.id))
-          errors.push({ text: `“${lb}”: reply connector ${cname} has no arrow.`, suggestion: "Drag the green dot to the box this reply should lead to — or remove the dot from its arrow panel." });
-        if (c.any) return; // catch-all needs no rule
+          errors.push({
+            text: `“${lb}”: ${c.silence ? "silence path" : `reply connector ${cname}`} has no arrow.`,
+            suggestion: c.silence
+              ? "Drag the sky-blue dot to the box the call should move to when the customer stays quiet."
+              : "Drag the green dot to the box this reply should lead to — or remove the dot from its arrow panel.",
+          });
+        if (c.any || c.silence) return; // catch-all and silence paths need no rule
         if (!c.intentKey)
           errors.push({ text: `“${lb}”: reply connector ${cname} has no rule.`, suggestion: "Click its arrow and describe when the agent should use it." });
         else {
@@ -1440,9 +1466,9 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       // Reply connectors need an arrow, and (unless catch-all) a picked reply.
       connectorsOf(d.config).forEach((c, i) => {
         const cname = c.label ? `“${snip(c.label, 24)}”` : `#${i + 1}`;
-        if (!c.any && !c.intentKey) w.push(`“${label}” reply connector ${cname} has no reply picked.`);
+        if (!c.any && !c.silence && !c.intentKey) w.push(`“${label}” reply connector ${cname} has no reply picked.`);
         if (!outsOf(n.id).some((e) => (e.sourceHandle ?? handleOf(e)) === c.id))
-          w.push(`“${label}” reply connector ${cname} has no arrow.`);
+          w.push(`“${label}” ${c.silence ? "silence path" : `reply connector ${cname}`} has no arrow.`);
       });
       if (d.kind === "start") continue;
       const ct = (d.config.contentType as Content) ?? "scenario";
@@ -1499,9 +1525,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
         if (isConnectorHandle(handle)) {
           const src = nodes.find((n) => n.id === e.source);
           const conn = src ? connectorsOf((src.data as NodeData).config).find((x) => x.id === handle) : undefined;
-          condition = conn?.any
-            ? { kind: "any", handle }
-            : { kind: "intent", by: "intent", value: conn?.intentKey ?? (cond.value as string) ?? "", handle };
+          condition = conn?.silence
+            ? { kind: "timeout", handle }
+            : conn?.any
+              ? { kind: "any", handle }
+              : { kind: "intent", by: "intent", value: conn?.intentKey ?? (cond.value as string) ?? "", handle };
         }
         return {
           id: e.id,
@@ -2010,6 +2038,11 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 const parts = outs.map((e) => {
                   const c = ((e.data as { condition?: Record<string, unknown> })?.condition ?? {}) as Record<string, unknown>;
                   const tgt = nodeLabel(e.target) ?? "next box";
+                  if (c.kind === "timeout") {
+                    const wn = nodes.find((n) => n.id === run.currentNodeId);
+                    const secs = Number((wn?.data as NodeData | undefined)?.config.waitSeconds) || 8;
+                    return `silent ${secs}s → ${tgt}`;
+                  }
                   if (c.kind === "any") return `anything else → ${tgt}`;
                   const scn = scenarios.find((s) => s.intent_key === c.value);
                   return `${scn ? `“${snip(scn.name, 26)}”` : `“${(c.value as string) ?? "?"}”`} → ${tgt}`;
@@ -2757,9 +2790,40 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                     )}
 
                     {content === "wait" && (
-                      <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[11px] text-gray-500">
-                        Pauses here and waits for the customer to speak before following its arrow. Speaks nothing.
-                      </p>
+                      <>
+                        <p className="rounded-lg border border-gray-700 bg-gray-900/50 p-2 text-[11px] text-gray-500">
+                          Listens. The agent says nothing and waits for the customer&rsquo;s reply — reply connectors (green dots)
+                          route what they say. If they stay quiet too long, the sky-blue <span className="text-sky-400">silence path</span> fires instead.
+                        </p>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">
+                            Silence timeout <span className="text-gray-600">(seconds of total quiet before the silence path fires)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={2}
+                            max={120}
+                            className={inputCls}
+                            value={Number(sd.config.waitSeconds) || 8}
+                            onChange={(e) => patchConfig(selNode.id, { waitSeconds: Math.min(120, Math.max(2, Number(e.target.value) || 8)) })}
+                          />
+                        </div>
+                        {!connectorsOf(sd.config).some((c) => c.silence) && (
+                          <button
+                            onClick={() =>
+                              patchConfig(selNode.id, {
+                                connectors: [
+                                  ...connectorsOf(sd.config),
+                                  { id: "c:" + crypto.randomUUID(), intentKey: "", silence: true, label: "customer stays silent" },
+                                ],
+                              })
+                            }
+                            className="w-full rounded-lg border border-sky-700 px-3 py-1.5 text-xs text-sky-300 transition hover:bg-sky-500/10"
+                          >
+                            Add silence path
+                          </button>
+                        )}
+                      </>
                     )}
 
                     {content === "return" && (
@@ -2840,7 +2904,32 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 const h = c?.handle;
                 if (isConnectorHandle(h)) {
                   const isAny = (c as { kind?: string } | undefined)?.kind === "any";
+                  const isTimeout = (c as { kind?: string } | undefined)?.kind === "timeout";
                   const scn = scenarios.find((s) => s.intent_key === c?.value);
+                  if (isTimeout) {
+                    const srcN = selEdge.source ? nodes.find((n) => n.id === selEdge.source) : undefined;
+                    const secs = Number((srcN?.data as NodeData | undefined)?.config.waitSeconds) || 8;
+                    return (
+                      <>
+                        <p className="rounded-lg border border-sky-800 bg-sky-500/5 p-2 text-xs text-gray-300">
+                          Silence path
+                          <span className="block text-[10px] text-gray-500">
+                            Fires when the customer stays completely quiet for {secs}s at this box — no rule needed.
+                            Change the seconds on the Wait box itself.
+                          </span>
+                        </p>
+                        <button
+                          onClick={() => {
+                            if (selEdge.source) removeConnector(selEdge.source, h);
+                            setSelEdgeId(null);
+                          }}
+                          className="w-full rounded-md border border-gray-700 px-2 py-1.5 text-xs text-gray-400 transition hover:border-rose-500 hover:text-rose-300"
+                        >
+                          Remove the silence path (dot + arrow)
+                        </button>
+                      </>
+                    );
+                  }
                   return (
                     <>
                       <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-gray-700 bg-gray-900/50 p-2">

@@ -5,7 +5,7 @@
 // The check is cheap (one query when nothing is pending) and idempotent
 // across concurrent invocations via persisted marker events.
 import { NextResponse } from "next/server";
-import { checkDelivery } from "@/lib/lab-watchdog";
+import { checkDelivery, checkWaitTimeout } from "@/lib/lab-watchdog";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -21,5 +21,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "callId required" }, { status: 400 });
   }
   await checkDelivery(callId, null);
+  await checkWaitTimeout(callId, null);
   return NextResponse.json({});
 }
