@@ -1,0 +1,72 @@
+# Vapi Voice Agent Training Tool — Kanban Board
+
+> Local mirror of the PMS board. **Rule:** when we start/finish a task here, we
+> also move it in the PMS tool. Move order: **Backlog → To Do → In Progress →
+> Review/QA → Done** (use **Blocked** if stuck).
+>
+> - **PMS project:** [Vapi Voice Agent Training Tool](https://pms-nu-eight.vercel.app/projects/cmrd42cp6000004jobwzyi37k)
+> - **Repo:** https://github.com/Optinet-Solutions-Automation/vapi-voiceagent-test
+> - **Live app:** https://vapi-voiceagent-test.vercel.app
+> - **Default assignee:** Christian Albea
+> - **Docs:** [VERSION.md](VERSION.md) — full change history per feature
+> - Last synced: 2026-07-09
+
+## How we keep this in sync with PMS
+1. Pick a task → move its line to **In Progress** here, and move it in PMS.
+2. When code is ready for check → move to **Review/QA** in both.
+3. When approved → move to **Done** in both, check the box.
+4. If blocked → move to **Blocked** in both and note why.
+5. New work → add to **Backlog** here *and* create it in PMS (assign Christian).
+
+PMS column IDs (for API moves via `PATCH /api/tasks/{taskId}/move`, auth
+`Authorization: Bearer $PMS_TOKEN` from `.env.local`):
+`Backlog` `cmrd42cqc000104jo8cvqaw64` · `To Do` `cmrd42cqc000204jokvqodvui` ·
+`In Progress` `cmrd42cqc000304jo21p67hqx` · `Review/QA` `cmrd42cqc000404job2r7064e` ·
+`Blocked` `cmrd42cqc000504jogfu27pan` · `Done` `cmrd42cqc000604jor7xjkbss`
+
+Create tasks: `POST /api/projects/cmrd42cp6000004jobwzyi37k/tasks`
+`{ title, description, columnId, priority: LOW|MEDIUM|HIGH|URGENT, assigneeIds }`
+
+---
+
+## 📋 Backlog
+- [ ] **Wire real SMS via Twilio** · `HIGH` · `cmrd4llh3001n04jogx9o7a8w` — _send box currently simulates; needs Twilio creds + phone-number calls_
+- [ ] **Observer Layer 2: rolling summary, customer mood, goal tracking** · `MEDIUM` · `cmrd4llko001p04josxe649v3` — _the LLM half of the observer design_
+- [ ] **Phase 3: one campaign = one voice agent** · `HIGH` · `cmrd4llu5000004kvamgo4tye` — _campaign_id, per-campaign active script, Build/Test/Results tabs_
+- [ ] **Phase 4: CRM-language palette + prefilled template** · `MEDIUM` · `cmrd4llyn000204kvuzpsotio`
+- [ ] **Phase 5: personalization tokens + audience filters** · `MEDIUM` · `cmrd4lm2q000404kvrfidy8de`
+
+## 🟦 To Do
+_(empty)_
+
+## 🟠 In Progress
+_(empty)_
+
+## 🟣 Review/QA
+_(empty)_
+
+## 🔴 Blocked
+_(empty)_
+
+## ✅ Done
+- [x] **Victor v2 campaign as data + platform rules** · `HIGH` · `cmrd4liva000h04joesmyhwgb`
+- [x] **Script Builder save integrity: uuid arrow ids, upsert-then-prune** · `HIGH` · `cmrd4lj6i000j04jo4ovf5tsh`
+- [x] **Serverless fixes: self-covered skip + persisted speculation** · `HIGH` · `cmrd4ljcn000l04jos5psmcnl`
+- [x] **Latency: Vercel functions pinned to Seoul next to Supabase** · `HIGH` · `cmrd4ljgi000n04joo37ha1na` — _~15s injections → 1.3–2.6s_
+- [x] **Reply-connector redesign: routing lives on the boxes** · `HIGH` · `cmrd4ljli000p04jo2eh3g1dk` — _If/Else & Loop retired; no default path_
+- [x] **Connector rules as plain text; matchers stay out of collections** · `MEDIUM` · `cmrd4ljpl000r04joa90i4xlx`
+- [x] **Catch-all connectors + primary-intent routing** · `HIGH` · `cmrd4ljtn000t04jo09aekesd`
+- [x] **Run mode: built-in QA gate + live canvas monitor** · `HIGH` · `cmrd4ljxj000v04jou53hnswe`
+- [x] **Live-run dock: transcript / listener / observer** · `MEDIUM` · `cmrd4lk1q000x04jo65mvrspz`
+- [x] **Run history + replay** · `MEDIUM` · `cmrd4lk5k000z04jod2m2b306`
+- [x] **Unified replies: side-answer merging on routed turns** · `MEDIUM` · `cmrd4lk94001104jo5odo4au1`
+- [x] **Call quality: anti-repeat ledger + Deepgram keyterm boosting** · `HIGH` · `cmrd4lkcp001304jo0a1xwxn6`
+- [x] **Observer navigation: expectation priors + waiting-for display** · `MEDIUM` · `cmrd4lkgy001504jodsc2b6ic`
+- [x] **Strict script mode: rules 8–9, approved fillers only** · `HIGH` · `cmrd4lkki001704jod7zk6241`
+- [x] **Collection Else ladder + delivery choice everywhere** · `MEDIUM` · `cmrd4lko7001904jozfl3753q`
+- [x] **Additional statements + hover toolbar + canvas capsules** · `MEDIUM` · `cmrd4lkrw001b04jo7uq6mj9q`
+- [x] **Delivery watchdog: swallowed lines can no longer vanish** · `HIGH` · `cmrd4lkw7001d04jojltsiatn`
+- [x] **Latency: three-tier classification (instant / fast / full)** · `HIGH` · `cmrd4lkzr001f04jo3l0hdpun`
+- [x] **Legacy era removed + UX batch** · `MEDIUM` · `cmrd4ll3e001h04jom7hwcqnj` — _undo/redo, dirty-save flow, −400 lines_
+- [x] **Builder config drawer + voice-agent picker** · `LOW` · `cmrd4ll7d001j04jo8z6kkfqk`
+- [x] **Sample scripts v2 (basic + advanced) with the full feature set** · `MEDIUM` · `cmrd4llaw001l04jo8rjkzuqm`
