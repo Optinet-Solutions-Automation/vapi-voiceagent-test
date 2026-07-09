@@ -43,7 +43,7 @@ _(empty)_
 _(empty)_
 
 ## 🟣 Review/QA
-_(empty)_
+- [ ] **Brief-ahead runtime: stage menus answered natively by VAPI** · `URGENT` · `cmrdb2nds000004l4y9rfqp6k` — _Jul 9; commit 9c32c34; awaiting Chris's live test call — rollback is one `git revert`_
 
 ## 🔴 Blocked
 _(empty)_
