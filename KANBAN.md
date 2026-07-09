@@ -9,7 +9,7 @@
 > - **Live app:** https://vapi-voiceagent-test.vercel.app
 > - **Default assignee:** Christian Albea
 > - **Docs:** [VERSION.md](VERSION.md) — full change history per feature
-> - Last synced: 2026-07-09
+> - Last synced: 2026-07-09 (backlog cleared per Chris; weekend Jul 4-5 work added)
 
 ## How we keep this in sync with PMS
 1. Pick a task → move its line to **In Progress** here, and move it in PMS.
@@ -30,11 +30,11 @@ Create tasks: `POST /api/projects/cmrd42cp6000004jobwzyi37k/tasks`
 ---
 
 ## 📋 Backlog
-- [ ] **Wire real SMS via Twilio** · `HIGH` · `cmrd4llh3001n04jogx9o7a8w` — _send box currently simulates; needs Twilio creds + phone-number calls_
-- [ ] **Observer Layer 2: rolling summary, customer mood, goal tracking** · `MEDIUM` · `cmrd4llko001p04josxe649v3` — _the LLM half of the observer design_
-- [ ] **Phase 3: one campaign = one voice agent** · `HIGH` · `cmrd4llu5000004kvamgo4tye` — _campaign_id, per-campaign active script, Build/Test/Results tabs_
-- [ ] **Phase 4: CRM-language palette + prefilled template** · `MEDIUM` · `cmrd4llyn000204kvuzpsotio`
-- [ ] **Phase 5: personalization tokens + audience filters** · `MEDIUM` · `cmrd4lm2q000404kvrfidy8de`
+_(empty — cleared 2026-07-09)_
+
+> Parking lot (ideas NOT on the PMS board yet — promote when ready):
+> Twilio real SMS · Observer Layer 2 (summary/mood/goal) · Phase 3 one-campaign-one-agent ·
+> Phase 4 CRM palette · Phase 5 personalization/audience
 
 ## 🟦 To Do
 _(empty)_
@@ -49,6 +49,10 @@ _(empty)_
 _(empty)_
 
 ## ✅ Done
+- [x] **Multi-intent router + anticipatory listener + analyzed interruptions** · `HIGH` · `cmrd52zkx000604kvkjq9cki2` — _Jul 4-5_
+- [x] **One response per turn + speaking lock + skip-ahead** · `HIGH` · `cmrd54z1a001r04joei51tyua` — _Jul 4-5_
+- [x] **Filler discipline v1: instant, moment-matched, from a tiny set** · `MEDIUM` · `cmrd54zfd001t04jo3oant46b` — _Jul 4-5_
+- [x] **Composed prompt architecture + one-command campaign switching** · `MEDIUM` · `cmrd54zjg001v04johxqzgte2` — _Jul 4-5_
 - [x] **Victor v2 campaign as data + platform rules** · `HIGH` · `cmrd4liva000h04joesmyhwgb`
 - [x] **Script Builder save integrity: uuid arrow ids, upsert-then-prune** · `HIGH` · `cmrd4lj6i000j04jo4ovf5tsh`
 - [x] **Serverless fixes: self-covered skip + persisted speculation** · `HIGH` · `cmrd4ljcn000l04jos5psmcnl`
