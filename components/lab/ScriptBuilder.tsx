@@ -26,6 +26,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   listScripts,
+  duplicateScript,
   updateScript,
   deleteScript,
   getScriptGraph,
@@ -1545,6 +1546,22 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
       setError(e instanceof Error ? e.message : "Failed to delete");
     }
   }
+  async function handleDuplicateScript() {
+    // The copy is made from the SAVED graph — unsaved canvas changes stay on
+    // the original, so the usual dirty guard decides what happens to them.
+    if (!scriptId || !confirmDiscard()) return;
+    setBusy(true);
+    try {
+      const copy = await duplicateScript(scriptId, `${name.trim() || "Untitled workflow"} (copy)`);
+      setScripts(await listScripts());
+      await loadScript(copy.id);
+      setNotice("Duplicated — now editing the copy.");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to duplicate");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function toggleActive() {
     if (!scriptId) return;
     const next = activeScriptId === scriptId ? null : scriptId;
@@ -1799,6 +1816,17 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 13h8v6H8z" />
               </svg>
             )}
+          </button>
+
+          {/* Duplicate workflow */}
+          <button onClick={handleDuplicateScript} disabled={!scriptId || busy} title="Duplicate workflow — copy every box and arrow into a new script" className="rounded-lg border border-gray-700 p-2 text-gray-300 transition hover:bg-gray-800 disabled:opacity-40">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+              />
+            </svg>
           </button>
 
           {/* Delete */}

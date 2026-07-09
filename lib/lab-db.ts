@@ -168,6 +168,56 @@ export async function deleteScript(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/** Deep-copy a workflow: new script row + every node and arrow, with fresh
+ *  ids and arrows remapped to the copied boxes. Node configs (connectors,
+ *  statements, collection links) copy verbatim — connector handle ids only
+ *  need to be unique within one script, and Playbook scenarios are shared
+ *  by reference, not cloned. Returns the new script. */
+export async function duplicateScript(id: string, newName: string): Promise<ListenerScript> {
+  const [{ data: src, error: srcErr }, graph] = await Promise.all([
+    supabase.from("listener_scripts").select("*").eq("id", id).single(),
+    getScriptGraph(id),
+  ]);
+  if (srcErr) throw new Error(srcErr.message);
+  const { data: copy, error: insErr } = await supabase
+    .from("listener_scripts")
+    .insert({ name: newName, description: src?.description ?? null, collection_id: src?.collection_id ?? null })
+    .select()
+    .single();
+  if (insErr) throw new Error(insErr.message);
+  const nodeIdMap = new Map(graph.nodes.map((n) => [n.id, crypto.randomUUID()] as const));
+  if (graph.nodes.length) {
+    const { error } = await supabase.from("listener_script_nodes").insert(
+      graph.nodes.map((n) => ({
+        id: nodeIdMap.get(n.id)!,
+        script_id: copy.id,
+        type: n.type,
+        label: n.label,
+        config: n.config,
+        scenario_id: n.scenario_id,
+        pos_x: n.pos_x,
+        pos_y: n.pos_y,
+      }))
+    );
+    if (error) throw new Error(error.message);
+  }
+  const edges = graph.edges.filter((e) => nodeIdMap.has(e.source_node_id) && nodeIdMap.has(e.target_node_id));
+  if (edges.length) {
+    const { error } = await supabase.from("listener_script_edges").insert(
+      edges.map((e) => ({
+        id: crypto.randomUUID(),
+        script_id: copy.id,
+        source_node_id: nodeIdMap.get(e.source_node_id)!,
+        target_node_id: nodeIdMap.get(e.target_node_id)!,
+        condition: e.condition,
+        label: e.label,
+      }))
+    );
+    if (error) throw new Error(error.message);
+  }
+  return copy;
+}
+
 export type ScriptGraph = { nodes: ListenerScriptNode[]; edges: ListenerScriptEdge[] };
 
 export async function getScriptGraph(scriptId: string): Promise<ScriptGraph> {
