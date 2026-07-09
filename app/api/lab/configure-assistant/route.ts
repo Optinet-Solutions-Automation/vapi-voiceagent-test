@@ -175,6 +175,9 @@ export async function POST(req: Request) {
       acknowledgementPhrases: [
         "okay", "ok", "yeah", "yes", "uh-huh", "mm-hmm", "mhm", "right",
         "sure", "got it", "i see", "alright", "gotcha", "cool", "i hear you",
+        // Channel checks aren't replies either — keep talking through them;
+        // the listener holds navigation on them too (backchannel gate).
+        "hello", "hello hello", "are you there", "you there", "can you hear me",
       ],
       interruptionPhrases: ["stop", "wait", "hold on", "no no", "excuse me", "actually", "question"],
     },

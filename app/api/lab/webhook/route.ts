@@ -12,6 +12,7 @@ import {
   agentSpokeSince,
   agentWordsSince,
   assistantSpeaking,
+  lastAssistantSpeechStop,
   recentUnansweredFragment,
   getDeliveredHandlers,
   getLastInjectedEvent,
@@ -757,11 +758,16 @@ async function handleTranscript(
     const wordCount = turnText.split(/\s+/).filter(Boolean).length;
     if (flowIntent === "none" && wordCount <= 6) {
       const norm = turnText.toLowerCase().replace(/[^a-z? ]+/g, " ").replace(/\s+/g, " ").trim();
+      const speakingNow = await assistantSpeaking(callId).catch(() => false);
+      const stopAt = await lastAssistantSpeechStop(callId).catch(() => null);
+      // "Stopped moments before this landed" = the noise itself cut the
+      // agent off (finals lag the spoken words by ~0.5-1.5s).
+      const stoppedJustNow = stopAt != null && utteranceAt.getTime() - stopAt < 3000;
       const channelNoise =
         /^(hello|hi|hey|huh|what|sorry|pardon)[?. ]*$|are you (there|with me)|you there|still there|can you hear|you hear me|not hearing|hearing me/.test(norm);
       const ackNoise =
         /^(okay|ok|kay|alright|right|understood|got it|i understood|mhm|mm hmm|uh huh)[?. ]*$/.test(norm) &&
-        (await assistantSpeaking(callId).catch(() => false));
+        (speakingNow || stoppedJustNow);
       if (channelNoise || ackNoise) {
         await log({
           call_id: callId,
@@ -770,6 +776,27 @@ async function handleTranscript(
           intent_key: cls.intent,
           meta: { flow: true, reason: "backchannel" },
         });
+        // Interruption arbiter, part two: the noise physically cut the agent
+        // off and it hasn't resumed — rule the interruption ignorable and
+        // send it back to finish the line (the old 2-3s analyzed-interruption
+        // behavior, rebuilt for brief-ahead).
+        if (!speakingNow && stoppedJustNow) {
+          const controlUrl = await getControlUrl(callId, controlUrlHint);
+          if (controlUrl) {
+            await log({
+              call_id: callId,
+              event_type: "injected",
+              content: `→ resume: interruption ruled ignorable ("${utterance.slice(0, 40)}")`,
+              intent_key: cls.intent,
+              meta: { flow: true, mode: "resume", ...(controlUrlHint ? { controlUrl: controlUrlHint } : {}) },
+            });
+            await injectStaffNote(
+              controlUrl,
+              `The customer's "${utterance.slice(0, 60)}" was just ${channelNoise ? "a channel check" : "an acknowledgement"}, not a real reply — you were cut off mid-line. Resume and finish what you were saying from exactly where you stopped: only the unsaid part, never restart, never re-answer covered ground.`,
+              true
+            ).catch(() => {});
+          }
+        }
         return;
       }
     }

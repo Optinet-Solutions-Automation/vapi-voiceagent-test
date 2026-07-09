@@ -167,8 +167,9 @@ export async function checkDelivery(callId: string, controlUrlHint: string | nul
     if (nodeType === "transfer") return;
     // Brief-ahead turns speak MODEL-SIDE — there is no supplied line to
     // deliver, so a "retrigger" here would force a duplicate reply on top of
-    // the model's own. The watchdog only guards triggering injections.
-    if (inj.meta.mode === "model_side" || inj.meta.mode === "briefed") return;
+    // the model's own. Resume nudges are best-effort continuations, not
+    // deliverable lines. The watchdog only guards triggering injections.
+    if (inj.meta.mode === "model_side" || inj.meta.mode === "briefed" || inj.meta.mode === "resume") return;
     // 3.5s, not 5: `age` compares a DB timestamp against this machine's
     // clock, and ~1s of skew once made a 5s check measure 4.4s and skip.
     // A normal delivery starts speaking well inside 3.5s, and the speech

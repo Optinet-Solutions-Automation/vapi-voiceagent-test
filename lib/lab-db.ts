@@ -567,6 +567,25 @@ export async function agentSaidAfter(callId: string, afterId: number, minLen = 0
   });
 }
 
+/** When did the assistant last STOP speaking? Null if its newest speech
+ *  transition is a start (still talking) or it never spoke. Powers the
+ *  interruption arbiter: a stop moments before a noise utterance means the
+ *  noise cut the agent off mid-line — grounds for a resume nudge. */
+export async function lastAssistantSpeechStop(callId: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("content, created_at")
+    .eq("call_id", callId)
+    .eq("event_type", "status")
+    .like("content", "speech-update:%(assistant)")
+    .order("id", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const r = (data ?? [])[0];
+  if (!r || !(r.content ?? "").startsWith("speech-update: stopped")) return null;
+  return new Date(r.created_at).getTime();
+}
+
 /** When did ANYONE last speak on this call (customer utterance or agent
  *  transcript)? Excluded lines (the configured idle nudges) don't count —
  *  they'd reset the Wait box's silence clock every 12s and the timeout
