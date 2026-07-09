@@ -49,6 +49,7 @@ _(empty)_
 _(empty)_
 
 ## ✅ Done
+- [x] **Wait box: silence path after N seconds** · `MEDIUM` · `cmrdhivc9000004l7twlw9n9s` — _Jul 9; listens for the reply; sky-blue silence arrow fires after waitSeconds (default 8) of quiet via the poll clock_
 - [x] **Duplicate workflow button** · `MEDIUM` · `cmrdgo2a2000004joss5rgpzb` — _Jul 9; one-click deep copy of a script (boxes, arrows, connector wiring) opening as "(copy)"_
 - [x] **Watchdog real clock: run poll ticks /api/lab/watch every 1.2s** · `HIGH` · `cmrd9ndfh000004lexnyrr3ij` — _Jul 9; silent-briefing recovery 16-19s → ~4-6s; rule 8 outlaws silence after a supplied step_
 - [x] **Transcript reply-latency tags** · `MEDIUM` · `cmrd8lfuz000h04lhlyd8xstx` — _Jul 9; each agent line shows the seconds the customer waited (utterance → speech start)_
