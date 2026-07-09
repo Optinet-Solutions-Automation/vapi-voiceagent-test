@@ -22,6 +22,7 @@ import {
   persistFlowStateGuarded,
 } from "@/lib/lab-db";
 import { checkDelivery } from "@/lib/lab-watchdog";
+import { compileStageBriefing } from "@/lib/lab-briefing";
 import { findEntryNode, nodeById, pickNextEdge, contentTypeOf } from "@/lib/lab-flow";
 import { classifyUtterance, type Classification } from "@/lib/lab-router";
 import {
@@ -722,21 +723,6 @@ async function handleTranscript(
     },
   });
 
-  // Can the Playbook answer this turn on its own? The flow uses this to let
-  // off-script questions fall through to the reactive layer instead of
-  // dragging them down an Else branch.
-  const reactiveHandler = handlers.find((h) => h.intent_key === flowIntent);
-  // Conversion actions are flow steps: when a script is active the reactive
-  // layer must never pitch the offer or confirm an SMS out of order — that
-  // desyncs the conversation from the flow position for the rest of the call.
-  // Such intents don't defer; the flow keeps walking and speaks its own step.
-  const flowOwnsAction =
-    !!settings.active_script_id &&
-    !!reactiveHandler &&
-    (reactiveHandler.action_type === "send_sms" || reactiveHandler.action_type === "give_offer");
-  const reactiveCanHandle =
-    flowIntent !== "none" && !!reactiveHandler && reactiveHandler.action_type !== "ignore" && !flowOwnsAction;
-
   // Split finals: if a newer customer fragment arrived while we were busy
   // classifying, this one is stale — the newest fragment gets the response.
   if (utteranceEventId != null && (await hasNewerUtterance(callId, utteranceEventId).catch(() => false))) {
@@ -750,11 +736,16 @@ async function handleTranscript(
     return;
   }
 
-  // ── Script runtime: if a script is active, try to advance the flow first.
-  //    Reactive scenarios still handle anything the flow doesn't consume.
+  // ── Script runtime (brief-ahead): the model answers every turn NATIVELY
+  //    from its [CURRENT STAGE] menu — the walk below only navigates (flow
+  //    state, the next briefing) and runs actions. The reactive Playbook
+  //    layer is fully suppressed on scripted calls: a reactive injection
+  //    would double-speak on top of the model's own reply. reactiveCanHandle
+  //    is forced false so the flow never defers to a layer that no longer
+  //    answers.
   if (settings.active_script_id) {
     try {
-      const advanced = await runScriptFlow(
+      await runScriptFlow(
         callId,
         controlUrlHint,
         settings.active_script_id,
@@ -763,10 +754,9 @@ async function handleTranscript(
         turnText,
         utteranceAt,
         classifiedAt,
-        reactiveCanHandle,
+        false,
         utteranceEventId
       );
-      if (advanced) return; // flow handled this turn
     } catch (e) {
       await log({
         call_id: callId,
@@ -775,6 +765,7 @@ async function handleTranscript(
         meta: { error: e instanceof Error ? e.message : String(e) },
       });
     }
+    return;
   }
 
   // ── Reactive-only guards (the flow above is never blocked by these) ──
@@ -826,8 +817,9 @@ async function handleTranscript(
     return;
   }
 
+  // (Only reachable with no active script — scripted calls returned above.)
   const handler = handlers.find((h) => h.intent_key === flowIntent);
-  if (!handler || handler.action_type === "ignore" || flowOwnsAction) {
+  if (!handler || handler.action_type === "ignore") {
     await log({
       call_id: callId,
       event_type: "skipped",
@@ -835,7 +827,7 @@ async function handleTranscript(
       intent_key: cls.intent,
       confidence: cls.confidence,
       handler_id: handler?.id ?? null,
-      meta: { reason: flowOwnsAction ? "flow_owns_action" : handler ? "handler_ignore" : "handler_not_found" },
+      meta: { reason: handler ? "handler_ignore" : "handler_not_found" },
     });
     return;
   }
@@ -1241,6 +1233,7 @@ async function runScriptFlow(
       currentNodeId = target.id;
       note("", target, ct, edgeCond, null);
       await flush();
+      await armNextStage(target);
       return true;
     }
 
@@ -1288,21 +1281,18 @@ async function runScriptFlow(
       if (await staleNow()) return true;
       const goodbyeStatements = (((cfg.statements as string[]) ?? []).map((s) => (s ?? "").trim()).filter(Boolean));
       const text = [scn?.response_template || "Thanks for your time today. Goodbye!", ...goodbyeStatements].join(" ");
-      // Goodbye delivery honours the scenario: exact line → spoken verbatim
-      // with the hangup attached; reword → briefed, hangup follows shortly.
+      // Goodbye delivery honours the scenario: exact line → the system speaks
+      // it verbatim with the hangup attached; reword → the model already has
+      // it from the stage menu and says it natively — the delivery watchdog
+      // hangs up once it's voiced (serverless can't run a hangup timer).
       const rewordGoodbye = scn?.delivery === "reword" && !!scn?.response_template;
       currentNodeId = target.id;
       note(text, target, ct, edgeCond, scn?.id ?? null, undefined, rewordGoodbye ? { rewordGoodbye: true } : undefined);
       if (!(await flush())) return true; // lost the race — say nothing
       const controlUrl = await ctl();
-      if (controlUrl) {
-        if (rewordGoodbye) {
-          await injectStaffNote(controlUrl, `Deliver this goodbye in your own words — nothing else, no questions — then stop speaking: ${text}`, true).catch(() => {});
-          setTimeout(() => endCall(controlUrl).catch(() => {}), 7000);
-        } else {
-          const r = await injectSay(controlUrl, text, true);
-          if (!r.ok) setTimeout(() => endCall(controlUrl).catch(() => {}), 4000);
-        }
+      if (controlUrl && !rewordGoodbye) {
+        const r = await injectSay(controlUrl, text, true);
+        if (!r.ok) setTimeout(() => endCall(controlUrl).catch(() => {}), 4000);
       }
       return true;
     }
@@ -1373,116 +1363,36 @@ async function runScriptFlow(
     }
 
     if (await staleNow()) return true;
-    // Speaking lock: if the agent is mid-sentence, wait for it to finish —
-    // the line then lands as a continuation instead of an overlap.
-    await waitForAgentSilence(callId);
-    if (await staleNow()) return true;
     currentNodeId = target.id;
-    // One response per customer turn: if the agent already answered naturally
-    // while this step was in flight, the line continues that reply instead of
-    // starting a second one — quoting its own words back so it can't restart
-    // ("This is Tom with Lucky's. I'm Tom with Lucky Seven, and…").
-    const [alreadyReplied, deliveredRows] = await Promise.all([
-      utteranceEventId != null ? agentSpokeSince(callId, utteranceEventId).catch(() => false) : Promise.resolve(false),
-      getDeliveredHandlers(callId).catch(() => [] as { handler_id: string; count: number }[]),
-    ]);
-    const spokenSince =
-      alreadyReplied && utteranceEventId != null
-        ? await agentWordsSince(callId, utteranceEventId).catch(() => null)
-        : null;
-    // Anti-repeat ledger: loop-backs and re-visited stages must rephrase, and
-    // finished topics stay closed unless the customer re-opens them.
-    const priorRepeats = scenario ? (deliveredRows.find((r) => r.handler_id === scenario.id)?.count ?? 0) : 0;
-    const coveredNames = deliveredRows
-      .filter((r) => r.handler_id !== scenario?.id)
-      .map((r) => allHandlers.find((h) => h.id === r.handler_id)?.name)
-      .filter((n): n is string => !!n)
-      .slice(0, 4);
-    const coveredLine = coveredNames.length
-      ? ` (Earlier in this call you already covered: ${coveredNames.join("; ")} — don't re-open those unless asked.)`
-      : "";
-    const repeatLine =
-      priorRepeats > 0
-        ? ` (You've already said this ${priorRepeats === 1 ? "once" : `${priorRepeats} times`} this call — don't recite it again: much shorter, new emphasis or one new detail. E.g. a second self-introduction stresses the COMPANY, not your name.)`
-        : "";
-    // Ground briefings in the customer's actual words — the step should feel
-    // like a reply to them, not a recital of the next script line. The clamp
-    // at the end is load-bearing: without it the model appends invented
-    // follow-up questions after delivering the line.
-    const brief = (t: string) =>
-      (alreadyReplied
-        ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
-        : `The customer just said: "${utterance.slice(0, 140)}" — open with at most ONE filler from your approved list (or none), then deliver the scripted step: ${t}`) +
-      " If the step is written as an instruction to you (\"Explain that…\", \"Mention…\"), say what it asks for in the customer's language — NEVER read instruction wording aloud. Deliver ONLY that, then stop — no added follow-up question of your own; the script decides what comes next." +
-      repeatLine +
-      coveredLine;
-    let injectedText = "";
+    // ── Brief-ahead delivery: the model already holds this stage's menu and
+    // answers the customer NATIVELY — the engine speaks nothing here. Three
+    // jobs remain: record what the script expected (the audit trail the dock
+    // and observer read), run real ACTIONS, and arm the NEXT stage so the
+    // model is briefed before the customer's next turn.
+    let expectedText = "";
     if (ct === "send_sms") {
-      injectedText = scenario?.response_template || "The SMS with the details is on its way. Confirm that to the customer.";
+      expectedText = scenario?.response_template || "The SMS with the details is on its way.";
     } else if (ct === "transfer") {
-      injectedText = scenario?.response_template || "Thanks — let me connect you to one of our team now.";
+      expectedText = scenario?.response_template || "Thanks — let me connect you to one of our team now.";
     } else if (mergedText) {
-      injectedText = mergedText;
+      expectedText = mergedText;
     } else if (scenario) {
-      injectedText = scenario.response_template ?? "";
+      expectedText = scenario.response_template ?? "";
     }
-
-    // Additional statements: author-attached lines that ALWAYS ride along
-    // with this box's response — appended in order, same single reply.
+    // Additional statements ride along with the box's reply — the stage menu
+    // told the model the same thing; this is the audit copy.
     const extraStatements = ((cfg.statements as string[]) ?? []).map((s) => (s ?? "").trim()).filter(Boolean);
     if (extraStatements.length) {
-      injectedText = [injectedText, ...extraStatements].filter(Boolean).join(" ");
+      expectedText = [expectedText, ...extraStatements].filter(Boolean).join(" ");
+    }
+    if (!expectedText && ct === "collection") {
+      expectedText = `(no member matched — the agent bridges with one neutral sentence${
+        stageMemberNames.length ? `; stage handles: ${stageMemberNames.slice(0, 4).join("; ")}` : ""
+      })`;
     }
 
-    // A collection entered with nothing specific to say (no default line, no
-    // matching member) must NOT leave the agent to improvise — the model
-    // invents facts ("I can see you've been pretty active"). Ground it.
-    let stageGuidance = false;
-    if (!injectedText && ct === "collection") {
-      injectedText =
-        `You've just moved into the "${target.label || "next"}" part of the call` +
-        (stageMemberNames.length ? ` — it exists to handle: ${stageMemberNames.slice(0, 4).join("; ")}` : "") +
-        `. Bridge into it with ONE short, neutral sentence. Never invent facts, activity, or offers, and ask nothing.`;
-      stageGuidance = true;
-    }
-
-    // The reply often carries MORE than the routed step expects ("sure, text
-    // me — but what's the catch?"): fold every OTHER matched Playbook answer
-    // into the same briefing so the agent gives ONE unified reply and no part
-    // of the customer's turn is silently dropped.
-    let sideMerged = false;
-    if (ct !== "transfer") {
-      const covered = new Set<string>([...(scenario ? [scenario.id] : []), ...mergedIds]);
-      const sideAnswers: ListenerHandler[] = [];
-      for (const k of intents) {
-        if (consumedIntents.has(k)) continue; // the routing itself answers these
-        const h = allHandlers.find((x) => x.intent_key === k);
-        if (!h || covered.has(h.id)) continue;
-        if (h.action_type !== "answer" && h.action_type !== "give_offer") continue;
-        if (!h.response_template) continue;
-        covered.add(h.id);
-        sideAnswers.push(h);
-      }
-      if (sideAnswers.length > 0 && injectedText) {
-        // A generic stage bridge has nothing of its own to say — the side
-        // answers ARE the reply. Never fold internal guidance wording into a
-        // deliverable briefing.
-        const parts = [...(stageGuidance ? [] : [injectedText]), ...sideAnswers.map((h) => h.response_template)];
-        stageGuidance = false;
-        injectedText =
-          parts.length > 1
-            ? `The customer raised ${parts.length} points at once — cover ALL of them in ONE short, natural reply (a single paragraph, keep exact facts, prices and terms word-accurate): ` +
-              parts.map((t, i) => `(${i + 1}) ${t}`).join(" ")
-            : String(parts[0] ?? "");
-        sideMerged = true;
-      }
-    }
-
-    note(injectedText, target, ct, edgeCond, scenario?.id ?? null, alreadyReplied ? "continue_after_reply" : "fresh", {
-      repeated: priorRepeats,
-      covered: coveredNames.length,
-    });
-    if (!(await flush())) return true; // lost the race — say nothing
+    note(expectedText, target, ct, edgeCond, scenario?.id ?? null, "model_side", mergedIds.length ? { merged: mergedIds.length } : undefined);
+    if (!(await flush())) return true; // lost the race — the newer turn navigates
     if (ct === "send_sms") {
       // Honesty in the timeline: no SMS provider is wired yet — the send is
       // SIMULATED. Real sends need Twilio (or similar) plus a phone-call
@@ -1495,58 +1405,37 @@ async function runScriptFlow(
         meta: { simulated: true },
       });
     }
-    const controlUrl = await ctl();
-    if (controlUrl) {
-      let deliveredAsNote = false;
-      if (ct === "send_sms") {
-        await injectStaffNote(controlUrl, brief(injectedText), true);
-        deliveredAsNote = true;
-      } else if (ct === "transfer") {
-        await injectSay(controlUrl, injectedText, false);
-      } else if (stageGuidance) {
-        // Stage guidance is INTERNAL orientation, not a deliverable line — a
-        // live call proved that wrapping it in brief()'s "then deliver:"
-        // makes the model recite the guidance verbatim to the customer
-        // ("You've just moved into the collection part of the call…").
-        await injectStaffNote(
-          controlUrl,
-          `[INTERNAL guidance — never say or paraphrase this wording to the customer] ${injectedText} The customer just said: "${utterance.slice(0, 140)}". Your ENTIRE reply is that one short bridging sentence in your own persona's voice — nothing else, then stop.`,
-          true
-        );
-        deliveredAsNote = true;
-      } else if (mergedText || sideMerged) {
-        // Merged multi-point replies are always briefings.
-        await injectStaffNote(controlUrl, brief(injectedText), true);
-        deliveredAsNote = true;
-      } else if (scenario) {
-        // A verbatim say after the agent's own reply would restate/re-ask on
-        // top of it, and a repeated line must never be spoken word-for-word
-        // again — both become continuation notes.
-        if (scenario.delivery === "verbatim" && !alreadyReplied && priorRepeats === 0) {
-          await injectSay(controlUrl, injectedText, false);
-        } else {
-          await injectStaffNote(controlUrl, brief(injectedText), true);
-          deliveredAsNote = true;
-        }
-      }
-      // Delivery watchdog: in-process timers are best-effort (serverless can
-      // freeze them — a live call proved it), so the same idempotent check
-      // also rides every later webhook event. Double-firing is prevented by
-      // the persisted retrigger/error marker events checkDelivery consults.
-      if (deliveredAsNote) {
-        after(async () => {
-          try {
-            await new Promise((r) => setTimeout(r, 5000));
-            await checkDelivery(callId, controlUrlHint);
-            await new Promise((r) => setTimeout(r, 5500));
-            await checkDelivery(callId, controlUrlHint);
-          } catch {
-            /* best effort */
-          }
-        });
-      }
+    if (ct === "transfer") {
+      // Transfers stay engine-spoken: the announcement precedes a control
+      // action the model can't perform.
+      const controlUrl = await ctl();
+      if (controlUrl) await injectSay(controlUrl, expectedText, false);
     }
+    await armNextStage(target);
     return true;
   }
   return false;
+
+  // Push the menu for the node the flow now sits at — non-triggering, so it
+  // lands silently while the agent is (or is about to be) speaking. This is
+  // the brief-ahead heart: the NEXT turn's thinking happens NOW, off the
+  // customer's clock.
+  async function armNextStage(target: NonNullable<ReturnType<typeof nodeById>>): Promise<void> {
+    try {
+      const briefing = await compileStageBriefing(graph, target.id, allHandlers);
+      if (!briefing) return;
+      const controlUrl = await ctl();
+      if (!controlUrl) return;
+      await injectStaffNote(controlUrl, briefing, false);
+      await log({
+        call_id: callId,
+        event_type: "injected",
+        content: `→ armed stage: ${target.label || contentTypeOf(target)}`,
+        intent_key: intent,
+        meta: { flow: true, mode: "briefed", toNode: target.id, nodeType: contentTypeOf(target), ...(controlUrlHint ? { controlUrl: controlUrlHint } : {}) },
+      });
+    } catch {
+      /* best effort — the model still has the previous stage to work from */
+    }
+  }
 }

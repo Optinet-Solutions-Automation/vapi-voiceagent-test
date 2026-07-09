@@ -3,6 +3,8 @@
 import { NextResponse } from "next/server";
 import { LAB_TOOLS, LAB_OPERATING_RULES, DEFAULT_SHORT_PROMPT } from "@/lib/lab-tools";
 import { getLabSettings, saveLabSettings, listHandlers, getScriptGraph } from "@/lib/lab-db";
+import { compileStageBriefing } from "@/lib/lab-briefing";
+import { findEntryNode } from "@/lib/lab-flow";
 
 const VAPI_BASE = "https://api.vapi.ai";
 
@@ -62,16 +64,20 @@ export async function POST(req: Request) {
     identityScenario?.response_template?.trim() || settings?.short_prompt?.trim() || DEFAULT_SHORT_PROMPT;
   // The wait-phrase ban is bookended: first line of the prompt AND inside the
   // hard rules — it kept leaking from an end-only position.
-  // Script mode: the flow owns the conversation's direction. Without this,
-  // the model fills injection latency by inventing whole topics ("How's
-  // everything been going on the site lately?") that aren't in the script.
+  // Script mode (brief-ahead): the graph is compiled into [CURRENT STAGE]
+  // sections the model answers from NATIVELY — no waiting for injected
+  // lines. The entry stage ships inside this prompt; the webhook pushes each
+  // next stage as the flow advances.
   const scriptRule = settings?.active_script_id
-    ? `\n8. This call follows a script — the SYSTEM chooses every next move and supplies every answer, never you. After EVERY customer turn — a yes, a no, an objection, even a direct question — say at most ONE filler from the approved list below and WAIT for the supplied line. Never answer a question yourself, never re-introduce yourself, never pitch, never ask your own question: the answer is already on its way, and answering twice ruins the call. Waiting means SILENCE after the filler — no repeating earlier lines. But the instant a [STAFF] message supplies a line or step, SILENCE IS OVER: speaking it is mandatory and immediate — staying quiet after a supplied step is the one unforgivable failure. Deliver it and STOP.
-9. APPROVED FILLERS — in this call these are the ONLY words you may say that were not supplied to you: "mm-hmm", "uh-huh", "right—", "okay so—", "got it.", "perfect.", "fair question—", "alright—", "sounds good—". Nothing else, ever; never the same one twice in a call.`
+    ? `\n8. This call follows a script delivered as [CURRENT STAGE] sections — the NEWEST one alone governs your replies; older ones are void. Every customer turn gets an IMMEDIATE reply chosen from the current stage: pick the path that fits, blend the matching lines into ONE short reply if the customer raised several points, keep facts, prices and terms word-accurate, and say word-for-word lines exactly as written. If nothing in the stage fits, use its fallback path. Never invent facts, offers, account activity or questions the script didn't supply, never re-open a topic you already covered — rephrase with new emphasis, never recite, if something must be said twice. Never wait in silence for instructions: the stage in hand IS your instruction.
+9. APPROVED FILLERS — the ONLY words you may add around the scripted lines: "mm-hmm", "uh-huh", "right—", "okay so—", "got it.", "perfect.", "fair question—", "alright—", "sounds good—". At most one per reply; never the same one twice in a call.`
     : "";
   // Reworded opening: the model generates the first message itself (the run
   // sets firstMessageMode accordingly), so the gist must live in the prompt.
+  // The ENTRY stage briefing also ships in the prompt — the model must know
+  // how to answer the very first reply before any webhook turn has run.
   let openingRule = "";
+  let entryStage = "";
   if (settings?.active_script_id) {
     try {
       const g = await getScriptGraph(settings.active_script_id);
@@ -80,12 +86,18 @@ export async function POST(req: Request) {
       const op = ((sc.opening as string) ?? "").trim();
       if (op && (sc.openingDelivery as string) === "reword")
         openingRule = `\n\n[Opening] Open the call in your own words with exactly this meaning — one short greeting and the question, nothing more: "${op.replace(/\{\{\s*name\s*\}\}/gi, "there")}"`;
+      const entry = findEntryNode(g.nodes, g.edges);
+      if (entry) {
+        const handlers = await listHandlers().catch(() => []);
+        const briefing = await compileStageBriefing(g, entry.id, handlers).catch(() => null);
+        if (briefing) entryStage = `\n\n${briefing}`;
+      }
     } catch {
-      /* no graph → no opening rule */
+      /* no graph → no opening rule / entry stage */
     }
   }
 
-  const prompt = `ABSOLUTE RULE — never say "hold on", "hold on a sec", "one moment", "just a sec", "just a moment", "give me a second", "please hold" or any wait-phrase, in any situation, ever. If you need a beat: one tiny casual filler ("mm-hmm", "okay so—") or silence.\n\n${persona}\n\n${LAB_OPERATING_RULES}${scriptRule}${openingRule}`;
+  const prompt = `ABSOLUTE RULE — never say "hold on", "hold on a sec", "one moment", "just a sec", "just a moment", "give me a second", "please hold" or any wait-phrase, in any situation, ever. If you need a beat: one tiny casual filler ("mm-hmm", "okay so—") or silence.\n\n${persona}\n\n${LAB_OPERATING_RULES}${scriptRule}${openingRule}${entryStage}`;
 
   const model = assistant.model ?? {};
   let messages: Array<{ role: string; content: string }> = model.messages ?? [];

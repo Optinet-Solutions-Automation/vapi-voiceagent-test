@@ -41,7 +41,7 @@ export async function checkDelivery(callId: string, controlUrlHint: string | nul
     // waiting stopped making sense), hang up.
     if (nodeType === "end") {
       const voiced = await agentSaidAfter(callId, inj.id, 10, IDLE_NUDGES);
-      const overdue = inj.meta.rewordGoodbye ? (voiced && age > 7000) || age > 15000 : !voiced && age > 8000;
+      const overdue = inj.meta.rewordGoodbye ? (voiced && age > 5000) || age > 15000 : !voiced && age > 8000;
       if (overdue && !(await assistantSpeaking(callId))) {
         const controlUrl = await getControlUrl(callId, hint);
         if (controlUrl) await endCall(controlUrl).catch(() => {});
@@ -49,6 +49,10 @@ export async function checkDelivery(callId: string, controlUrlHint: string | nul
       return;
     }
     if (nodeType === "transfer") return;
+    // Brief-ahead turns speak MODEL-SIDE — there is no supplied line to
+    // deliver, so a "retrigger" here would force a duplicate reply on top of
+    // the model's own. The watchdog only guards triggering injections.
+    if (inj.meta.mode === "model_side" || inj.meta.mode === "briefed") return;
     // 3.5s, not 5: `age` compares a DB timestamp against this machine's
     // clock, and ~1s of skew once made a 5s check measure 4.4s and skip.
     // A normal delivery starts speaking well inside 3.5s, and the speech
