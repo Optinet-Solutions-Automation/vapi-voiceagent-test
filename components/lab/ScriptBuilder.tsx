@@ -1896,6 +1896,28 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               // the firstMessage too) — including our logged opening would
               // show the greeting twice.
               const transcript = runEvents.filter((e) => e.event_type === "utterance" || e.event_type === "agent_said");
+              // Reply latency per agent line: how long the customer actually
+              // waited — from their utterance to the assistant speech-START
+              // that produced the line (agent_said itself lands at the END of
+              // the speech, so its own timestamp would overstate).
+              const replyMs = new Map<number, number>();
+              {
+                let utterAt: number | null = null;
+                let speechStartAt: number | null = null; // latest assistant speech-start since the utterance
+                for (const e of runEvents) {
+                  if (e.event_type === "utterance") {
+                    utterAt = new Date(e.created_at).getTime();
+                    speechStartAt = null;
+                  } else if (e.event_type === "status" && (e.content ?? "").startsWith("speech-update: started (assistant)")) {
+                    speechStartAt = new Date(e.created_at).getTime();
+                  } else if (e.event_type === "agent_said" && utterAt != null && speechStartAt != null) {
+                    replyMs.set(e.id, Math.max(0, speechStartAt - utterAt));
+                    speechStartAt = null; // consumed — the next line needs its own start
+                  }
+                }
+              }
+              const replyTag = (e: LabCallEvent) =>
+                replyMs.has(e.id) ? `${(replyMs.get(e.id)! / 1000).toFixed(1)}s` : null;
               const listener = runEvents.filter(
                 (e) =>
                   ["classified", "sms", "error"].includes(e.event_type) ||
@@ -1961,7 +1983,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
               const head = "flex shrink-0 items-center justify-between border-b border-gray-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500";
               // Plain-text builders for copy-to-clipboard (chronological).
               const transcriptLine = (e: LabCallEvent) =>
-                `${e.event_type === "utterance" ? "Customer" : "Agent"}: ${e.content ?? ""}`;
+                `${e.event_type === "utterance" ? "Customer" : "Agent"}${replyTag(e) ? ` (${replyTag(e)})` : ""}: ${e.content ?? ""}`;
               const listenerLine = (e: LabCallEvent) => {
                 const m = metaOf(e);
                 if (e.event_type === "classified")
@@ -2088,6 +2110,7 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
                                   {e.event_type === "utterance" ? "Customer" : "Agent"}:
                                 </span>{" "}
                                 <span className="text-gray-300">{e.content}</span>
+                                {replyTag(e) && <span className="text-gray-600"> · {replyTag(e)}</span>}
                               </p>
                             ))}
                         </div>
