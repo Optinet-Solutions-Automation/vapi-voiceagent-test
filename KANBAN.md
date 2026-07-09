@@ -49,6 +49,7 @@ _(empty)_
 _(empty)_
 
 ## ✅ Done
+- [x] **Watchdog real clock: run poll ticks /api/lab/watch every 1.2s** · `HIGH` · `cmrd9ndfh000004lexnyrr3ij` — _Jul 9; silent-briefing recovery 16-19s → ~4-6s; rule 8 outlaws silence after a supplied step_
 - [x] **Transcript reply-latency tags** · `MEDIUM` · `cmrd8lfuz000h04lhlyd8xstx` — _Jul 9; each agent line shows the seconds the customer waited (utterance → speech start)_
 - [x] **Live-call QA: silent briefings, guidance recital, router spike** · `HIGH` · `cmrd7y1vy000004lipz4ndjyu` — _Jul 9; watchdog now event-driven (serverless-proof), stage guidance framed INTERNAL, router capped 4s+retry_
 - [x] **Multi-intent router + anticipatory listener + analyzed interruptions** · `HIGH` · `cmrd52zkx000604kvkjq9cki2` — _Jul 4-5_
