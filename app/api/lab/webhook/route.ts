@@ -15,7 +15,8 @@ import {
   recentUnansweredFragment,
   getDeliveredHandlers,
   agentSaidAfter,
-  latestEventId,
+  lastFlowInjection,
+  watchdogStateAfter,
   getLastInjectedEvent,
   getRecentTurns,
   getCollectionHandlerIds,
@@ -333,6 +334,74 @@ async function scopeToActiveCollection(
   }
 }
 
+// The idle nudges configure-assistant installs — spoken by VAPI itself, so
+// they must never count as the briefed line having been delivered.
+const IDLE_NUDGES = ["Take your time — I'm still here.", "Are you still with me?", "Can you hear me okay?"];
+
+/** Delivery watchdog. The model sometimes answers a triggered briefing with
+ *  its filler ALONE ("Uh-huh." … silence) — it "waits" for a line that
+ *  already arrived — or the trigger races the filler and gets swallowed.
+ *  Serverless freezes background timers (a live call proved the old
+ *  setTimeout version never ran on Vercel), so this check is EVENT-DRIVEN:
+ *  every subsequent webhook message re-checks the newest injection. It is
+ *  idempotent across invocations via persisted marker events — re-trigger
+ *  once with blunter wording, and if even that stays silent, log a red error
+ *  so an undelivered line can never pass QA unnoticed. */
+async function checkDelivery(callId: string, controlUrlHint: string | null): Promise<void> {
+  try {
+    const inj = await lastFlowInjection(callId);
+    if (!inj || !inj.content || !inj.meta.flow) return;
+    if (inj.meta.mode === "disabled_skipped") return;
+    const nodeType = inj.meta.nodeType as string | undefined;
+    const age = Date.now() - new Date(inj.createdAt).getTime();
+    // Goodbyes end the call themselves — but the reworded-goodbye hangup used
+    // a background timer serverless freezes, so the event stream ends it:
+    // once the goodbye was voiced (or waiting stopped making sense), hang up.
+    if (nodeType === "end") {
+      const voiced = await agentSaidAfter(callId, inj.id, 10, IDLE_NUDGES);
+      const overdue = inj.meta.rewordGoodbye ? (voiced && age > 7000) || age > 15000 : !voiced && age > 8000;
+      if (overdue && !(await assistantSpeaking(callId))) {
+        const controlUrl = await getControlUrl(callId, controlUrlHint);
+        if (controlUrl) await endCall(controlUrl).catch(() => {});
+      }
+      return;
+    }
+    if (nodeType === "transfer") return;
+    if (age < 4500 || age > 60000) return;
+    if (await hasNewerUtterance(callId, inj.id)) return; // customer moved on — the new turn owns delivery
+    if (await agentSaidAfter(callId, inj.id, 20, IDLE_NUDGES)) return; // substantial non-idle speech = delivered
+    if (await assistantSpeaking(callId)) return; // mid-speech — the next event re-checks
+    const wd = await watchdogStateAfter(callId, inj.id);
+    if (wd.errored) return;
+    if (wd.retriggerAt) {
+      if (Date.now() - new Date(wd.retriggerAt).getTime() < 5000) return;
+      await log({
+        call_id: callId,
+        event_type: "error",
+        content: "line never voiced — briefing and retrigger both produced no speech",
+        meta: { flow: true, reason: "undelivered" },
+      });
+      return;
+    }
+    const controlUrl = await getControlUrl(callId, controlUrlHint);
+    if (!controlUrl) return;
+    // Marker first: it is the idempotency lock other invocations check.
+    await log({
+      call_id: callId,
+      event_type: "skipped",
+      content: "briefing produced no speech — re-triggering once",
+      meta: { flow: true, reason: "retrigger" },
+    });
+    await injectStaffNote(
+      controlUrl,
+      `You paused after your filler, but the supplied step is still UNDELIVERED — speak it NOW, nothing else (if it's written as an instruction, say what it asks for; never read instruction wording aloud): ${inj.content}`,
+      true
+    );
+  } catch {
+    /* best effort */
+  }
+}
+
 export async function POST(req: Request) {
   let message: VapiMessage;
   try {
@@ -372,6 +441,7 @@ export async function POST(req: Request) {
         content: message.status ?? null,
         meta: { controlUrl: controlUrlHint, endedReason: message.endedReason ?? null },
       });
+      if (message.status !== "ended") after(() => checkDelivery(callId, controlUrlHint));
       return NextResponse.json({});
 
     case "speech-update":
@@ -381,6 +451,11 @@ export async function POST(req: Request) {
         event_type: "status",
         content: `speech-update: ${(message as Record<string, unknown>).status ?? ""} (${message.role ?? ""})`,
       });
+      // Assistant speech transitions arrive continuously during a call — the
+      // delivery watchdog rides them instead of trusting serverless
+      // background timers. User transitions are excluded: a retrigger there
+      // would talk over the customer, whose imminent transcript owns the turn.
+      if (message.role === "assistant") after(() => checkDelivery(callId, controlUrlHint));
       return NextResponse.json({});
 
     case "end-of-call-report":
@@ -1404,8 +1479,8 @@ async function runScriptFlow(
     const brief = (t: string) =>
       (alreadyReplied
         ? `You already started replying${spokenSince ? ` — your words so far: "${spokenSince}"` : ""}. Continue seamlessly from where you left off with ONLY the following — do not repeat or rephrase anything you already said, do not introduce yourself again, do not re-acknowledge (keep facts, prices and terms word-accurate): ${t}`
-        : `The customer just said: "${utterance.slice(0, 140)}" — open with at most ONE filler from your approved list (or none), then deliver: ${t}`) +
-      " Deliver ONLY that, then stop — no added follow-up question of your own; the script decides what comes next." +
+        : `The customer just said: "${utterance.slice(0, 140)}" — open with at most ONE filler from your approved list (or none), then deliver the scripted step: ${t}`) +
+      " If the step is written as an instruction to you (\"Explain that…\", \"Mention…\"), say what it asks for in the customer's language — NEVER read instruction wording aloud. Deliver ONLY that, then stop — no added follow-up question of your own; the script decides what comes next." +
       repeatLine +
       coveredLine;
     let injectedText = "";
@@ -1456,10 +1531,16 @@ async function runScriptFlow(
         sideAnswers.push(h);
       }
       if (sideAnswers.length > 0 && injectedText) {
-        const parts = [injectedText, ...sideAnswers.map((h) => h.response_template)];
+        // A generic stage bridge has nothing of its own to say — the side
+        // answers ARE the reply. Never fold internal guidance wording into a
+        // deliverable briefing.
+        const parts = [...(stageGuidance ? [] : [injectedText]), ...sideAnswers.map((h) => h.response_template)];
+        stageGuidance = false;
         injectedText =
-          `The customer raised ${parts.length} points at once — cover ALL of them in ONE short, natural reply (a single paragraph, keep exact facts, prices and terms word-accurate): ` +
-          parts.map((t, i) => `(${i + 1}) ${t}`).join(" ");
+          parts.length > 1
+            ? `The customer raised ${parts.length} points at once — cover ALL of them in ONE short, natural reply (a single paragraph, keep exact facts, prices and terms word-accurate): ` +
+              parts.map((t, i) => `(${i + 1}) ${t}`).join(" ")
+            : String(parts[0] ?? "");
         sideMerged = true;
       }
     }
@@ -1484,14 +1565,24 @@ async function runScriptFlow(
     const controlUrl = await ctl();
     if (controlUrl) {
       let deliveredAsNote = false;
-      const anchorId = await latestEventId(callId).catch(() => 0);
       if (ct === "send_sms") {
         await injectStaffNote(controlUrl, brief(injectedText), true);
         deliveredAsNote = true;
       } else if (ct === "transfer") {
         await injectSay(controlUrl, injectedText, false);
-      } else if (mergedText || sideMerged || stageGuidance) {
-        // Merged multi-point replies and stage guidance are always briefings.
+      } else if (stageGuidance) {
+        // Stage guidance is INTERNAL orientation, not a deliverable line — a
+        // live call proved that wrapping it in brief()'s "then deliver:"
+        // makes the model recite the guidance verbatim to the customer
+        // ("You've just moved into the collection part of the call…").
+        await injectStaffNote(
+          controlUrl,
+          `[INTERNAL guidance — never say or paraphrase this wording to the customer] ${injectedText} The customer just said: "${utterance.slice(0, 140)}". Your ENTIRE reply is that one short bridging sentence in your own persona's voice — nothing else, then stop.`,
+          true
+        );
+        deliveredAsNote = true;
+      } else if (mergedText || sideMerged) {
+        // Merged multi-point replies are always briefings.
         await injectStaffNote(controlUrl, brief(injectedText), true);
         deliveredAsNote = true;
       } else if (scenario) {
@@ -1505,42 +1596,17 @@ async function runScriptFlow(
           deliveredAsNote = true;
         }
       }
-      // Delivery watchdog: the model sometimes answers a triggered briefing
-      // with its filler ALONE ("Uh-huh." … silence) — it "waits" for a line
-      // that already arrived — or the trigger races the filler and gets
-      // swallowed outright. Verify substantial speech follows; re-trigger
-      // once with blunter wording; if even that stays silent, log a red
-      // error so an undelivered line can never pass QA unnoticed.
+      // Delivery watchdog: in-process timers are best-effort (serverless can
+      // freeze them — a live call proved it), so the same idempotent check
+      // also rides every later webhook event. Double-firing is prevented by
+      // the persisted retrigger/error marker events checkDelivery consults.
       if (deliveredAsNote) {
         after(async () => {
-          const undisturbed = async () =>
-            !(utteranceEventId != null && (await hasNewerUtterance(callId, utteranceEventId))) &&
-            !(await assistantSpeaking(callId)) &&
-            !(await agentSaidAfter(callId, anchorId, 20));
           try {
             await new Promise((r) => setTimeout(r, 5000));
-            if (!(await undisturbed())) return;
-            await log({
-              call_id: callId,
-              event_type: "skipped",
-              content: "briefing produced no speech — re-triggering once",
-              intent_key: intent,
-              meta: { flow: true, reason: "retrigger" },
-            });
-            await injectStaffNote(
-              controlUrl,
-              `You paused after your filler, but the supplied line is still UNDELIVERED — say it NOW, nothing else: ${injectedText}`,
-              true
-            );
-            await new Promise((r) => setTimeout(r, 5000));
-            if (!(await undisturbed())) return;
-            await log({
-              call_id: callId,
-              event_type: "error",
-              content: "line never voiced — briefing and retrigger both produced no speech",
-              intent_key: intent,
-              meta: { flow: true, reason: "undelivered" },
-            });
+            await checkDelivery(callId, controlUrlHint);
+            await new Promise((r) => setTimeout(r, 5500));
+            await checkDelivery(callId, controlUrlHint);
           } catch {
             /* best effort */
           }

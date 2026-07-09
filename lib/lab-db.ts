@@ -498,7 +498,7 @@ export async function latestEventId(callId: string): Promise<number> {
  *  delivery watchdog: a triggered briefing can race the agent's own filler
  *  ("Perfect.") and get swallowed — a short filler must not count as the
  *  line having been voiced, so a minimum length filters it out. */
-export async function agentSaidAfter(callId: string, afterId: number, minLen = 0): Promise<boolean> {
+export async function agentSaidAfter(callId: string, afterId: number, minLen = 0, exclude: string[] = []): Promise<boolean> {
   const { data, error } = await supabase
     .from("lab_call_events")
     .select("content")
@@ -507,7 +507,56 @@ export async function agentSaidAfter(callId: string, afterId: number, minLen = 0
     .gt("id", afterId)
     .limit(25);
   if (error) throw new Error(error.message);
-  return (data ?? []).some((e) => (e.content ?? "").trim().length >= minLen);
+  // Excluded lines (the configured idle nudges) compare punctuation-blind:
+  // the transcriber may render "time — I'm" as "time. I'm".
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const ex = new Set(exclude.map(norm));
+  return (data ?? []).some((e) => {
+    const t = (e.content ?? "").trim();
+    return t.length >= minLen && !ex.has(norm(t));
+  });
+}
+
+/** The newest flow injection for a call — the delivery watchdog's subject. */
+export async function lastFlowInjection(
+  callId: string
+): Promise<{ id: number; content: string; createdAt: string; meta: Record<string, unknown> } | null> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("id, content, created_at, meta")
+    .eq("call_id", callId)
+    .eq("event_type", "injected")
+    .order("id", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const r = (data ?? [])[0];
+  if (!r) return null;
+  return { id: r.id, content: r.content ?? "", createdAt: r.created_at, meta: (r.meta ?? {}) as Record<string, unknown> };
+}
+
+/** Watchdog bookkeeping since an injection: was the blunt retrigger already
+ *  sent, and was the undelivered error already raised? Persisted as events so
+ *  the check stays idempotent across serverless invocations. */
+export async function watchdogStateAfter(
+  callId: string,
+  afterId: number
+): Promise<{ retriggerAt: string | null; errored: boolean }> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("event_type, created_at, meta")
+    .eq("call_id", callId)
+    .gt("id", afterId)
+    .in("event_type", ["skipped", "error"])
+    .limit(25);
+  if (error) throw new Error(error.message);
+  let retriggerAt: string | null = null;
+  let errored = false;
+  for (const e of data ?? []) {
+    const reason = (e.meta as Record<string, unknown> | null)?.reason;
+    if (e.event_type === "skipped" && reason === "retrigger") retriggerAt = e.created_at;
+    if (e.event_type === "error" && reason === "undelivered") errored = true;
+  }
+  return { retriggerAt, errored };
 }
 
 /** Is the assistant speaking RIGHT NOW? True when its latest speech-update

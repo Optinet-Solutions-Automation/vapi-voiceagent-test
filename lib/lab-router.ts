@@ -29,7 +29,10 @@ export async function classifyUtterance(
    *  may answer "other" to escalate to the full vocabulary. */
   fastTier = false
 ): Promise<Classification> {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  // Latency cap: a live call measured a 10.5s classification (median ~1.5s) —
+  // one provider spike must not stall the turn into idle-nudge territory.
+  // Abort at 4s and retry once; a spiked request's retry usually lands fast.
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 4000, maxRetries: 1 });
 
   // Expected-next handlers lead the list — position in the prompt is weight.
   const expected = new Set(expectedKeys);

@@ -49,6 +49,7 @@ _(empty)_
 _(empty)_
 
 ## ✅ Done
+- [x] **Live-call QA: silent briefings, guidance recital, router spike** · `HIGH` · `cmrd7y1vy000004lipz4ndjyu` — _Jul 9; watchdog now event-driven (serverless-proof), stage guidance framed INTERNAL, router capped 4s+retry_
 - [x] **Multi-intent router + anticipatory listener + analyzed interruptions** · `HIGH` · `cmrd52zkx000604kvkjq9cki2` — _Jul 4-5_
 - [x] **One response per turn + speaking lock + skip-ahead** · `HIGH` · `cmrd54z1a001r04joei51tyua` — _Jul 4-5_
 - [x] **Filler discipline v1: instant, moment-matched, from a tiny set** · `MEDIUM` · `cmrd54zfd001t04jo3oant46b` — _Jul 4-5_
