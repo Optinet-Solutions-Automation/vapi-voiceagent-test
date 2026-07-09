@@ -125,10 +125,40 @@ export async function compileStageBriefing(graph: Graph, nodeId: string, handler
     bullets.push(`• ${when} →\n${await targetSays(target, byId, handlers)}`);
   }
   if (!bullets.length) return null;
+  // The universal fallback: without it, a stage whose paths don't cover the
+  // reply leaves the model empty-handed — live calls degenerated to "mhm"
+  // stonewalling at sparse boxes (Wait especially).
+  bullets.push(
+    `• If the reply fits NONE of the paths above → answer it from [STANDING ANSWERS] if one fits and STAY at this step; if none fits, bridge with ONE short, neutral sentence (invent nothing, ask nothing) — the system moves the call along when it's time.`
+  );
   return [
     `[CURRENT STAGE — "${node.label || "next step"}"]`,
     `This supersedes every earlier CURRENT STAGE section — it ALONE governs your next reply. Answer the customer's next turn through exactly one of these paths:`,
     bullets.join("\n"),
-    `Stage rules: reply IMMEDIATELY — never wait in silence for anything; open with at most ONE approved filler; if the customer raised several points, blend the matching lines into ONE short reply; use ONLY the lines above plus approved fillers; where a line reads as an instruction to you ("Explain that…", "Mention…"), do what it says in the customer's language — never read instruction wording aloud; never invent facts, prices, offers, account activity or questions; if you already said a line earlier in the call, rephrase it with new emphasis — never recite it twice.`,
+    `Stage rules: reply IMMEDIATELY — never wait in silence for anything; open with at most ONE approved filler; if the customer raised several points, blend the matching lines into ONE short reply; use ONLY the lines above (plus [STANDING ANSWERS] and approved fillers); where a line reads as an instruction to you ("Explain that…", "Mention…"), do what it says in the customer's language — never read instruction wording aloud; never invent facts, prices, offers, account activity or questions; NEVER re-answer ground you already covered — if the customer says they didn't hear you ("hello?", "are you there?"), give a ONE-SENTENCE recap of your last point, never the full line again; if you were interrupted mid-reply, resume with only the part you had not yet said — never restart; speak at a calm, unhurried pace in short sentences with a natural beat between thoughts — never rush to fit everything in.`,
+  ].join("\n");
+}
+
+/** Off-path answer bank for the whole call: every collection the script's
+ *  boxes reference, flattened. The reactive Playbook layer used to answer
+ *  off-script questions while the flow parked; in brief-ahead the model owns
+ *  the turn, so the same safety net must live in its prompt. */
+export async function compileStandingAnswers(graph: Graph, handlers: ListenerHandler[]): Promise<string | null> {
+  const colIds = new Set<string>();
+  for (const n of graph.nodes) {
+    const cfg = cfgOf(n);
+    if (cfg.collectionId) colIds.add(cfg.collectionId as string);
+    if (cfg.elseCollectionId) colIds.add(cfg.elseCollectionId as string);
+  }
+  if (!colIds.size) return null;
+  const memberIds = new Set<string>();
+  for (const cid of colIds) {
+    for (const hid of await getCollectionHandlerIds(cid).catch(() => [] as string[])) memberIds.add(hid);
+  }
+  const members = handlers.filter((h) => memberIds.has(h.id) && h.enabled && (h.response_template ?? "").trim() && h.action_type !== "ignore").slice(0, 18);
+  if (!members.length) return null;
+  return [
+    `[STANDING ANSWERS] Off-path questions and concerns the customer may raise at ANY point in the call. Use one ONLY when the CURRENT STAGE has no fitting path: answer briefly, then return to where the call was — never advance the plan on your own, and never re-answer one you already covered.`,
+    ...members.map((h) => `- If ${h.description?.trim() || h.name}: ${renderLine(h)}`),
   ].join("\n");
 }

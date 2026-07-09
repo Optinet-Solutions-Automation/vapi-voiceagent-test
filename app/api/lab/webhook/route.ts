@@ -744,8 +744,37 @@ async function handleTranscript(
   //    is forced false so the flow never defers to a layer that no longer
   //    answers.
   if (settings.active_script_id) {
+    // Backchannel gate: a live run raced three stages ahead on "Hello." /
+    // "understood" / "not hearing me" — channel noise firing catch-all
+    // arrows while the agent was still mid-delivery. Two noise classes for
+    // unmapped (intent "none") short turns:
+    //  - channel checks ("hello?", "are you there", "can you hear me")
+    //    are NEVER replies — always hold;
+    //  - understanding-acks ("okay", "understood", "got it") are noise only
+    //    while the agent is SPEAKING (an interjection); once the agent is
+    //    quiet they are real turn-taking and the author's "anything else"
+    //    arrow may fire. Real short answers ("Nope.", "yes") always walk.
+    const wordCount = turnText.split(/\s+/).filter(Boolean).length;
+    if (flowIntent === "none" && wordCount <= 6) {
+      const norm = turnText.toLowerCase().replace(/[^a-z? ]+/g, " ").replace(/\s+/g, " ").trim();
+      const channelNoise =
+        /^(hello|hi|hey|huh|what|sorry|pardon)[?. ]*$|are you (there|with me)|you there|still there|can you hear|you hear me|not hearing|hearing me/.test(norm);
+      const ackNoise =
+        /^(okay|ok|kay|alright|right|understood|got it|i understood|mhm|mm hmm|uh huh)[?. ]*$/.test(norm) &&
+        (await assistantSpeaking(callId).catch(() => false));
+      if (channelNoise || ackNoise) {
+        await log({
+          call_id: callId,
+          event_type: "skipped",
+          content: utterance,
+          intent_key: cls.intent,
+          meta: { flow: true, reason: "backchannel" },
+        });
+        return;
+      }
+    }
     try {
-      await runScriptFlow(
+      const advanced = await runScriptFlow(
         callId,
         controlUrlHint,
         settings.active_script_id,
@@ -757,6 +786,17 @@ async function handleTranscript(
         false,
         utteranceEventId
       );
+      // Held turns are invisible otherwise — the tester couldn't tell
+      // "answered in place" from "engine missed it" on the dock.
+      if (!advanced) {
+        await log({
+          call_id: callId,
+          event_type: "skipped",
+          content: utterance,
+          intent_key: cls.intent,
+          meta: { flow: true, reason: "held_at_stage" },
+        });
+      }
     } catch (e) {
       await log({
         call_id: callId,

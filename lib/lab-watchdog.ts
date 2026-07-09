@@ -78,7 +78,11 @@ export async function checkWaitTimeout(callId: string, controlUrlHint: string | 
     const text = [scn?.response_template?.trim() || (ct === "end" ? "Thanks for your time today. Goodbye!" : ""), ...statements]
       .filter(Boolean)
       .join(" ");
-    const controlUrl = await getControlUrl(callId, controlUrlHint);
+    // The poll route runs as a separate lambda with no in-memory control-url
+    // cache — fall back to the url stamped on the call's last injection row.
+    const lastInj = await lastFlowInjection(callId).catch(() => null);
+    const hint = controlUrlHint ?? ((lastInj?.meta.controlUrl as string | undefined) || null);
+    const controlUrl = await getControlUrl(callId, hint);
     if (ct === "end") {
       await insertLabEvent({
         call_id: callId,
