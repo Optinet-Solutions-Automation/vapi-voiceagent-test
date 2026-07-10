@@ -22,7 +22,7 @@ import {
 } from "./lab-db";
 import { getControlUrl, injectStaffNote, injectSay, endCall } from "./lab-control";
 import { contentTypeOf } from "./lab-flow";
-import { compileStageBriefing } from "./lab-briefing";
+import { composeArmedBriefing } from "./lab-briefing";
 
 // The idle nudges configure-assistant installs — spoken by VAPI itself, so
 // they must never count as the briefed line having been delivered.
@@ -98,17 +98,18 @@ export async function checkWaitTimeout(callId: string, controlUrlHint: string | 
       }
       return;
     }
-    // Arm the target's menu FIRST, then deliver its line with a trigger —
-    // logged last so the delivery watchdog above guards exactly this row.
+    // Arm the target's menu FIRST (through the observer pass), then deliver
+    // its line with a trigger — logged last so the delivery watchdog above
+    // guards exactly this row.
     if (controlUrl) {
-      const briefing = await compileStageBriefing(graph, target.id, handlers).catch(() => null);
-      if (briefing) {
-        await injectStaffNote(controlUrl, briefing, false).catch(() => {});
+      const armed = await composeArmedBriefing(callId, graph, target.id, handlers).catch(() => null);
+      if (armed) {
+        await injectStaffNote(controlUrl, armed.text, false).catch(() => {});
         await insertLabEvent({
           call_id: callId,
           event_type: "injected",
-          content: `→ armed stage: ${target.label || ct}`,
-          meta: { flow: true, mode: "briefed", toNode: target.id, nodeType: ct },
+          content: `→ armed stage: ${target.label || ct}${armed.covered || armed.owed ? ` (observer: ${armed.covered} covered, ${armed.owed} owed)` : ""}`,
+          meta: { flow: true, mode: "briefed", toNode: target.id, nodeType: ct, covered: armed.covered, owed: armed.owed },
         }).catch(() => {});
       }
     }

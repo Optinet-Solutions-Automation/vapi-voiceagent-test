@@ -23,7 +23,7 @@ import {
   persistFlowStateGuarded,
 } from "@/lib/lab-db";
 import { checkDelivery } from "@/lib/lab-watchdog";
-import { compileStageBriefing } from "@/lib/lab-briefing";
+import { composeArmedBriefing } from "@/lib/lab-briefing";
 import { findEntryNode, nodeById, pickNextEdge, contentTypeOf } from "@/lib/lab-flow";
 import { classifyUtterance, type Classification } from "@/lib/lab-router";
 import {
@@ -1486,20 +1486,23 @@ async function runScriptFlow(
   // Push the menu for the node the flow now sits at — non-triggering, so it
   // lands silently while the agent is (or is about to be) speaking. This is
   // the brief-ahead heart: the NEXT turn's thinking happens NOW, off the
-  // customer's clock.
+  // customer's clock. The observer pass reconciles the menu against the
+  // conversation first: covered lines get marked, skipped statements come
+  // back as debts.
   async function armNextStage(target: NonNullable<ReturnType<typeof nodeById>>): Promise<void> {
     try {
-      const briefing = await compileStageBriefing(graph, target.id, allHandlers);
-      if (!briefing) return;
+      const armed = await composeArmedBriefing(callId, graph, target.id, allHandlers);
+      if (!armed) return;
       const controlUrl = await ctl();
       if (!controlUrl) return;
-      await injectStaffNote(controlUrl, briefing, false);
+      await injectStaffNote(controlUrl, armed.text, false);
+      const obsNote = armed.covered || armed.owed ? ` (observer: ${armed.covered} covered, ${armed.owed} owed)` : "";
       await log({
         call_id: callId,
         event_type: "injected",
-        content: `→ armed stage: ${target.label || contentTypeOf(target)}`,
+        content: `→ armed stage: ${target.label || contentTypeOf(target)}${obsNote}`,
         intent_key: intent,
-        meta: { flow: true, mode: "briefed", toNode: target.id, nodeType: contentTypeOf(target), ...(controlUrlHint ? { controlUrl: controlUrlHint } : {}) },
+        meta: { flow: true, mode: "briefed", toNode: target.id, nodeType: contentTypeOf(target), covered: armed.covered, owed: armed.owed, ...(controlUrlHint ? { controlUrl: controlUrlHint } : {}) },
       });
     } catch {
       /* best effort — the model still has the previous stage to work from */

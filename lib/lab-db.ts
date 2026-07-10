@@ -567,6 +567,40 @@ export async function agentSaidAfter(callId: string, afterId: number, minLen = 0
   });
 }
 
+/** Everything the agent has actually said this call, as one lowercase blob —
+ *  the observer pass compares outgoing briefings against it to mark covered
+ *  ground and detect owed content. */
+export async function agentSaidCorpus(callId: string): Promise<string> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("content")
+    .eq("call_id", callId)
+    .eq("event_type", "agent_said")
+    .order("id", { ascending: false })
+    .limit(60);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => r.content ?? "").join(" ").toLowerCase();
+}
+
+/** The boxes this call's flow has actually visited (model_side turns), in
+ *  order — the observer walks their statements to find un-voiced debts. */
+export async function visitedFlowNodeIds(callId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("lab_call_events")
+    .select("meta")
+    .eq("call_id", callId)
+    .eq("event_type", "injected")
+    .order("id", { ascending: true })
+    .limit(200);
+  if (error) throw new Error(error.message);
+  const out: string[] = [];
+  for (const r of data ?? []) {
+    const m = (r.meta ?? {}) as Record<string, unknown>;
+    if (m.flow && m.mode === "model_side" && typeof m.toNode === "string" && !out.includes(m.toNode)) out.push(m.toNode);
+  }
+  return out;
+}
+
 /** When did the assistant last STOP speaking? Null if its newest speech
  *  transition is a start (still talking) or it never spoke. Powers the
  *  interruption arbiter: a stop moments before a noise utterance means the
