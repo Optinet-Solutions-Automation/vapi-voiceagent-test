@@ -133,12 +133,17 @@ export default function OrganizerTable() {
     setPage(1);
   }, [search, tagFilter]);
 
+  // Connector matchers (reply detectors) are routing plumbing owned by their
+  // script's arrows — edited on the arrow itself, never reusable content.
+  // They don't belong in the Playbook's scenario list.
+  const visible = handlers.filter((h) => !(h.action_type === "ignore" && h.mode === "listener"));
+
   const allTags = Array.from(
-    new Set(handlers.flatMap((h) => h.tags ?? []).filter(Boolean))
+    new Set(visible.flatMap((h) => h.tags ?? []).filter(Boolean))
   ).sort();
 
   const q = search.trim().toLowerCase();
-  const filtered = handlers.filter((h) => {
+  const filtered = visible.filter((h) => {
     if (tagFilter && !(h.tags ?? []).includes(tagFilter)) return false;
     if (
       q &&

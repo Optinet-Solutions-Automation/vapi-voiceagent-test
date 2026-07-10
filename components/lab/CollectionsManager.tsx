@@ -42,7 +42,10 @@ export default function CollectionsManager({ onActiveChange }: Props) {
         getLabSettings(),
       ]);
       setCollections(cols);
-      setHandlers(hs.filter((h) => h.intent_key !== "first_message"));
+      // first_message is prompt material; connector matchers (ignore +
+      // listener) are their script's routing plumbing — neither is
+      // collectible content.
+      setHandlers(hs.filter((h) => h.intent_key !== "first_message" && !(h.action_type === "ignore" && h.mode === "listener")));
       setActiveId(settings?.active_collection_id ?? null);
       setError(null);
     } catch (e: any) {
