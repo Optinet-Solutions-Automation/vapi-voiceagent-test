@@ -50,6 +50,7 @@ _(empty)_
 _(empty)_
 
 ## ✅ Done
+- [x] **Palette: hide Wait and Transfer to human** · `LOW` · `cmrefntrb000004ju7f01sgpg` — _Jul 10; legacy boxes still render and run; palette-only removal like If/Else and Loop_
 - [x] **Improved the sample workflow (317b305d) in the builder** · `MEDIUM` · `cmref7dh3000004jlr17xxhe7` — _Jul 10; data-only: ANY→End traps defused via Q&A routing, accept/firm-refusal matchers added, boxes renamed; Val's shared assets untouched_
 - [x] **Interruption arbiter: listener rules noise ignorable, agent resumes** · `HIGH` · `cmrdn5f2o001704l5vxk6fpo1` — _Jul 9; noise that cuts the agent off triggers a resume-from-where-you-stopped nudge; channel checks never stop the agent_
 - [x] **Wait box: silence path after N seconds** · `MEDIUM` · `cmrdhivc9000004l7twlw9n9s` — _Jul 9; listens for the reply; sky-blue silence arrow fires after waitSeconds (default 8) of quiet via the poll clock_
