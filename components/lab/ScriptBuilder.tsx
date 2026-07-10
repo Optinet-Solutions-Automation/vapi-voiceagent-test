@@ -790,17 +790,17 @@ export default function ScriptBuilder({ onClose, initialScriptId }: Props) {
     createBox(payload, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
   }
 
-  // If/Else and Loop are gone from the palette: routing lives on each box's
-  // reply connectors now, and repeating = drawing an arrow back up. Legacy
-  // boxes still render and run for old scripts.
+  // If/Else, Loop, Wait and Transfer are gone from the palette: routing
+  // lives on each box's reply connectors, repeating = drawing an arrow back
+  // up, every box already listens between turns (Wait), and Transfer isn't
+  // wired to a real handoff yet. Legacy boxes still render and run for old
+  // scripts.
   const PALETTE: { payload: string; label: string; cls: string }[] = [
     { payload: "start", label: "Start call", cls: "border-emerald-500 bg-emerald-500/10" },
     { payload: "scenario", label: "Scenario", cls: "border-indigo-500 bg-indigo-500/10" },
     { payload: "collection", label: "Collection", cls: "border-fuchsia-500 bg-fuchsia-500/10" },
     { payload: "subworkflow", label: "Sub-workflow", cls: "border-teal-500 bg-teal-500/10" },
-    { payload: "wait", label: "Wait", cls: "border-sky-500 bg-sky-500/10" },
     { payload: "send_sms", label: "Send SMS", cls: "border-amber-500 bg-amber-500/10" },
-    { payload: "transfer", label: "Transfer to human", cls: "border-orange-500 bg-orange-500/10" },
     { payload: "return", label: "Return result", cls: "border-lime-500 bg-lime-500/10" },
     { payload: "end", label: "End call", cls: "border-rose-500 bg-rose-500/10" },
   ];
