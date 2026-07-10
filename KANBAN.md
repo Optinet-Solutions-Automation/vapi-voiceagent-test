@@ -50,6 +50,7 @@ _(empty)_
 _(empty)_
 
 ## ✅ Done
+- [x] **Connector matchers are script-local: hidden from Playbook + uncollectible** · `MEDIUM` · `cmreq1pdf000k04jrtuzplg5n` — _Jul 10; 73 matchers out of the scenario list, Collections picker closed to them; Identity stays_
 - [x] **Observer pass: briefings reconciled against the whole conversation** · `HIGH` · `cmrepopjx000704jrmmmbqr5t` — _Jul 10; covered lines marked (never deleted), skipped statements return as Still-OWED debts; dock shows observer counts_
 - [x] **Palette: hide Wait and Transfer to human** · `LOW` · `cmrefntrb000004ju7f01sgpg` — _Jul 10; legacy boxes still render and run; palette-only removal like If/Else and Loop_
 - [x] **Improved the sample workflow (317b305d) in the builder** · `MEDIUM` · `cmref7dh3000004jlr17xxhe7` — _Jul 10; data-only: ANY→End traps defused via Q&A routing, accept/firm-refusal matchers added, boxes renamed; Val's shared assets untouched_
