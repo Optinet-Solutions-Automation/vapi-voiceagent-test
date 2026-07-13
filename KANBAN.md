@@ -50,6 +50,7 @@ _(empty)_
 _(empty)_
 
 ## ✅ Done
+- [x] **Voizo migration plan: script mode as second campaign option** · `HIGH` · `cmrjux5ea000004lb9tvfvhx3` — _Jul 11; docs/VOIZO-SCRIPT-ENGINE-MIGRATION-PLAN.md — handoff for Voizo Claude; DNC gap flagged as launch blocker_
 - [x] **Val's four voices in the picker** · `LOW` · `cmrewvcq2000204l5pmdy8bet` — _Jul 10; Mark Casual/Natural, Cal, Hope with "Val -" prefix, listed first; UgBBYS2s relabeled (same voice as old Mark entry)_
 - [x] **Connector matchers are script-local: hidden from Playbook + uncollectible** · `MEDIUM` · `cmreq1pdf000k04jrtuzplg5n` — _Jul 10; 73 matchers out of the scenario list, Collections picker closed to them; Identity stays_
 - [x] **Observer pass: briefings reconciled against the whole conversation** · `HIGH` · `cmrepopjx000704jrmmmbqr5t` — _Jul 10; covered lines marked (never deleted), skipped statements return as Still-OWED debts; dock shows observer counts_
