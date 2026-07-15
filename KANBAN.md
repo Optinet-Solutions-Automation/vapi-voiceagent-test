@@ -17,6 +17,11 @@
 3. When approved → move to **Done** in both, check the box.
 4. If blocked → move to **Blocked** in both and note why.
 5. New work → add to **Backlog** here *and* create it in PMS (assign Christian).
+6. **Docs rule:** when a change alters architecture, features, APIs, workflows or
+   conventions, also update the matching document in the
+   [PMS Docs section](https://pms-nu-eight.vercel.app/projects/cmrd42cp6000004jobwzyi37k/docs)
+   (9 docs: Overview, Requirements, Architecture, Technical Design, Install,
+   User Manual, Features & API, Workflows, Important Notes) — same breath as shipping.
 
 PMS column IDs (for API moves via `PATCH /api/tasks/{taskId}/move`, auth
 `Authorization: Bearer $PMS_TOKEN` from `.env.local`):
@@ -50,6 +55,7 @@ _(empty)_
 _(empty)_
 
 ## ✅ Done
+- [x] **PMS project docs populated + docs-upkeep rule** · `MEDIUM` · `cmrlkjsu5000204l1jdu2bz6t` — _Jul 11; all 9 docs written via the documents API; rule: ship a change → update the matching PMS doc_
 - [x] **Voizo migration plan: script mode as second campaign option** · `HIGH` · `cmrjux5ea000004lb9tvfvhx3` — _Jul 11; docs/VOIZO-SCRIPT-ENGINE-MIGRATION-PLAN.md — handoff for Voizo Claude; DNC gap flagged as launch blocker_
 - [x] **Val's four voices in the picker** · `LOW` · `cmrewvcq2000204l5pmdy8bet` — _Jul 10; Mark Casual/Natural, Cal, Hope with "Val -" prefix, listed first; UgBBYS2s relabeled (same voice as old Mark entry)_
 - [x] **Connector matchers are script-local: hidden from Playbook + uncollectible** · `MEDIUM` · `cmreq1pdf000k04jrtuzplg5n` — _Jul 10; 73 matchers out of the scenario list, Collections picker closed to them; Identity stays_
